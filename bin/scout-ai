@@ -1,0 +1,5 @@
+#!/usr/bin/env ruby
+
+require 'scout-ai'
+
+load Scout.bin.scout.find

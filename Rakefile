@@ -1,14 +1,8 @@
 # encoding: utf-8
 
+ENV["BRANCH"] = 'main'
+
 require 'rubygems'
-require 'bundler'
-begin
-  Bundler.setup(:default, :development)
-rescue Bundler::BundlerError => e
-  $stderr.puts e.message
-  $stderr.puts "Run `bundle install` to install missing gems"
-  exit e.status_code
-end
 require 'rake'
 require 'juwelier'
 Juwelier::Tasks.new do |gem|
@@ -16,8 +10,8 @@ Juwelier::Tasks.new do |gem|
   gem.name = "scout-ai"
   gem.homepage = "http://github.com/mikisvaz/scout-ai"
   gem.license = "MIT"
-  gem.summary = %Q{TODO: one-line summary of your gem}
-  gem.description = %Q{TODO: longer description of your gem}
+  gem.summary = %Q{AI gear for scouts}
+  gem.description = %Q{assorted functionalities to help scouts use AI}
   gem.email = "mikisvaz@gmail.com"
   gem.authors = ["Miguel Vazquez"]
 

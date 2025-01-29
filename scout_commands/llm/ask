@@ -1,0 +1,54 @@
+#!/usr/bin/env ruby
+
+require 'scout'
+require 'scout-ai'
+
+$0 = "scout #{$previous_commands.any? ? $previous_commands*" " + " " : "" }#{ File.basename(__FILE__) }" if $previous_commands
+
+options = SOPT.setup <<EOF
+
+Ask GPT
+
+$ #{$0} [<options>] [question]
+
+Use STDIN to add context to the question
+
+-h--help Print this help
+-l--log* Log level
+-t--template* Use a template
+-m--model* Model to use
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage 
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+Log.severity = options.delete(:log).to_i if options.include? :log
+
+question = ARGV * " "
+
+if template = options.delete(:template)
+  if Open.exists?(template)
+    template_question = Open.read(template)
+  else
+    template_question = Scout.questions[template].read
+  end
+  if template_question.include?('???')
+    question = template_question.sub('???', question)
+  else
+    question = template_question
+  end
+end
+
+if question.include?('...')
+  context = STDIN.read
+  question = question.sub('...', context)
+end
+
+require 'openai'
+
+puts LLM.ask(question, options)
