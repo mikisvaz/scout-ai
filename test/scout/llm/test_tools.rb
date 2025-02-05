@@ -1,20 +1,10 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
-require 'scout/workflow'
-require 'scout/knowledge_base'
-
-class TestLLM < Test::Unit::TestCase
-  def _test_ask
-    Log.severity = 0
-    prompt =<<-EOF
-system: you are a coding helper that only write code and comments without formatting so that it can work directly, avoid the initial and end commas ```.
-user: write a script that sorts files in a directory 
-    EOF
-    ppp LLM.ask prompt
-  end
-
-  def _test_workflow_ask
+require 'rbbt/workflow'
+require 'rbbt/knowledge_base'
+class TestLLMTools < Test::Unit::TestCase
+  def test_workflow_definition
     m = Module.new do
       extend Workflow
       self.name = "RecipeWorkflow"
@@ -39,23 +29,27 @@ user: write a script that sorts files in a directory
       end
     end
 
-    ppp LLM.workflow_ask(m, "How much time does it take to prepare a cake recipe")
+    LLM.task_tool_definition(m, :recipe_steps)
+    LLM.task_tool_definition(m, :step_time)
+
+    tool_definitions = LLM.workflow_tools(m)
+    ppp JSON.pretty_generate tool_definitions
   end
 
-  def test_knowledbase
+  def test_knowledbase_definition
     TmpFile.with_dir do |dir|
       kb = KnowledgeBase.new dir
-      kb.format = {"Person" => "Alias"}
       kb.register :brothers, datafile_test(:person).brothers, undirected: true
-      kb.register :marriages, datafile_test(:person).marriages, undirected: true, source: "=>Alias", target: "=>Alias"
       kb.register :parents, datafile_test(:person).parents
 
-      Log.tsv kb.get_index(:marriages)
-      sss 0
-      ppp LLM.knowledgebase_ask(kb, "Who is Miki's brother in law?", log_errors: true, model: 'gpt-4o')
-      ppp LLM.knowledgebase_ask(kb, "Who is Miki's father in law?", log_errors: true, model: 'gpt-4o')
-    end
-  end
+      assert_include kb.all_databases, :brothers
 
+      assert_equal Person, kb.target_type(:parents)
+
+      knowledgebase_definition = LLM.knowledgebase_tool_definition(kb)
+      ppp JSON.pretty_generate knowledgebase_definition
+    end
+
+  end
 end
 

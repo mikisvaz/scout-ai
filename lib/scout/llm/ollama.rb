@@ -1,9 +1,10 @@
 require 'ollama-ai'
 require_relative 'parse'
+require_relative 'tools'
 
 module LLM
   module OLlama
-    def self.ask(question, options = {})
+    def self.ask(question, options = {}, &block)
 
       role, model, url, mode = IndiferentHash.process_options options, :role, :model, :url, :mode,
         model: 'mistral', url: "http://localhost:11434", mode: 'chat'
@@ -39,7 +40,23 @@ module LLM
         Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
 
         response = client.chat(parameters)
-        response.collect{|e| e['message']['content']} * ""
+        message = response[0]['message']
+        while message["role"] == "assistant" && message["tool_calls"]
+          messages << message
+
+          message["tool_calls"].each do |tool_call|
+            response_message = LLM.tool_response(tool_call, &block)
+            messages << response_message
+          end
+
+          parameters[:messages] = messages
+          Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
+          response = client.chat(parameters)
+
+          message = response[0]['message']
+        end
+
+        message["content"]
       else
         parameters = options.merge(model: model, prompt: prompt * "\n", system: system*"\n")
         Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"

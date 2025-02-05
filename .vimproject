@@ -8,6 +8,7 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
   scout=scout{
    llm=llm{
     parse.rb
+    tools.rb
     openai.rb
     ollama.rb
     ask.rb
@@ -28,5 +29,6 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
  questions=questions filter="*"{
   coach
   evaluator
+  templater
  }
 }
