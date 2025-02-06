@@ -40,23 +40,25 @@ module LLM
         Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
 
         response = client.chat(parameters)
-        message = response[0]['message']
-        while message["role"] == "assistant" && message["tool_calls"]
-          messages << message
+        response.collect do |choice|
+          message=choice['message']
+          while message["role"] == "assistant" && message["tool_calls"]
+            messages << message
 
-          message["tool_calls"].each do |tool_call|
-            response_message = LLM.tool_response(tool_call, &block)
-            messages << response_message
+            message["tool_calls"].each do |tool_call|
+              response_message = LLM.tool_response(tool_call, &block)
+              messages << response_message
+            end
+
+            parameters[:messages] = messages
+            Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
+            response = client.chat(parameters)
+
+            message = response[0]['message']
           end
 
-          parameters[:messages] = messages
-          Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
-          response = client.chat(parameters)
-
-          message = response[0]['message']
-        end
-
-        message["content"]
+          message["content"]
+        end * ""
       else
         parameters = options.merge(model: model, prompt: prompt * "\n", system: system*"\n")
         Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"

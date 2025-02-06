@@ -25,10 +25,9 @@ module LLM
   def self.knowledgebase_ask(knowledgebase, question, options = {})
     knowledgebase_tools = LLM.knowledgebase_tool_definition(knowledgebase)
     self.ask(question, options.merge(tools: knowledgebase_tools)) do |task_name,parameters|
-      database, entities = parameters.values_at :database, :entities
-      res = knowledgebase.children(database, entities)
-      iif [database, entities, res]
-      res
+      parameters = IndiferentHash.setup(parameters)
+      database, entities = parameters.values_at "database", "entities"
+      knowledgebase.children(database, entities)
     end
   end
 end

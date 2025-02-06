@@ -9,7 +9,7 @@ system: you are a coding helper that only write code and inline comments. No ext
 system: Avoid using backticks ``` to format code.
 user: write a script that sorts files in a directory 
     EOF
-    ppp LLM::OLlama.ask prompt, model: 'qwen2.5-coder', mode: 'chat'
+    ppp LLM::OLlama.ask prompt, model: 'mistral', mode: 'chat'
   end
 
   def test_gepeto

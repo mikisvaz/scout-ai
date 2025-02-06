@@ -50,10 +50,12 @@ user: write a script that sorts files in a directory
       kb.register :marriages, datafile_test(:person).marriages, undirected: true, source: "=>Alias", target: "=>Alias"
       kb.register :parents, datafile_test(:person).parents
 
-      Log.tsv kb.get_index(:marriages)
-      sss 0
+      Scout::Config.set(:backend, :openai, :llm)
       ppp LLM.knowledgebase_ask(kb, "Who is Miki's brother in law?", log_errors: true, model: 'gpt-4o')
       ppp LLM.knowledgebase_ask(kb, "Who is Miki's father in law?", log_errors: true, model: 'gpt-4o')
+      Scout::Config.set(:backend, :ollama, :llm)
+      ppp LLM.knowledgebase_ask(kb, "Who is Miki's brother in law?")
+      ppp LLM.knowledgebase_ask(kb, "Who is Miki's father in law?")
     end
   end
 
