@@ -1,6 +1,7 @@
 require 'scout'
-require_relative 'openai'
-require_relative 'ollama'
+require_relative 'backends/openai'
+require_relative 'backends/ollama'
+require_relative 'backends/openwebui'
 
 module LLM
   def self.ask(...)
@@ -10,6 +11,8 @@ module LLM
       LLM::OpenAI.ask(...)
     when :ollama, "ollama"
       LLM::OLlama.ask(...)
+    when :openwebui, "openwebui"
+      LLM::OpenWebUI.ask(...)
     else
       raise "Unknown backend: #{backend}"
     end
@@ -22,12 +25,12 @@ module LLM
     end
   end
 
-  def self.knowledgebase_ask(knowledgebase, question, options = {})
-    knowledgebase_tools = LLM.knowledgebase_tool_definition(knowledgebase)
-    self.ask(question, options.merge(tools: knowledgebase_tools)) do |task_name,parameters|
+  def self.knowledge_base_ask(knowledge_base, question, options = {})
+    knowledge_base_tools = LLM.knowledge_base_tool_definition(knowledge_base)
+    self.ask(question, options.merge(tools: knowledge_base_tools)) do |task_name,parameters|
       parameters = IndiferentHash.setup(parameters)
       database, entities = parameters.values_at "database", "entities"
-      knowledgebase.children(database, entities)
+      knowledge_base.children(database, entities)
     end
   end
 end

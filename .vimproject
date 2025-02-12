@@ -9,13 +9,25 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
    llm=llm{
     parse.rb
     tools.rb
-    openai.rb
-    ollama.rb
+    backends=backends{
+     ollama.rb
+     openai.rb
+     openwebui.rb
+    }
     ask.rb
+    agent.rb
    }
   }
  }
  test=test {
+  data=data filter="*"{
+   person=person{
+    brothers
+    identifiers
+    marriages
+    parents
+   }
+  }
   test_helper.rb
  }
  data=data filter="*"{

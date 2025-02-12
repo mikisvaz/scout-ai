@@ -1,5 +1,5 @@
-require 'rbbt/workflow'
-require 'rbbt/knowledge_base'
+require 'scout/workflow'
+require 'scout/knowledge_base'
 module LLM
   def self.tool_response(tool_call, &block)
     tool_call_id = tool_call.dig("id")
@@ -62,9 +62,9 @@ module LLM
     workflow.tasks.keys.collect{|task_name| self.task_tool_definition(workflow, task_name) }
   end
 
-  def self.knowledgebase_tool_definition(knowledgebase)
+  def self.knowledge_base_tool_definition(knowledge_base)
 
-    databases = knowledgebase.all_databases.collect{|d| d.to_s }
+    databases = knowledge_base.all_databases.collect{|d| d.to_s }
 
     properties = {
       database: {

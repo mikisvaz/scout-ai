@@ -46,8 +46,8 @@ class TestLLMTools < Test::Unit::TestCase
 
       assert_equal Person, kb.target_type(:parents)
 
-      knowledgebase_definition = LLM.knowledgebase_tool_definition(kb)
-      ppp JSON.pretty_generate knowledgebase_definition
+      knowledge_base_definition = LLM.knowledge_base_tool_definition(kb)
+      ppp JSON.pretty_generate knowledge_base_definition
     end
 
   end

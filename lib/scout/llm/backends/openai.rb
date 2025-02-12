@@ -1,7 +1,7 @@
 require 'scout'
 require 'openai'
-require_relative 'parse'
-require_relative 'tools'
+require_relative '../parse'
+require_relative '../tools'
 
 module LLM
 	module OpenAI

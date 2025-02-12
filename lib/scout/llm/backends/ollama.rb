@@ -1,6 +1,6 @@
 require 'ollama-ai'
-require_relative 'parse'
-require_relative 'tools'
+require_relative '../parse'
+require_relative '../tools'
 
 module LLM
   module OLlama

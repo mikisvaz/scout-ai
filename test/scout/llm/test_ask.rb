@@ -51,11 +51,11 @@ user: write a script that sorts files in a directory
       kb.register :parents, datafile_test(:person).parents
 
       Scout::Config.set(:backend, :openai, :llm)
-      ppp LLM.knowledgebase_ask(kb, "Who is Miki's brother in law?", log_errors: true, model: 'gpt-4o')
-      ppp LLM.knowledgebase_ask(kb, "Who is Miki's father in law?", log_errors: true, model: 'gpt-4o')
+      ppp LLM.knowledge_base_ask(kb, "Who is Miki's brother in law?", log_errors: true, model: 'gpt-4o')
+      ppp LLM.knowledge_base_ask(kb, "Who is Miki's father in law?", log_errors: true, model: 'gpt-4o')
       Scout::Config.set(:backend, :ollama, :llm)
-      ppp LLM.knowledgebase_ask(kb, "Who is Miki's brother in law?")
-      ppp LLM.knowledgebase_ask(kb, "Who is Miki's father in law?")
+      ppp LLM.knowledge_base_ask(kb, "Who is Miki's brother in law?")
+      ppp LLM.knowledge_base_ask(kb, "Who is Miki's father in law?")
     end
   end
 
