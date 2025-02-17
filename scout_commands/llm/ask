@@ -52,6 +52,4 @@ if question.include?('...')
   question = question.sub('...', context)
 end
 
-require 'openai'
-
 puts LLM.ask(question, options)
