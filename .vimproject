@@ -13,6 +13,7 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
      ollama.rb
      openai.rb
      openwebui.rb
+     relay.rb
     }
     ask.rb
     agent.rb
@@ -36,6 +37,7 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
   llm=llm{
    ask
    template
+   process
   }
  }
  questions=questions filter="*"{
