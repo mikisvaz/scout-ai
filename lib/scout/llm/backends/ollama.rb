@@ -7,7 +7,9 @@ module LLM
     def self.ask(question, options = {}, &block)
 
       role, model, url, mode = IndiferentHash.process_options options, :role, :model, :url, :mode,
-        model: 'mistral', url: "http://localhost:11434", mode: 'chat'
+        model: 'mistral', mode: 'chat'
+      
+      url ||= Scout::Config.get(:url, :ollama, default: "http://localhost:11434")
 
       server = url.match(/https?:\/\/([^\/:]*)/)[1] || "NOSERVER"
 
