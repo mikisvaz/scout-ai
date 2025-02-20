@@ -2,6 +2,7 @@ require 'scout'
 require_relative 'backends/openai'
 require_relative 'backends/ollama'
 require_relative 'backends/openwebui'
+require_relative 'backends/relay'
 
 module LLM
   def self.ask(...)
@@ -13,6 +14,8 @@ module LLM
       LLM::OLlama.ask(...)
     when :openwebui, "openwebui"
       LLM::OpenWebUI.ask(...)
+    when :relay, "relay"
+      LLM::Relay.ask(...)
     else
       raise "Unknown backend: #{backend}"
     end
