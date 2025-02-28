@@ -7,7 +7,7 @@ require_relative 'backends/relay'
 module LLM
   def self.embed(text, options = {})
     backend = IndiferentHash.process_options options, :backend
-    backend ||= Scout::Config.get :backend, :llm, :ask, env: 'EMBED_BACKEND,LLM_BACKEND', default: :openai
+    backend ||= Scout::Config.get :backend, :embed, :llm, env: 'EMBED_BACKEND,LLM_BACKEND', default: :openai
     case backend
     when :openai, "openai"
       LLM::OpenAI.embed(text, options)

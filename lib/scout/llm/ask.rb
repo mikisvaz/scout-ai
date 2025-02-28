@@ -7,7 +7,7 @@ require_relative 'backends/relay'
 module LLM
   def self.ask(question, options = {}, &block)
     backend = IndiferentHash.process_options options, :backend
-    backend ||= Scout::Config.get :backend, :llm, :ask, env: 'ASK_BACKEND,LLM_BACKEND', default: :openai
+    backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :openai
 
     case backend
     when :openai, "openai"
