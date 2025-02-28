@@ -1,7 +1,7 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
-class TestLLMOllama < Test::Unit::TestCase
+class TestLLMHF < Test::Unit::TestCase
 
   def test_ask
     Log.severity = 0
@@ -10,7 +10,7 @@ system: you are a coding helper that only write code and inline comments. No ext
 system: Avoid using backticks ``` to format code.
 user: write a script that sorts files in a directory 
     EOF
-    ppp LLM::OLlama.ask prompt, model: 'mistral', mode: 'chat'
+    ppp LLM::Huggingface.ask prompt, model: 'HuggingFaceTB/SmolLM2-135M-Instruct'
   end
 
   def test_embeddings
@@ -18,7 +18,7 @@ user: write a script that sorts files in a directory
     text =<<-EOF
 Some text
     EOF
-    emb = LLM::OLlama.embed text, model: 'mistral'
+    emb = LLM::Huggingface.embed text, model: 'distilbert-base-uncased-finetuned-sst-2-english'
     assert(Float === emb.first)
   end
 
@@ -27,7 +27,7 @@ Some text
     text =<<-EOF
 Some text
     EOF
-    emb = LLM::OLlama.embed [text], model: 'mistral'
+    emb = LLM::Huggingface.embed [text], model: 'distilbert-base-uncased-finetuned-sst-2-english'
     assert(Float === emb.first.first)
   end
 
@@ -62,11 +62,12 @@ What is the weather in London. Should I take an umbrella?
     ]
 
     sss 0
-    respose = LLM::OLlama.ask prompt, model: 'mistral', tool_choice: 'required', tools: tools do |name,arguments|
+    respose = LLM::Huggingface.ask prompt, model: 'HuggingFaceTB/SmolLM2-135M-Instruct', tool_choice: 'required', tools: tools do |name,arguments|
       "It's raining cats and dogs"
     end
 
     ppp respose
   end
+
 end
 

@@ -4,16 +4,32 @@ require_relative '../tools'
 
 module LLM
   module OLlama
-    def self.ask(question, options = {}, &block)
+    def self.client(options)
+      url = IndiferentHash.process_options options, :url
 
-      role, model, url, mode = IndiferentHash.process_options options, :role, :model, :url, :mode,
-        model: 'mistral', mode: 'chat'
-      
-      url ||= Scout::Config.get(:url, :ollama, default: "http://localhost:11434")
 
-      server = url.match(/https?:\/\/([^\/:]*)/)[1] || "NOSERVER"
+      url ||= Scout::Config.get(:url, :ollama, env: 'OLLAMA_URL', default: "http://localhost:11434")
+      server = url.match(/(?:https?:\/\/)?([^\/:]*)/)[1] || "NOSERVER"
 
       key = Scout::Config.get(:key, :ollama, server, server.split(".").first)
+
+      Ollama.new(
+        credentials: {
+          address: url,
+          bearer_token: key
+        },
+        options: { stream: false, debug: true }
+      )
+    end
+
+    def self.ask(question, options = {}, &block)
+
+      client = self.client options
+
+      role, mode, model = IndiferentHash.process_options options, :role, :mode, :model
+
+      model ||= Scout::Config.get(:model, :ollama, env: 'OLLAMA_MODEL', default: "mistral")
+
       messages = LLM.parse(question)
 
       system = []
@@ -26,15 +42,6 @@ module LLM
           prompt << content
         end
       end
-
-      client = Ollama.new(
-        credentials: {
-          address: url,
-          bearer_token: key
-        },
-        system: system * "\n",
-        options: { stream: false, debug: true }
-      )
 
       case mode
       when :chat, 'chat'
@@ -67,6 +74,21 @@ module LLM
         response = client.generate(parameters)
         response.collect{|e| e['response']} * ""
       end
+    end
+
+    def self.embed(text, options = {})
+
+      client = self.client options
+
+      role, model = IndiferentHash.process_options options, :role, :model
+
+      model ||= Scout::Config.get(:model, :ollama, env: 'OLLAMA_MODEL', default: "mistral")
+
+      parameters = { input: text, model: model }
+      Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
+      embeddings = client.request('api/embed', parameters)
+
+      Array === text ? embeddings.first['embeddings'] : embeddings.first['embeddings'].first
     end
   end
 end

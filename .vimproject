@@ -3,6 +3,9 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
  bin=bin filter="*"{
   scout-ai
  }
+ etc=etc filter="*"{
+  config
+ }
  lib=lib {
   scout-ai.rb
   scout=scout{
@@ -13,9 +16,15 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
      ollama.rb
      openai.rb
      openwebui.rb
+     huggingface.rb
      relay.rb
     }
     ask.rb
+
+    embed.rb
+
+    rag.rb
+
     agent.rb
    }
   }

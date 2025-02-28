@@ -5,12 +5,21 @@ class TestLLMOpenAI < Test::Unit::TestCase
   def test_ask
     prompt =<<-EOF
 system: you are a coding helper that only write code and comments without formatting so that it can work directly, avoid the initial and end commas ```.
-user: write a script that sorts files in a directory 
+user: write a script that sorts files in a directory
     EOF
     ppp LLM::OpenAI.ask prompt
   end
 
-  def _test_tool
+  def test_embeddings
+    Log.severity = 0
+    text =<<-EOF
+Some text
+    EOF
+    emb = LLM::OpenAI.embed text, log_errors: true
+    assert(Float === emb.first)
+  end
+
+  def test_tool
     prompt =<<-EOF
 What is the weather in London. Should I take an umbrella?
     EOF
