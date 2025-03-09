@@ -3,9 +3,10 @@ require 'openai'
 require 'rest-client'
 require_relative '../parse'
 require_relative '../tools'
+require_relative '../utils'
 
 module LLM
-	module OpenWebUI
+  module OpenWebUI
 
     def self.rest(method, base_url, key, action, options = {})
       url = File.join(base_url, action.to_s)
@@ -21,15 +22,15 @@ module LLM
       JSON.parse(response.body)
     end
 
-		def self.ask(question, options = {}, &block)
+    def self.ask(question, options = {}, &block)
 
-			role, model, dig, client, log_errors = IndiferentHash.process_options options, :role, :model, :dig, :client, :log_errors,
-				model: 'gpt-3.5-turbo', dig: true
+      url, key, model, log_errors = IndiferentHash.process_options options, :url, :key, :model, :log_errors
 
-      url = Scout::Config.get(:url, :openwebui, default: "http://localhost:3000/api")
-      server = url.match(/https?:\/\/([^\/:]*)/)[1] || "NOSERVER"
-      key = Scout::Config.get(:key, :openwebui, server, server.split(".").first)
+      url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENWEBUI_URL', default: "http://localhost:3000/api")
+      key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :openai, env: 'OPENWEBUI_KEY')
+      model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENWEBUI_MODEL')
 
+      role = IndiferentHash.process_options options, :role
       messages = LLM.parse(question, role)
 
       parameters = options.merge(model: model, messages: messages)

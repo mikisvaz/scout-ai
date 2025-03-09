@@ -24,8 +24,9 @@ module LLM
             question_role = role
             q = line
           end
+          next if q.empty?
           {role: question_role, content: q}
-        end
+        end.compact
       end
     end
   end

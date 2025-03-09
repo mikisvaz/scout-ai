@@ -2,7 +2,7 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 require 'rbbt/workflow'
-require 'rbbt/knowledge_base'
+require 'scout/knowledge_base'
 class TestLLMTools < Test::Unit::TestCase
   def test_workflow_definition
     m = Module.new do
@@ -49,7 +49,6 @@ class TestLLMTools < Test::Unit::TestCase
       knowledge_base_definition = LLM.knowledge_base_tool_definition(kb)
       ppp JSON.pretty_generate knowledge_base_definition
     end
-
   end
 end
 

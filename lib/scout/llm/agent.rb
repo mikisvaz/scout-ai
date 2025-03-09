@@ -3,7 +3,7 @@ require_relative 'ask'
 module LLM
   class Agent
     attr_accessor :system, :workflow, :knowledge_base
-    def initialize(system = [], workflow: nil, knowledge_base: nil, model: 'gpt-3.5-turbo', **kwargs)
+    def initialize(system = [], workflow: nil, knowledge_base: nil, model: nil, **kwargs)
       @system = system
       @workflow = workflow
       @knowledge_base = knowledge_base
@@ -47,16 +47,21 @@ You have acess to the following databases associating entities:
       tools = []
       tools += LLM.workflow_tools(workflow) if workflow
       tools += LLM.knowledge_base_tool_definition(knowledge_base) if knowledge_base
-      ppp prompt(messages)
       LLM.ask prompt(messages), @other_options.merge(model: model, log_errors: true, tools: tools) do |name,parameters|
         case name
         when 'children'
           parameters = IndiferentHash.setup(parameters)
           database, entities = parameters.values_at "database", "entities"
-          knowledge_base.children(database, entities)
+          Log.high "Finding #{entities} children in #{database}"
+          knowledge_base.children(database, entities).target
         else
           if workflow
-            workflow.job(name, parameters).run
+            begin
+              Log.high "Calling #{workflow}##{name} with #{Log.fingerprint parameters}"
+              workflow.job(name, parameters).run
+            rescue
+              $!.message
+            end
           else
             raise "What?"
           end

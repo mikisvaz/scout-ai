@@ -35,7 +35,8 @@ module LLM
     self.ask(question, options.merge(tools: knowledge_base_tools)) do |task_name,parameters|
       parameters = IndiferentHash.setup(parameters)
       database, entities = parameters.values_at "database", "entities"
-      knowledge_base.children(database, entities)
+      Log.info "Finding #{entities} children in #{database}"
+      knowledge_base.children(database, entities).collect{|e| e.sub('~', '=>')}
     end
   end
 end

@@ -10,6 +10,7 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
   scout-ai.rb
   scout=scout{
    llm=llm{
+    utils.rb
     parse.rb
     tools.rb
     backends=backends{
@@ -32,8 +33,8 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
  test=test {
   data=data filter="*"{
    person=person{
-    brothers
     identifiers
+    brothers
     marriages
     parents
    }

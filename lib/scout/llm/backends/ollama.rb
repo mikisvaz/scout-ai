@@ -1,18 +1,11 @@
 require 'ollama-ai'
 require_relative '../parse'
 require_relative '../tools'
+require_relative '../utils'
 
 module LLM
   module OLlama
-    def self.client(options)
-      url = IndiferentHash.process_options options, :url
-
-
-      url ||= Scout::Config.get(:url, :ollama, env: 'OLLAMA_URL', default: "http://localhost:11434")
-      server = url.match(/(?:https?:\/\/)?([^\/:]*)/)[1] || "NOSERVER"
-
-      key = Scout::Config.get(:key, :ollama, server, server.split(".").first)
-
+    def self.client(url, key = nil)
       Ollama.new(
         credentials: {
           address: url,
@@ -24,11 +17,20 @@ module LLM
 
     def self.ask(question, options = {}, &block)
 
-      client = self.client options
+      client, url, key, model = IndiferentHash.process_options options, :client, :url, :key, :model
 
-      role, mode, model = IndiferentHash.process_options options, :role, :mode, :model
+      if client.nil?
+        url ||= Scout::Config.get(:url, :ollama_ask, :ask, :ollama, env: 'OLLAMA_URL', default: "http://localhost:11434")
+        key ||= LLM.get_url_config(:key, url, :ollama_ask, :ask, :ollama, env: 'OLLAMA_KEY')
+        client = self.client url, key
+      end
 
-      model ||= Scout::Config.get(:model, :ollama, env: 'OLLAMA_MODEL', default: "mistral")
+      if model.nil?
+        url ||= Scout::Config.get(:url, :ollama_ask, :ask, :ollama, env: 'OLLAMA_URL', default: "http://localhost:11434")
+        model ||= LLM.get_url_config(:model, url, :ollama_ask, :ask, :ollama, env: 'OLLAMA_MODEL', default: "mistral")
+      end
+
+      mode  = IndiferentHash.process_options options, :mode
 
       messages = LLM.parse(question)
 
@@ -78,11 +80,18 @@ module LLM
 
     def self.embed(text, options = {})
 
-      client = self.client options
+      client, url, key, model = IndiferentHash.process_options options, :client, :url, :key, :model
 
-      role, model = IndiferentHash.process_options options, :role, :model
+      if client.nil?
+        url ||= Scout::Config.get(:url, :ollama_embed, :embed, :ollama, env: 'OLLAMA_URL', default: "http://localhost:11434")
+        key ||= LLM.get_url_config(:key, url, :ollama_embed, :embed, :ollama, env: 'OLLAMA_KEY')
+        client = self.client url, key
+      end
 
-      model ||= Scout::Config.get(:model, :ollama, env: 'OLLAMA_MODEL', default: "mistral")
+      if model.nil?
+        url ||= Scout::Config.get(:url, :ollama_embed, :embed, :ollama, env: 'OLLAMA_URL', default: "http://localhost:11434")
+        model ||= LLM.get_url_config(:model, url, :ollama_embed, :embed, :ollama, env: 'OLLAMA_MODEL', default: "mistral")
+      end
 
       parameters = { input: text, model: model }
       Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"

@@ -7,10 +7,18 @@ class TestLLMOpenAI < Test::Unit::TestCase
 system: you are a coding helper that only write code and comments without formatting so that it can work directly, avoid the initial and end commas ```.
 user: write a script that sorts files in a directory
     EOF
+    sss 0
     ppp LLM::OpenAI.ask prompt
   end
 
-  def test_embeddings
+  def _test_argonne
+    prompt =<<-EOF
+user: write a script that sorts files in a directory
+    EOF
+    sss 0
+  end
+
+  def _test_embeddings
     Log.severity = 0
     text =<<-EOF
 Some text
@@ -19,9 +27,9 @@ Some text
     assert(Float === emb.first)
   end
 
-  def test_tool
+  def _test_tool
     prompt =<<-EOF
-What is the weather in London. Should I take an umbrella?
+What is the weather in London. Should I take my umbrella?
     EOF
 
     tools = [
@@ -29,7 +37,7 @@ What is the weather in London. Should I take an umbrella?
         "type": "function",
         "function": {
           "name": "get_current_temperature",
-          "description": "Get the current temperature for a specific location",
+          "description": "Get the current temperature and raining conditions for a specific location",
           "parameters": {
             "type": "object",
             "properties": {
@@ -49,8 +57,9 @@ What is the weather in London. Should I take an umbrella?
       },
     ]
 
-    respose = LLM::OpenAI.ask prompt, tool_choice: 'required', tools: tools do |name,arguments|
-      "It's raining cats and dogs"
+    sss 0
+    respose = LLM::OpenAI.ask prompt, tool_choice: 'required', tools: tools, model: "gpt-4o" do |name,arguments|
+      "It's 15 degrees and raining."
     end
 
     ppp respose

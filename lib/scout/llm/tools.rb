@@ -8,11 +8,19 @@ module LLM
     function_arguments = JSON.parse(function_arguments, { symbolize_names: true }) if String === function_arguments
     function_response = block.call function_name, function_arguments
 
+    #content = String === function_response ? function_response : function_response.to_json,
+    content = case function_response
+              when String
+                function_response
+              when nil
+                "success"
+              else
+                function_response.to_json
+              end
     {
       tool_call_id: tool_call_id,
       role: "tool",
-      name: function_name,
-      content: String === function_response ? function_response : function_response.to_json
+      content: content
     }
   end
 
@@ -31,7 +39,7 @@ module LLM
       }
 
       if input_options = task_info[:input_options][input]
-        if input_options[:select_options]
+        if select_options = input_options[:select_options]
           select_options = select_options.values if Hash === select_options
           acc[input]["enum"] = select_options
         end
@@ -83,7 +91,7 @@ module LLM
       type: "function",
       function: {
         name: 'children',
-        description: "Find the graph children for a list of entities in a format like parent~child",
+        description: "Find the graph children for a list of entities in a format like parent~child. Returns a list.",
         parameters: {
           type: "object",
           properties: properties,
