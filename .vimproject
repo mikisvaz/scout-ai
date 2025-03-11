@@ -12,7 +12,6 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
    llm=llm{
     utils.rb
     parse.rb
-    tools.rb
     backends=backends{
      ollama.rb
      openai.rb
@@ -26,6 +25,7 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
 
     rag.rb
 
+    tools.rb
     agent.rb
    }
   }
@@ -48,6 +48,9 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
    ask
    template
    process
+  }
+  agent=agent{
+   ask
   }
  }
  questions=questions filter="*"{

@@ -23,4 +23,13 @@ module LLM
     Scout::Config.get(key, *all_tokens, hash)
   end
 
+  def self
+    if workflow.root.etc.AI[@model || 'default'].exists?
+      workflow.root.etc.AI[@model || 'default'].json
+    elsif Scout.etc.AI[@model || 'default'].exists?
+      Scout.etc.AI[@model || 'default'].json
+    else
+      {}
+    end
+  end
 end

@@ -3,7 +3,7 @@ require_relative 'ask'
 module LLM
   class Agent
     attr_accessor :system, :workflow, :knowledge_base
-    def initialize(system = [], workflow: nil, knowledge_base: nil, model: nil, **kwargs)
+    def initialize(system = nil, workflow: nil, knowledge_base: nil, model: nil, **kwargs)
       @system = system
       @workflow = workflow
       @knowledge_base = knowledge_base
@@ -19,11 +19,11 @@ module LLM
 
     def system_prompt
       system = @system
-      system = [system] unless system.is_a? Array
+      system = [system] unless system.nil? || system.is_a?(Array)
 
       if @knowledge_base
         system << <<-EOF
-You have acess to the following databases associating entities:
+You have access to the following databases associating entities:
         EOF
 
         knowledge_base.all_databases.each do |database|
@@ -37,16 +37,22 @@ You have acess to the following databases associating entities:
     end
 
     def prompt(messages)
-      [format_message(system_prompt, "system"), messages.collect{|m| format_message(m)}.flatten] * "\n"
+      if system_prompt
+        [format_message(system_prompt, "system"), messages.collect{|m| format_message(m)}.flatten] * "\n"
+      else
+        messages.collect{|m| format_message(m)}.flatten
+      end
     end
 
     # function: takes an array of messages and calls LLM.ask with them
     def ask(messages, model = nil)
       messages = [messages] unless messages.is_a? Array
       model ||= @model
+
       tools = []
       tools += LLM.workflow_tools(workflow) if workflow
       tools += LLM.knowledge_base_tool_definition(knowledge_base) if knowledge_base
+
       LLM.ask prompt(messages), @other_options.merge(model: model, log_errors: true, tools: tools) do |name,parameters|
         case name
         when 'children'

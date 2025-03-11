@@ -22,7 +22,7 @@ module LLM
       end
 
       if model.nil?
-        url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL', default: "http://localhost:11434")
+        url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
         model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-3.5-turbo")
       end
 
@@ -54,7 +54,7 @@ module LLM
         parameters[:messages] = messages.compact
         Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
         response = client.chat( parameters: parameters)
-        Log.debug "Respose: #{response.inspect}"
+        Log.debug "Respose: #{Log.fingerprint response}"
 
         message = response.dig("choices", 0, "message")
         tool_calls = response.dig("choices", 0, "tool_calls") ||

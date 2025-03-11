@@ -66,8 +66,9 @@ module LLM
     }
   end
 
-  def self.workflow_tools(workflow)
-    workflow.tasks.keys.collect{|task_name| self.task_tool_definition(workflow, task_name) }
+  def self.workflow_tools(workflow, tasks = nil)
+    tasks ||= workflow.tasks.keys
+    tasks.collect{|task_name| self.task_tool_definition(workflow, task_name) }
   end
 
   def self.knowledge_base_tool_definition(knowledge_base)
