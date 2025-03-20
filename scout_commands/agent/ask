@@ -20,6 +20,7 @@ Use STDIN to add context to the question
 -l--log* Log level
 -t--template* Use a template
 -m--model* Model to use
+-e--endpoint* Endpoint to use
 -f--file* Incorporate file at the start
 EOF
 if options[:help]
@@ -45,7 +46,7 @@ workflow = begin
 
 knowledge_base = begin workflow.knowledge_base rescue nil end || KnowledgeBase.new(Scout.var.Agent[agent])
 
-agent = LLM::Agent.new workflow: workflow, knowledge_base: knowledge_base
+agent = LLM::Agent.new workflow: workflow, knowledge_base: knowledge_base, **options
 
 question = question_parts * " " 
 
@@ -67,4 +68,4 @@ if question.include?('...')
   question = question.sub('...', context)
 end
 
-puts LLM.ask(question, options)
+puts agent.ask(question)

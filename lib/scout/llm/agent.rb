@@ -19,16 +19,17 @@ module LLM
 
     def system_prompt
       system = @system
+      system = [] if system.nil?
       system = [system] unless system.nil? || system.is_a?(Array)
 
-      if @knowledge_base
+      if @knowledge_base && @knowledge_base.all_databases.any?
         system << <<-EOF
 You have access to the following databases associating entities:
         EOF
 
-        knowledge_base.all_databases.each do |database|
-          system << <<-EOF.strip + (knowledge_base.undirected(database) ? ". Undirected" : "")
-* #{database}: #{knowledge_base.source(database)} => #{knowledge_base.target(database)}
+        @knowledge_base.all_databases.each do |database|
+          system << <<-EOF.strip + (@knowledge_base.undirected(database) ? ". Undirected" : "")
+* #{database}: #{@knowledge_base.source(database)} => #{@knowledge_base.target(database)}
           EOF
         end
       end
@@ -45,7 +46,7 @@ You have access to the following databases associating entities:
     end
 
     # function: takes an array of messages and calls LLM.ask with them
-    def ask(messages, model = nil)
+    def ask(messages, model = nil, options = {})
       messages = [messages] unless messages.is_a? Array
       model ||= @model
 
