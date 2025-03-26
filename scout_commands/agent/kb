@@ -1,0 +1,15 @@
+#!/usr/bin/env ruby
+
+agent = ARGV.shift
+
+agent_dir = Scout.var.Agent[agent]
+
+if ARGV.any?
+  ARGV.push "--knowledge_base"
+  ARGV.push agent_dir.knowledge_base
+  ARGV.push "--log"
+  ARGV.push Log.severity.to_s
+end
+ARGV.unshift 'kb'
+
+load Scout.bin.scout.find

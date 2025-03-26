@@ -32,7 +32,9 @@ directory = ARGV.first || Scout.var.ask.find
 directory = Path.setup directory
 
 while true
-  directory.glob('*.json').each do |file|
+  files = directory.glob('*.json')
+
+  files.each do |file|
     target = directory.reply[id + '.json']
 
     if ! File.exist?(target)
@@ -46,5 +48,5 @@ while true
     Open.rm(file)
   end
 
-  sleep 1
+  sleep 1 if files.empty?
 end

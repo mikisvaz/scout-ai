@@ -19,6 +19,7 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
      huggingface.rb
      relay.rb
     }
+
     ask.rb
 
     embed.rb
@@ -26,6 +27,7 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
     rag.rb
 
     tools.rb
+
     agent.rb
    }
   }
@@ -51,6 +53,7 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
   }
   agent=agent{
    ask
+   kb
   }
  }
  questions=questions filter="*"{

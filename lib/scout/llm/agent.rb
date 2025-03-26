@@ -21,16 +21,15 @@ module LLM
       system = @system
       system = [] if system.nil?
       system = [system] unless system.nil? || system.is_a?(Array)
+      system = [] if system.nil?
 
-      if @knowledge_base && @knowledge_base.all_databases.any?
+      if @knowledge_base and @knowledge_base.all_databases.any?
         system << <<-EOF
 You have access to the following databases associating entities:
         EOF
 
-        @knowledge_base.all_databases.each do |database|
-          system << <<-EOF.strip + (@knowledge_base.undirected(database) ? ". Undirected" : "")
-* #{database}: #{@knowledge_base.source(database)} => #{@knowledge_base.target(database)}
-          EOF
+        knowledge_base.all_databases.each do |database|
+          system << knowledge_base.markdown(database)
         end
       end
 
@@ -48,19 +47,19 @@ You have access to the following databases associating entities:
     # function: takes an array of messages and calls LLM.ask with them
     def ask(messages, model = nil, options = {})
       messages = [messages] unless messages.is_a? Array
-      model ||= @model
+      model ||= @model if model
 
       tools = []
       tools += LLM.workflow_tools(workflow) if workflow
-      tools += LLM.knowledge_base_tool_definition(knowledge_base) if knowledge_base
+      tools += LLM.knowledge_base_tool_definition(knowledge_base) if knowledge_base and knowledge_base.all_databases.any?
 
-      LLM.ask prompt(messages), @other_options.merge(model: model, log_errors: true, tools: tools) do |name,parameters|
+      LLM.ask prompt(messages), @other_options.merge(log_errors: true, tools: tools) do |name,parameters|
         case name
         when 'children'
           parameters = IndiferentHash.setup(parameters)
           database, entities = parameters.values_at "database", "entities"
           Log.high "Finding #{entities} children in #{database}"
-          knowledge_base.children(database, entities).target
+          knowledge_base.children(database, entities)
         else
           if workflow
             begin

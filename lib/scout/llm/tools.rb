@@ -8,7 +8,6 @@ module LLM
     function_arguments = JSON.parse(function_arguments, { symbolize_names: true }) if String === function_arguments
     function_response = block.call function_name, function_arguments
 
-    #content = String === function_response ? function_response : function_response.to_json,
     content = case function_response
               when String
                 function_response
@@ -32,6 +31,7 @@ module LLM
       description = task_info[:input_descriptions][input]
 
       type = :string if type == :select
+      type = :string if type == :path
 
       acc[input] = {
         "type": type,
@@ -67,7 +67,7 @@ module LLM
   end
 
   def self.workflow_tools(workflow, tasks = nil)
-    tasks ||= workflow.tasks.keys
+    tasks = workflow.all_exports
     tasks.collect{|task_name| self.task_tool_definition(workflow, task_name) }
   end
 
