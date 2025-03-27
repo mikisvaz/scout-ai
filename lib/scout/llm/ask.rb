@@ -16,7 +16,6 @@ module LLM
     backend = IndiferentHash.process_options options, :backend
     backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :openai
 
-
     case backend
     when :openai, "openai"
       LLM::OpenAI.ask(question, options, &block)

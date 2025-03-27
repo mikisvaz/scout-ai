@@ -24,9 +24,10 @@ module LLM
     end
 
     def self.ask(question, options = {}, &block)
-      options[:question] = question
+      server = IndiferentHash.process_options options, :server
+      server ||= Scout::Config.get :server, :ask_relay, :relay, :ask, env: 'ASK_ENDPOINT,LLM_ENDPOINT', default: :openai
 
-      server = Scout::Config.get(:server, :relay, default: "localhost")
+      options[:question] = question
       TmpFile.with_file(options.to_json) do |file|
         id = upload(server, file)
         gather(server, id)
