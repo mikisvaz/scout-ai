@@ -2,6 +2,7 @@ require 'scout'
 require_relative 'backends/openai'
 require_relative 'backends/ollama'
 require_relative 'backends/openwebui'
+require_relative 'backends/bedrock'
 require_relative 'backends/relay'
 
 module LLM
@@ -25,6 +26,8 @@ module LLM
       LLM::OpenWebUI.ask(question, options, &block)
     when :relay, "relay"
       LLM::Relay.ask(question, options, &block)
+    when :bedrock, "bedrock"
+      LLM::Bedrock.ask(question, options, &block)
     else
       raise "Unknown backend: #{backend}"
     end
