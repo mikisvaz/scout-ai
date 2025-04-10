@@ -16,6 +16,7 @@ Use STDIN to add context to the question
 -h--help Print this help
 -l--log* Log level
 -t--template* Use a template
+-c--chat* Follow a conversation
 -m--model* Model to use
 -e--endpoint* Endpoint to use
 -f--file* Incorporate file at the start
@@ -31,11 +32,11 @@ end
 
 Log.severity = options.delete(:log).to_i if options.include? :log
 
-file = options.delete(:file)
+file, chat, template = IndiferentHash.process_options options, :file, :chat, :template
 
 question = ARGV * " "
 
-if template = options.delete(:template)
+if template
   if Open.exists?(template)
     template_question = Open.read(template)
   else
@@ -49,8 +50,18 @@ if template = options.delete(:template)
 end
 
 if question.include?('...')
-  context = file ? Open.read(file) : STDIN.read 
+  context = file ? Open.read(file) : STDIN.read
   question = question.sub('...', context)
+elsif file
+  question = "<file basename=#{File.basename file}>[[[\n" + Open.read(file) + "\n]]]</file>"
 end
 
-puts LLM.ask(question, options)
+if chat
+  conversation = Open.exist?(chat)? Open.read(chat) : "" 
+  question = question.empty? ? conversation : conversation + "\nuser:\n" +  question
+  new = LLM.ask(question, options)
+  conversation = question + "\nassistant:\n" + new
+  Open.write(chat, conversation)
+else
+  puts LLM.ask(question, options)
+end

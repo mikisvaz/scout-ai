@@ -12,21 +12,47 @@ module LLM
         inside = m[2]
         post = m[3]
         messages = parse(pre, role)
-        messages.last[:content] += "\n" + inside
-        messages.concat parse(post, role)
+
+        messages = [{role: role, content: ''}] if messages.empty?
+        messages.last[:content] += inside
+
+        last = parse(post, messages.last[:role])
+
+        messages.concat last
+
+        messages
+      elsif m = question.match(/(.*?)(```.*?```)(.*)/m)
+        pre = m[1]
+        inside = m[2]
+        post = m[3]
+        messages = parse(pre, role)
+
+        messages = [{role: role, content: ''}] if messages.empty?
+        messages.last[:content] += inside
+
+        last = parse(post, messages.last[:role])
+
+        if last.first[:role] == messages.last[:role]
+          m = last.shift
+          messages.last[:content] += m[:content]
+        end
+
+        messages.concat last
+
+        messages
       else
-        question.split("\n").collect do |line|
-          if line.include?("\t")
-            question_role, _sep, q = line.partition("\t")
-          elsif m = line.match(/^([^\s]*): ?(.*)/)
-            question_role, q = m.values_at 1, 2
-          else
-            question_role = role
-            q = line
+        chunks = question.scan(/(.*?)^(\w+):(.*?)(?=^\w+:|\z)/m)
+
+        if chunks.any?
+          messages = []
+          messages << {role: role, content: chunks.first.first} if chunks.first and not chunks.first.first.empty?
+          chunks.collect do |pre,role,text|
+            messages << {role: role, content: text.strip}
           end
-          next if q.empty?
-          {role: question_role, content: q}
-        end.compact
+          messages
+        else
+          [{role: role, content: question.strip}]
+        end
       end
     end
   end
