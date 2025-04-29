@@ -1,4 +1,41 @@
 module LLM
+  def self.tag(tag, title, content)
+    <<-EOF.strip
+<#{tag} name="#{title}">
+#{content}
+</#{tag}>
+    EOF
+  end
+
+  def self.process_inside(inside)
+    header, content = inside.match(/([^\n]*)\n(.*)/).values_at 1, 2
+    if header.empty?
+      content
+    else
+      action, _sep, rest = header.partition /\s/
+      case action
+      when 'import'
+      when 'cmd'
+        title = rest.strip.empty? ? content : rest
+        tag('file', title, CMD.cmd(content).read)
+      when 'file'
+        file = content
+        title = rest.strip.empty? ? file : rest
+        tag(action, title, Open.read(file))
+      when 'directory'
+        directory = content
+        title = rest.strip.empty? ? directory : rest
+        directory_content = Dir.glob(File.join(directory, '**/*')).collect do |file|
+          file_title = Misc.path_relative_to(directory, file)
+          tag('file', file_title, Open.read(file) )
+        end * "\n"
+        tag(action, title, directory_content )
+      else 
+        tag(action, rest, content)
+      end
+    end
+  end
+
   def self.parse(question, role = nil)
     role = :user if role.nil?
 
@@ -14,7 +51,7 @@ module LLM
         messages = parse(pre, role)
 
         messages = [{role: role, content: ''}] if messages.empty?
-        messages.last[:content] += inside
+        messages.last[:content] += process_inside inside
 
         last = parse(post, messages.last[:role])
 
@@ -50,8 +87,10 @@ module LLM
             messages << {role: role, content: text.strip}
           end
           messages
+        elsif question.strip.empty?
+          []
         else
-          [{role: role, content: question.strip}]
+          [{role: role, content: question}]
         end
       end
     end

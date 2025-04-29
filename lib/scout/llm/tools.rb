@@ -101,4 +101,21 @@ module LLM
       }
     }]
   end
+  
+  def self.run_tools(messages)
+    messages.collect do |info|
+      IndiferentHash.setup(info)
+      role = info[:role]
+      if role == 'cmd'
+        {
+          role: 'tool',
+          content: CMD.cmd(info[:content]).read
+        }
+      else
+        info
+      end
+    end
+  end
+
+
 end

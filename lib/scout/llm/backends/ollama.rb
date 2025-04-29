@@ -2,6 +2,7 @@ require 'ollama-ai'
 require_relative '../parse'
 require_relative '../tools'
 require_relative '../utils'
+require_relative '../chat'
 
 module LLM
   module OLlama
@@ -32,7 +33,7 @@ module LLM
 
       mode  = IndiferentHash.process_options options, :mode
 
-      messages = LLM.parse(question)
+      messages = LLM.messages(question)
 
       system = []
       prompt = []

@@ -28,7 +28,7 @@ module LLM
 
       role = IndiferentHash.process_options options, :role
 
-      messages = LLM.parse(question, role)
+      messages = LLM.messages(question, role)
 
       parameters = options.merge(model: model, messages: messages)
 

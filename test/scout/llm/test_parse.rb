@@ -64,5 +64,35 @@ I have a question
 
     assert_include LLM.parse(text).last[:content], 'question'
   end
+
+
+  def test_cmd
+    text=<<-EOF
+How many files are there:
+
+[[cmd list of files
+echo "file1 file2"
+]]
+    EOF
+
+    assert_equal :user, LLM.parse(text).last[:role]
+    assert_include LLM.parse(text).first[:content], 'file1'
+  end
+
+  def test_directory
+    TmpFile.with_path do |tmpdir|
+      tmpdir.file1.write "foo"
+      tmpdir.file2.write "bar"
+      text=<<-EOF
+How many files are there:
+
+[[directory DIR
+#{tmpdir}
+]]
+      EOF
+
+      assert_include LLM.parse(text).first[:content], 'file1'
+    end
+  end
 end
 

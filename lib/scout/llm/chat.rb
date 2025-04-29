@@ -3,6 +3,7 @@ require_relative 'tools'
 
 module LLM
   def self.messages(question, role = nil)
+    return question if Array === question
     messages = []
     current_role = nil
     current_content = ""

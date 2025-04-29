@@ -20,7 +20,7 @@ module LLM
 
       model = self.model model_options
 
-      messages = LLM.parse(question)
+      messages = LLM.messages(question)
 
       system = []
       prompt = []

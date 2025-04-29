@@ -20,6 +20,7 @@ Use STDIN to add context to the question
 -m--model* Model to use
 -e--endpoint* Endpoint to use
 -f--file* Incorporate file at the start
+-d--dry_run Dry run, don't ask
 EOF
 if options[:help]
   if defined? scout_usage
@@ -32,7 +33,7 @@ end
 
 Log.severity = options.delete(:log).to_i if options.include? :log
 
-file, chat, template = IndiferentHash.process_options options, :file, :chat, :template
+file, chat, template, dry_run = IndiferentHash.process_options options, :file, :chat, :template, :dry_run
 
 question = ARGV * " "
 
@@ -57,10 +58,15 @@ elsif file
 end
 
 if chat
-  conversation = Open.exist?(chat)? Open.read(chat) : "" 
-  question = question.empty? ? conversation : conversation + "\nuser:\n" +  question
-  new = LLM.ask(question, options)
-  conversation = question + "\nassistant:\n" + new
+  conversation = Open.exist?(chat)? LLM.chat(chat) : [] 
+  iii conversation
+  conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
+  if dry_run
+    ppp LLM.print conversation
+    exit 0
+  end
+  new = LLM.ask(conversation, options)
+  conversation = Open.read(chat) + "\nassistant:\n" + new
   Open.write(chat, conversation)
 else
   puts LLM.ask(question, options)

@@ -14,22 +14,26 @@ module LLM
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
     end
 
-    backend = IndiferentHash.process_options options, :backend
-    backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :openai
+    Persist.persist("Question", other: question) do
+      Log.low "Asking #{endpoint}: "  + LLM.print(question) 
 
-    case backend
-    when :openai, "openai"
-      LLM::OpenAI.ask(question, options, &block)
-    when :ollama, "ollama"
-      LLM::OLlama.ask(question, options, &block)
-    when :openwebui, "openwebui"
-      LLM::OpenWebUI.ask(question, options, &block)
-    when :relay, "relay"
-      LLM::Relay.ask(question, options, &block)
-    when :bedrock, "bedrock"
-      LLM::Bedrock.ask(question, options, &block)
-    else
-      raise "Unknown backend: #{backend}"
+      backend = IndiferentHash.process_options options, :backend
+      backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :openai
+
+      case backend
+      when :openai, "openai"
+        LLM::OpenAI.ask(question, options, &block)
+      when :ollama, "ollama"
+        LLM::OLlama.ask(question, options, &block)
+      when :openwebui, "openwebui"
+        LLM::OpenWebUI.ask(question, options, &block)
+      when :relay, "relay"
+        LLM::Relay.ask(question, options, &block)
+      when :bedrock, "bedrock"
+        LLM::Bedrock.ask(question, options, &block)
+      else
+        raise "Unknown backend: #{backend}"
+      end
     end
   end
 

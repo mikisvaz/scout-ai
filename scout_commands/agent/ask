@@ -19,6 +19,7 @@ Use STDIN to add context to the question
 -h--help Print this help
 -l--log* Log level
 -t--template* Use a template
+-c--chat* Follow a conversation
 -m--model* Model to use
 -e--endpoint* Endpoint to use
 -f--file* Incorporate file at the start
@@ -83,4 +84,12 @@ if question.include?('...')
   question = question.sub('...', context)
 end
 
-puts agent.ask(question)
+if chat
+  conversation = Open.exist?(chat)? Open.read(chat) : "" 
+  question = question.empty? ? conversation : conversation + "\nuser:\n" +  question
+  new = LLM.ask(question, options)
+  conversation = question + "\nassistant:\n" + new
+  Open.write(chat, conversation)
+else
+  puts LLM.ask(question, options)
+end

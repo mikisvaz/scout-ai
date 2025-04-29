@@ -31,7 +31,7 @@ module LLM
       model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENWEBUI_MODEL')
 
       role = IndiferentHash.process_options options, :role
-      messages = LLM.parse(question, role)
+      messages = LLM.messages(question, role)
 
       parameters = options.merge(model: model, messages: messages)
 

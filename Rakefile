@@ -16,6 +16,7 @@ Juwelier::Tasks.new do |gem|
   gem.authors = ["Miguel Vazquez"]
 
   # dependencies defined in Gemfile
+  gem.add_runtime_dependency 'aws-sdk-s3', '>= 0'
 end
 Juwelier::RubygemsDotOrgTasks.new
 require 'rake/testtask'
