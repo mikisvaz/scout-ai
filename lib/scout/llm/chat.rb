@@ -114,6 +114,37 @@ module LLM
     end.flatten
   end
 
+  def self.files(messages, original = nil)
+    messages.collect do |message|
+      if message[:role] == 'file' || message[:role] == 'directory'
+        file = message[:content].strip
+        path = Scout.root[file]
+        original = original.find if Path === original
+        relative = File.join(File.dirname(original), file) if original
+
+        target = if Open.exist?(file)
+                file
+              elsif relative && Open.exist?(relative)
+                relative
+              elsif path.exists?
+                path
+              else
+                raise "Import not found: #{file}"
+              end
+
+        if message[:role] == 'directory'
+          Path.setup target
+          target.glob('*').collect{|dir| files(dir) }
+        else
+          new = LLM.tag :file, file, Open.read(target)
+          {role: 'user', content: new}
+        end
+      else
+        message
+      end
+    end.flatten
+  end
+
   def self.clear(messages)
     new = []
 
@@ -139,6 +170,7 @@ module LLM
     messages = LLM.imports messages, file
     messages = LLM.clear messages
     messages = LLM.clean messages
+    messages = LLM.files messages
 
     messages
   end

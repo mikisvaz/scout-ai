@@ -19,6 +19,7 @@ Use STDIN to add context to the question
 -c--chat* Follow a conversation
 -m--model* Model to use
 -e--endpoint* Endpoint to use
+-b--backend* Backend to use
 -f--file* Incorporate file at the start
 -d--dry_run Dry run, don't ask
 EOF

@@ -1,12 +1,4 @@
 module LLM
-  def self.tag(tag, title, content)
-    <<-EOF.strip
-<#{tag} name="#{title}">
-#{content}
-</#{tag}>
-    EOF
-  end
-
   def self.process_inside(inside)
     header, content = inside.match(/([^\n]*)\n(.*)/).values_at 1, 2
     if header.empty?
