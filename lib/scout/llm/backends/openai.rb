@@ -1,8 +1,6 @@
 require 'scout'
 require 'openai'
-require_relative '../parse'
-require_relative '../tools'
-require_relative '../utils'
+require_relative '../chat'
 
 module LLM
   module OpenAI
@@ -11,9 +9,43 @@ module LLM
       Object::OpenAI::Client.new(access_token:key, log_errors: log_errors, uri_base: url)
     end
 
-    def self.ask(question, options = {}, &block)
+    def self.process_input(messages)
+      messages.collect do |message|
+        if message[:role] == 'function_call'
+          {role: 'assistant', tool_calls: [JSON.parse(message[:content])]}
+        elsif message[:role] == 'function_call_output'
+          JSON.parse(message[:content])
+        else
+          message
+        end
+      end.flatten
+    end
 
-      client, url, key, model, log_errors = IndiferentHash.process_options options, :client, :url, :key, :model, :log_errors
+    def self.process_response(response, &block)
+      Log.debug "Respose: #{Log.fingerprint response}"
+
+      message = response.dig("choices", 0, "message")
+      tool_calls = response.dig("choices", 0, "tool_calls") ||
+        response.dig("choices", 0, "message", "tool_calls")
+
+      if tool_calls && tool_calls.any?
+          tool_calls.collect{|tool_call| 
+            response_message = LLM.tool_response(tool_call, &block)
+            [
+              {role: "function_call", content: tool_call.to_json},
+              {role: "function_call_output", content: response_message.to_json},
+            ]
+          }.flatten
+      else
+        [message]
+      end
+    end
+
+    def self.ask(question, options = {}, &block)
+      original_options = options.dup
+      client, url, key, model, log_errors, return_messages = IndiferentHash.process_options options, 
+        :client, :url, :key, :model, :log_errors, :return_messages,
+        log_errors: true
 
       if client.nil?
         url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
@@ -23,45 +55,32 @@ module LLM
 
       if model.nil?
         url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
-        model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-3.5-turbo")
+        model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-4.1")
       end
 
       role = IndiferentHash.process_options options, :role
 
-      messages = LLM.messages(question, role)
+      messages = LLM.chat(question)
 
-      parameters = options.merge(model: model, messages: messages)
+      parameters = options.merge(model: model)
 
-      Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
+      Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
 
-      response = client.chat(parameters: parameters)
-      Log.debug "Respose: #{Log.fingerprint response}"
-      message = response.dig("choices", 0, "message")
-      tool_calls = response.dig("choices", 0, "tool_calls") ||
-        response.dig("choices", 0, "message", "tool_calls")
+      parameters[:messages] = self.process_input messages
 
-      parameters.delete :tool_choice
+      response = self.process_response client.chat(parameters: parameters), &block
 
-      while tool_calls && tool_calls.any?
-        messages << message
+      res = if response.last[:role] == 'function_call_output' 
+              response + self.ask(messages + response, original_options.except(:tool_choice, :return_messages))
+            else
+              response
+            end
 
-        cpus = Scout::Config.get :cpus, :tool_calling, default: 3
-        tool_calls.each do |tool_call|
-          response_message = LLM.tool_response(tool_call, &block)
-          messages << response_message
-        end
-
-        parameters[:messages] = messages.compact
-        Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
-        response = client.chat( parameters: parameters)
-        Log.debug "Respose: #{Log.fingerprint response}"
-
-        message = response.dig("choices", 0, "message")
-        tool_calls = response.dig("choices", 0, "tool_calls") ||
-          response.dig("choices", 0, "message", "tool_calls")
+      if return_messages
+        res
+      else
+        res.last['content']
       end
-
-      message.dig("content")
     end
 
     def self.embed(text, options = {})

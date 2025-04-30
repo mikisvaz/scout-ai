@@ -1,3 +1,4 @@
+require_relative 'utils'
 require_relative 'parse'
 require_relative 'tools'
 
@@ -145,6 +146,39 @@ module LLM
     end.flatten
   end
 
+  def self.jobs(messages, original = nil)
+    messages.collect do |message|
+      if message[:role] == 'job'
+        file = message[:content].strip
+
+        step = Step.load file
+
+        tool_call = {
+          type: "function",
+          function: {
+            name: step.full_task_name.sub('#', '-'),
+            arguments: step.provided_inputs.to_json
+          },
+          id: step.full_task_name,
+          call_id: step.short_path,
+        }
+
+        tool_output = {
+          tool_call_id: step.full_task_name,
+          role: "tool",
+          content: step.path.read
+        }
+
+        [
+          {role: 'function_call', content: tool_call.to_json},
+          {role: 'function_call_output', content: tool_output.to_json},
+        ]
+      else
+        message
+      end
+    end.flatten
+  end
+
   def self.clear(messages)
     new = []
 
@@ -161,16 +195,32 @@ module LLM
 
   def self.clean(messages)
     messages.reject do |message|
-      message[:content].empty?
+      message[:content] && message[:content].empty?
     end
   end
 
+  def self.indiferent(messages)
+    messages.collect{|msg| IndiferentHash.setup msg }
+  end
+
   def self.chat(file)
-    messages = LLM.messages Open.read(file)
-    messages = LLM.imports messages, file
-    messages = LLM.clear messages
-    messages = LLM.clean messages
-    messages = LLM.files messages
+    if Array === file
+      messages = file
+      messages = self.indiferent messages
+    elsif Open.exists?(file)
+      messages = self.messages Open.read(file)
+      messages = self.indiferent messages
+      messages = self.imports messages, file
+    else
+      messages = self.messages file
+      messages = self.indiferent messages
+      messages = self.imports messages, nil
+    end
+
+    messages = self.clear messages
+    messages = self.clean messages
+    messages = self.jobs messages
+    messages = self.files messages
 
     messages
   end
@@ -179,7 +229,11 @@ module LLM
     return chat if String  === chat
     chat.collect do |message|
       IndiferentHash.setup message
-      message[:role].to_s + ":\n\n" + message[:content] 
+      if message[:content]
+        message[:role].to_s + ":\n\n" + message[:content] 
+      else
+        message[:role].to_s + ":\n\n" + message.to_json
+      end
     end * "\n\n"
   end
 end

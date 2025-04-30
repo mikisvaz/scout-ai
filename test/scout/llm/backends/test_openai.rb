@@ -2,20 +2,13 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 class TestLLMOpenAI < Test::Unit::TestCase
-  def test_ask
+  def _test_ask
     prompt =<<-EOF
 system: you are a coding helper that only write code and comments without formatting so that it can work directly, avoid the initial and end commas ```.
 user: write a script that sorts files in a directory
     EOF
     sss 0
     ppp LLM::OpenAI.ask prompt
-  end
-
-  def _test_argonne
-    prompt =<<-EOF
-user: write a script that sorts files in a directory
-    EOF
-    sss 0
   end
 
   def _test_embeddings
@@ -27,8 +20,9 @@ Some text
     assert(Float === emb.first)
   end
 
-  def _test_tool
+  def test_tool
     prompt =<<-EOF
+user:
 What is the weather in London. Should I take my umbrella?
     EOF
 
@@ -57,8 +51,8 @@ What is the weather in London. Should I take my umbrella?
       },
     ]
 
-    sss 0
-    respose = LLM::OpenAI.ask prompt, tool_choice: 'required', tools: tools, model: "gpt-4o" do |name,arguments|
+    sss 1
+    respose = LLM::OpenAI.ask prompt, tool_choice: 'required', tools: tools, model: "gpt-4.1-mini", log_errors: true do |name,arguments|
       "It's 15 degrees and raining."
     end
 

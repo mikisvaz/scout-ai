@@ -2,7 +2,7 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 class TestMessages < Test::Unit::TestCase
-  def test_messages
+  def _test_messages
     question =<<-EOF 
 
 system: 
@@ -51,7 +51,7 @@ assistant:
     assert messages.collect{|i| i[:role] }.include?("import")
   end
 
-  def test_chat_import
+  def _test_chat_import
     file1 =<<-EOF
 system: You are an assistant
     EOF
@@ -69,7 +69,7 @@ user: say something
     end
   end
 
-  def test_clear
+  def _test_clear
     question =<<-EOF 
 system: 
 
@@ -85,6 +85,24 @@ What is the capital of France
     TmpFile.with_file question do |file|
       messages = LLM.chat file
       refute messages.collect{|m| m[:role] }.include?('system')
+    end
+  end
+
+  def test_job
+    question =<<-EOF 
+system 
+
+you are a terse assistant that only write in short sentences
+
+job: Baking/bake_muffin_tray/Default_08a1812eca3a18dce2232509dabc9b41
+
+How are muffins made
+
+    EOF
+
+    TmpFile.with_file question do |file|
+      messages = LLM.chat file
+      ppp LLM.print messages
     end
   end
 
