@@ -13,6 +13,8 @@ module LLM
     protected_block_type = nil
     protected_stack = []
 
+    role = default_role if role.nil?
+
     file_lines = question.split("\n")
 
     file_lines.each do |line|
@@ -58,7 +60,7 @@ module LLM
       end
 
       # Match a new message header
-      if stripped =~ /^([a-zA-Z0-9_]+):(.*)$/
+      if line =~ /^([a-z0-9_]+):(.*)$/
         role = $1
         inline_content = $2.strip
 
@@ -72,7 +74,7 @@ module LLM
         else
           # Inline message + next block is default role
           messages << { role: role, content: inline_content }
-          current_role = default_role
+          #current_role = default_role
           current_content = ""
         end
       else
@@ -81,7 +83,7 @@ module LLM
     end
 
     # Final message
-    messages << { role: current_role, content: current_content.strip }
+    messages << { role: current_role || default_role, content: current_content.strip }
 
     messages
   end
@@ -90,7 +92,7 @@ module LLM
     messages.collect do |message|
       if message[:role] == 'import' || message[:role] == 'continue'
         file = message[:content].strip
-        path = Scout.root[file]
+        path = Scout.chats[file]
         original = original.find if Path === original
         relative = File.join(File.dirname(original), file) if original
 
@@ -124,18 +126,23 @@ module LLM
         relative = File.join(File.dirname(original), file) if original
 
         target = if Open.exist?(file)
-                file
-              elsif relative && Open.exist?(relative)
-                relative
-              elsif path.exists?
-                path
-              else
-                raise "Import not found: #{file}"
-              end
+                   file
+                 elsif relative && Open.exist?(relative)
+                   relative
+                 elsif path.exists?
+                   path
+                 else
+                   raise "Import not found: #{file}"
+                 end
 
         if message[:role] == 'directory'
           Path.setup target
-          target.glob('*').collect{|dir| files(dir) }
+          target.glob('**/*').
+            reject{|file|
+              Open.directory?(file)
+            }.collect{|file|
+              files([{role: 'file', content: file}])
+            }
         else
           new = LLM.tag :file, file, Open.read(target)
           {role: 'user', content: new}
@@ -148,35 +155,68 @@ module LLM
 
   def self.jobs(messages, original = nil)
     messages.collect do |message|
-      if message[:role] == 'job'
+      if message[:role] == 'job' || message[:role] == 'inline_job'
         file = message[:content].strip
 
         step = Step.load file
 
-        tool_call = {
-          type: "function",
-          function: {
-            name: step.full_task_name.sub('#', '-'),
-            arguments: step.provided_inputs.to_json
-          },
-          id: step.full_task_name,
-          call_id: step.short_path,
-        }
+        if message[:role] == 'inline_job'
+          {role: 'file', content: step.path}
+        else
+          tool_call = {
+            type: "function",
+            function: {
+              name: step.full_task_name.sub('#', '-'),
+              arguments: step.provided_inputs.to_json
+            },
+            id: step.short_path.gsub('/','_'),
+          }
 
-        tool_output = {
-          tool_call_id: step.full_task_name,
-          role: "tool",
-          content: step.path.read
-        }
+          tool_output = {
+            tool_call_id: step.short_path.gsub('/','_'),
+            role: "tool",
+            content: step.path.read
+          }
 
-        [
-          {role: 'function_call', content: tool_call.to_json},
-          {role: 'function_call_output', content: tool_output.to_json},
-        ]
+          [
+            {role: 'function_call', content: tool_call.to_json},
+            {role: 'function_call_output', content: tool_output.to_json},
+          ]
+        end
       else
         message
       end
     end.flatten
+  end
+
+  def self.tasks(messages, original = nil)
+    jobs =  []
+    new = messages.collect do |message|
+      if message[:role] == 'task' || message[:role] == 'inline_task'
+        info = message[:content].strip
+
+        workflow, task  = info.split(" ").values_at 0, 1
+
+        options = IndiferentHash.parse_options info
+        jobname = options.delete :jobname
+
+        job = Workflow.require_workflow(workflow).job(task, jobname, options)
+
+        jobs << job
+
+        if message[:role] == 'inline_task'
+          {role: 'inline_job', content: job.short_path}
+        else
+          {role: 'job', content: job.short_path}
+        end
+      else
+        message
+      end
+    end.flatten
+
+    Workflow.produce(jobs)
+
+    new
   end
 
   def self.clear(messages)
@@ -219,10 +259,32 @@ module LLM
 
     messages = self.clear messages
     messages = self.clean messages
+    messages = self.tasks messages
     messages = self.jobs messages
     messages = self.files messages
 
     messages
+  end
+
+  def self.options(chat)
+    options = IndiferentHash.setup({})
+    new = []
+    chat.each do |info|
+      if Hash === info
+        role = info[:role].to_s
+        if %w(endpoint format).include? role.to_s
+          options[role] = info[:content]
+          next
+        end
+
+        if role == 'assistant'
+          options.clear
+        end
+      end
+      new << info
+    end
+    chat.replace new
+    options
   end
 
   def self.print(chat)
@@ -230,7 +292,7 @@ module LLM
     chat.collect do |message|
       IndiferentHash.setup message
       if message[:content]
-        message[:role].to_s + ":\n\n" + message[:content] 
+        message[:role].to_s + ":\n\n" + message[:content]
       else
         message[:role].to_s + ":\n\n" + message.to_json
       end

@@ -60,14 +60,14 @@ end
 
 if chat
   conversation = Open.exist?(chat)? LLM.chat(chat) : [] 
-  iii conversation
+  convo_options = LLM.options conversation
   conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
   if dry_run
     ppp LLM.print conversation
     exit 0
   end
-  new = LLM.ask(conversation, options)
-  conversation = Open.read(chat) + "\nassistant:\n" + new
+  new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
+  conversation = Open.read(chat) + LLM.print(new)
   Open.write(chat, conversation)
 else
   puts LLM.ask(question, options)

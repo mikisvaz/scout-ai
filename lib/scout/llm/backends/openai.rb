@@ -43,8 +43,12 @@ module LLM
 
     def self.ask(question, options = {}, &block)
       original_options = options.dup
-      client, url, key, model, log_errors, return_messages = IndiferentHash.process_options options, 
-        :client, :url, :key, :model, :log_errors, :return_messages,
+
+      messages = LLM.chat(question)
+      options = options.merge LLM.options messages
+
+      client, url, key, model, log_errors, return_messages, format = IndiferentHash.process_options options,
+        :client, :url, :key, :model, :log_errors, :return_messages, :format,
         log_errors: true
 
       if client.nil?
@@ -58,9 +62,14 @@ module LLM
         model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-4.1")
       end
 
-      role = IndiferentHash.process_options options, :role
+      #role = IndiferentHash.process_options options, :role
 
-      messages = LLM.chat(question)
+      case format.to_sym
+      when :json, :json_object
+        options[:response_format] = {type: 'json_object'}
+      else
+        options[:response_format] = {type: format}
+      end if format
 
       parameters = options.merge(model: model)
 
@@ -71,7 +80,7 @@ module LLM
       response = self.process_response client.chat(parameters: parameters), &block
 
       res = if response.last[:role] == 'function_call_output' 
-              response + self.ask(messages + response, original_options.except(:tool_choice, :return_messages))
+              response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true))
             else
               response
             end

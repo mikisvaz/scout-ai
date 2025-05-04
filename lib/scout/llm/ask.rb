@@ -7,6 +7,9 @@ require_relative 'backends/relay'
 
 module LLM
   def self.ask(question, options = {}, &block)
+    messages = LLM.chat(question)
+    options = options.merge LLM.options messages
+
     endpoint = IndiferentHash.process_options options, :endpoint
 
     endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT', default: :openai
@@ -14,23 +17,23 @@ module LLM
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
     end
 
-    Persist.persist("Question", other: question) do
-      Log.low "Asking #{endpoint}: "  + LLM.print(question) 
+    Persist.persist(endpoint, :json, prefix: "LLM ask", other: messages, persist: true) do
+      Log.low "Asking #{endpoint}: "  + LLM.print(question)
 
       backend = IndiferentHash.process_options options, :backend
       backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :openai
 
       case backend
       when :openai, "openai"
-        LLM::OpenAI.ask(question, options, &block)
+        LLM::OpenAI.ask(messages, options, &block)
       when :ollama, "ollama"
-        LLM::OLlama.ask(question, options, &block)
+        LLM::OLlama.ask(messages, options, &block)
       when :openwebui, "openwebui"
-        LLM::OpenWebUI.ask(question, options, &block)
+        LLM::OpenWebUI.ask(messages, options, &block)
       when :relay, "relay"
-        LLM::Relay.ask(question, options, &block)
+        LLM::Relay.ask(messages, options, &block)
       when :bedrock, "bedrock"
-        LLM::Bedrock.ask(question, options, &block)
+        LLM::Bedrock.ask(messages, options, &block)
       else
         raise "Unknown backend: #{backend}"
       end

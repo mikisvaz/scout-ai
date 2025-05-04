@@ -2,7 +2,7 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 class TestLLMOpenAI < Test::Unit::TestCase
-  def _test_ask
+  def test_ask
     prompt =<<-EOF
 system: you are a coding helper that only write code and comments without formatting so that it can work directly, avoid the initial and end commas ```.
 user: write a script that sorts files in a directory
@@ -11,7 +11,7 @@ user: write a script that sorts files in a directory
     ppp LLM::OpenAI.ask prompt
   end
 
-  def _test_embeddings
+  def test_embeddings
     Log.severity = 0
     text =<<-EOF
 Some text
@@ -57,6 +57,20 @@ What is the weather in London. Should I take my umbrella?
     end
 
     ppp respose
+  end
+
+  def test_json_output
+    prompt =<<-EOF
+system:
+
+Respond in json format with a hash of strings as keys and string arrays as values, at most three in length
+
+user:
+
+What other movies have the protagonists of the original gost busters played on, just the top.
+    EOF
+    sss 0
+    ppp LLM::OpenAI.ask prompt, format: :json
   end
 end
 

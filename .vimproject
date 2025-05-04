@@ -51,6 +51,21 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
    }
   }
  }
+ chats=chats{
+  system=system{
+   scout-ai
+  }
+  doc=doc{
+   chat
+  }
+  develop=develop{
+   chat
+  }
+  refactor=refactor{
+   chat
+  }
+ }
+
  test=test {
   data=data filter="*"{
    person=person{

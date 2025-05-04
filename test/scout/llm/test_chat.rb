@@ -2,10 +2,37 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 class TestMessages < Test::Unit::TestCase
-  def _test_messages
-    question =<<-EOF 
 
-system: 
+  def test_short
+
+    question =<<-EOF
+Hi
+    EOF
+
+    iii LLM.chat(question)
+  end
+
+  def test_inline
+    question =<<-EOF
+system:
+
+you are a terse assistant that only write in short sentences
+
+assistant:
+
+Here is some stuff
+
+user: feedback
+
+that continues here
+    EOF
+
+    iii LLM.chat(question)
+  end
+
+  def test_messages
+    question =<<-EOF
+system:
 
 you are a terse assistant that only write in short sentences
 
@@ -51,14 +78,14 @@ assistant:
     assert messages.collect{|i| i[:role] }.include?("import")
   end
 
-  def _test_chat_import
+  def test_chat_import
     file1 =<<-EOF
 system: You are an assistant
     EOF
 
     file2 =<<-EOF
 import: header
-user: say something 
+user: say something
     EOF
 
     TmpFile.with_path do |tmpdir|
@@ -69,9 +96,9 @@ user: say something
     end
   end
 
-  def _test_clear
-    question =<<-EOF 
-system: 
+  def test_clear
+    question =<<-EOF
+system:
 
 you are a terse assistant that only write in short sentences
 
@@ -88,9 +115,9 @@ What is the capital of France
     end
   end
 
-  def test_job
-    question =<<-EOF 
-system 
+  def __test_job
+    question =<<-EOF
+system:
 
 you are a terse assistant that only write in short sentences
 
@@ -106,5 +133,42 @@ How are muffins made
     end
   end
 
+
+  def test_task
+    question =<<-EOF
+system:
+
+you are a terse assistant that only write in short sentences
+
+task: Baking bake_muffin_tray blueberries=true title="This is a title" list=one,two,"and three"
+
+How are muffins made
+
+    EOF
+
+    TmpFile.with_file question do |file|
+      messages = LLM.chat file
+      ppp LLM.print messages
+    end
+  end
+
+  def test_structure
+    require 'scout/llm/ask'
+    sss 0
+    question =<<-EOF
+system:
+
+Respond in json format with a hash of strings as keys and string arrays as values, at most three in length
+
+endpoint: sambanova
+
+What other movies have the protagonists of the original gost busters played on, just the top.
+
+    EOF
+
+    TmpFile.with_file question do |file|
+      ppp LLM.ask file
+    end
+  end
 end
 

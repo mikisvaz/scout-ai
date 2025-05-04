@@ -12,6 +12,7 @@ system: you are a coding helper that only write code and comments without format
 user: write a script that sorts files in a directory 
     EOF
     ppp LLM.ask prompt
+    ppp LLM.ask prompt
   end
 
   def _test_workflow_ask
