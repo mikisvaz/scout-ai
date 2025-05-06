@@ -287,6 +287,30 @@ module LLM
     options
   end
 
+  def self.tools(messages)
+    tool_definitions = {}
+    new = messages.collect do |message|
+      if message[:role] == 'tool'
+        workflow_name, task_name, *inputs = message[:content].strip.split(/\s+/)
+        if Open.remote? workflow_name
+          require 'rbbt'
+          require 'scout/offsite/ssh'
+          require 'rbbt/workflow/remote_workflow'
+          workflow = RemoteWorkflow.new workflow_name
+        else
+          workflow = Workflow.require_workflow workflow_name
+        end
+        definition = LLM.task_tool_definition workflow, task_name, inputs
+        tool_definitions[task_name] = [workflow, definition]
+        next
+      else
+        message
+      end
+    end.compact.flatten
+    messages.replace new
+    tool_definitions
+  end
+
   def self.print(chat)
     return chat if String  === chat
     chat.collect do |message|

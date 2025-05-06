@@ -12,7 +12,7 @@ module LLM
 
     endpoint = IndiferentHash.process_options options, :endpoint
 
-    endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT', default: :openai
+    endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT'
     if endpoint && Scout.etc.AI[endpoint].exists?
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
     end

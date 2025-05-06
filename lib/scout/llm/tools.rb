@@ -14,8 +14,9 @@ module LLM
               when nil
                 "success"
               else
-                function_response.to_json
+                function_response
               end
+    content = content.to_s if Numeric === content
     {
       tool_call_id: tool_call_id,
       role: "tool",
@@ -23,15 +24,19 @@ module LLM
     }
   end
 
-  def self.task_tool_definition(workflow, task_name)
+  def self.task_tool_definition(workflow, task_name, inputs = nil)
     task_info = workflow.task_info(task_name)
 
+    inputs = inputs.collect{|i| i.to_sym } if inputs
+
     properties = task_info[:inputs].inject({}) do |acc,input|
+      next acc if inputs and not inputs.include?(input)
       type = task_info[:input_types][input]
       description = task_info[:input_descriptions][input]
 
       type = :string if type == :select
       type = :string if type == :path
+      type = :number if type == :float
 
       acc[input] = {
         "type": type,
@@ -49,7 +54,8 @@ module LLM
     end
 
     required_inputs = task_info[:inputs].select do |input|
-      task_info[:input_options].include?(input) && task_info[:input_options][:required]
+      next if inputs and not inputs.include?(input.to_sym)
+      task_info[:input_options].include?(input) && task_info[:input_options][input][:required]
     end
 
     {

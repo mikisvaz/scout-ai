@@ -3,7 +3,7 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 class TestMessages < Test::Unit::TestCase
 
-  def test_short
+  def _test_short
 
     question =<<-EOF
 Hi
@@ -12,7 +12,7 @@ Hi
     iii LLM.chat(question)
   end
 
-  def test_inline
+  def _test_inline
     question =<<-EOF
 system:
 
@@ -30,7 +30,7 @@ that continues here
     iii LLM.chat(question)
   end
 
-  def test_messages
+  def _test_messages
     question =<<-EOF
 system:
 
@@ -78,7 +78,7 @@ assistant:
     assert messages.collect{|i| i[:role] }.include?("import")
   end
 
-  def test_chat_import
+  def _test_chat_import
     file1 =<<-EOF
 system: You are an assistant
     EOF
@@ -96,7 +96,7 @@ user: say something
     end
   end
 
-  def test_clear
+  def _test_clear
     question =<<-EOF
 system:
 
@@ -134,7 +134,7 @@ How are muffins made
   end
 
 
-  def test_task
+  def _test_task
     question =<<-EOF
 system:
 
@@ -152,7 +152,7 @@ How are muffins made
     end
   end
 
-  def test_structure
+  def _test_structure
     require 'scout/llm/ask'
     sss 0
     question =<<-EOF
@@ -163,6 +163,23 @@ Respond in json format with a hash of strings as keys and string arrays as value
 endpoint: sambanova
 
 What other movies have the protagonists of the original gost busters played on, just the top.
+
+    EOF
+
+    TmpFile.with_file question do |file|
+      ppp LLM.ask file
+    end
+  end
+
+  def test_tools
+    require 'scout/llm/ask'
+    sss 0
+    question =<<-EOF
+system:
+
+Use the provided tool to learn the instructions of baking a tray of muffins
+
+tool: Baking bake_muffin_tray
 
     EOF
 

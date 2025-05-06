@@ -46,6 +46,7 @@ module LLM
 
       messages = LLM.chat(question)
       options = options.merge LLM.options messages
+      tools = LLM.tools messages
 
       client, url, key, model, log_errors, return_messages, format = IndiferentHash.process_options options,
         :client, :url, :key, :model, :log_errors, :return_messages, :format,
@@ -72,6 +73,18 @@ module LLM
       end if format
 
       parameters = options.merge(model: model)
+
+      if tools.any?
+        parameters[:tools] = tools.values.collect{|a| a.last }
+        if not block_given?
+          block = Proc.new do |name,parameters|
+            IndiferentHash.setup parameters
+            workflow = tools[name].first
+            jobname = parameters.delete :jobname
+            workflow.job(name, jobname, parameters).run
+          end
+        end
+      end
 
       Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
 
