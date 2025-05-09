@@ -10,14 +10,14 @@ module LLM
     messages = LLM.chat(question)
     options = options.merge LLM.options messages
 
-    endpoint = IndiferentHash.process_options options, :endpoint
+    endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
 
     endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT'
     if endpoint && Scout.etc.AI[endpoint].exists?
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
     end
 
-    Persist.persist(endpoint, :json, prefix: "LLM ask", other: messages, persist: true) do
+    Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist) do
       Log.low "Asking #{endpoint}: "  + LLM.print(question)
 
       backend = IndiferentHash.process_options options, :backend
