@@ -17,6 +17,7 @@ Use STDIN to add context to the question
 -l--log* Log level
 -t--template* Use a template
 -c--chat* Follow a conversation
+-i--inline* Ask inline questions about a file
 -m--model* Model to use
 -e--endpoint* Endpoint to use
 -b--backend* Backend to use
@@ -34,7 +35,7 @@ end
 
 Log.severity = options.delete(:log).to_i if options.include? :log
 
-file, chat, template, dry_run = IndiferentHash.process_options options, :file, :chat, :template, :dry_run
+file, chat, inline, template, dry_run = IndiferentHash.process_options options, :file, :chat, :inline, :template, :dry_run
 
 question = ARGV * " "
 
@@ -62,6 +63,7 @@ if chat
   conversation = Open.exist?(chat)? LLM.chat(chat) : [] 
   convo_options = LLM.options conversation
   conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
+
   if dry_run
     ppp LLM.print conversation
     exit 0
@@ -69,6 +71,36 @@ if chat
   new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
   conversation = Open.read(chat) + LLM.print(new)
   Open.write(chat, conversation)
+elsif inline
+
+  iii :INLINE
+  file = Open.read inline
+
+  new_file = ""
+  while true
+    pre, question, post = 
+      file.partition(/^\s*#\s*ask:(?:.*?)(?=^\s*[^\s#])/sm)
+
+      break if post.empty?
+
+    new_file << pre
+    new_file << question
+    clean_question = question.gsub('#', '').gsub(/\s+/,' ').sub(/.*ask:\s*/,'').strip
+    chat = [
+      {role: :system, content: "Write a succint reply with no commentary and no formatting."}, 
+      {role: :user, content: "Find the following question as a comment in the file give a response to be placed inline: #{question}"},
+      LLM.tag('file', file, inline)
+    ]
+    response = LLM.ask(LLM.chat(chat))
+    new_file << <<-EOF
+# Response start
+#{response}
+# Response end
+    EOF
+    file = post
+  end
+  new_file << file
+  Open.write(inline, new_file)
 else
   puts LLM.ask(question, options)
 end
