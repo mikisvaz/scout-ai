@@ -31,7 +31,7 @@ class ScoutModel
     if block_given?
       @init = block
     else
-      execute @init
+      @state = execute @init
       load_state
     end
   end
@@ -42,7 +42,7 @@ class ScoutModel
     else
       features = extract_features sample
 
-      init
+      init unless @state
       result = if @eval.arity == 2
 
                  execute @eval, features, nil
@@ -60,7 +60,7 @@ class ScoutModel
     else
       list = extract_features_list list
 
-      init
+      init unless @state
       result = if @eval_list
                  execute @eval_list, list
                elsif @eval
@@ -113,7 +113,7 @@ class ScoutModel
     if block_given?
       @train = block
     else
-      init
+      init unless @state
       execute @train, @features, @labels
       save_state
     end

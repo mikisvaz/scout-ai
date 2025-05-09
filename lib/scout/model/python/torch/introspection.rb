@@ -1,6 +1,7 @@
 require_relative 'helpers'
 class TorchModel
   def self.get_layer(state, layer = nil)
+    state = state.first if Array === state
     if layer.nil?
       state
     else

@@ -34,12 +34,15 @@ class TorchModel
   end
 
   def self.init_python
+    return if defined?(@@init_python) && @@init_python
+    ScoutPython.add_path Scout.python.find(:lib)
     ScoutPython.init_scout
     ScoutPython.pyimport :torch
     ScoutPython.pyimport :scout
     ScoutPython.pyimport :scout_ai
     ScoutPython.pyfrom :scout_ai, import: :util
     ScoutPython.pyfrom :torch, import: :nn
+    @@init_python = true
   end
 
   def self.optimizer(model, training_args = {})

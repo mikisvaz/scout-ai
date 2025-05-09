@@ -24,25 +24,26 @@ class TorchModel < PythonModel
     end
 
     train do |features,labels|
-      @device ||= TorchModel.device(options)
-      @dtype ||= TorchModel.dtype(options)
-      @state.to(@device)
-      @optimizer ||= TorchModel.optimizer(@state, options[:training_args] || {})
-      @criterion ||= TorchModel.optimizer(@state, options[:training_args] || {})
+      TorchModel.init_python
+      device ||= TorchModel.device(options)
+      dtype ||= TorchModel.dtype(options)
+      state.to(device)
+      @optimizer ||= TorchModel.optimizer(state, options[:training_args] || {})
+      @criterion ||= TorchModel.optimizer(state, options[:training_args] || {})
 
       epochs = options[:training_args][:epochs] || 3
       batch_size = options[:batch_size]
       batch_size ||= options[:training_args][:batch_size]
       batch_size ||= 1
 
-      inputs = TorchModel.tensor(features, @device, @dtype)
+      inputs = TorchModel.tensor(features, device, dtype)
       #target = TorchModel.tensor(labels.collect{|v| [v] }, @device, @dtype)
-      target = TorchModel.tensor(labels, @device, @dtype)
+      target = TorchModel.tensor(labels, device, dtype)
 
       Log::ProgressBar.with_bar epochs, :desc => "Training" do |bar|
         epochs.times do |i|
           optimizer.zero_grad()
-          outputs = @state.call(inputs)
+          outputs = state.call(inputs)
           outputs = outputs.squeeze() if target.dim() == 1
           loss = criterion.call(outputs, target)
           loss.backward()
@@ -54,10 +55,11 @@ class TorchModel < PythonModel
     end
 
     self.eval do |features,list|
-      @device ||= TorchModel.device(options)
-      @dtype ||= TorchModel.dtype(options)
-      @state.to(@device)
-      @state.eval
+      TorchModel.init_python
+      device ||= TorchModel.device(options)
+      dtype ||= TorchModel.dtype(options)
+      state.to(device)
+      state.eval
 
       list = [features] if features
 
@@ -66,9 +68,9 @@ class TorchModel < PythonModel
       batch_size ||= 1
 
       res = Misc.chunk(list, batch_size).inject(nil) do |acc,batch|
-        tensor = TorchModel.tensor(batch, @device, @dtype)
+        tensor = TorchModel.tensor(batch, device, dtype)
 
-        loss, chunk_res = @state.call(tensor)
+        loss, chunk_res = state.call(tensor)
         tensor.del
 
         chunk_res = loss if chunk_res.nil?

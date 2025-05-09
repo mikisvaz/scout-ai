@@ -5,42 +5,40 @@ class TestPythonModel < Test::Unit::TestCase
   def test_linear
     model = nil
 
-    TmpFile.with_dir do |dir|
+    TmpFile.with_path do |dir|
 
-      Misc.in_dir dir do
-        Open.write 'model.py', <<-EOF
+      dir['model.py'].write <<-EOF
 class TestModel:
   def __init__(self, delta):
     self.delta = delta
 
   def eval(self, x):
     return [e + self.delta for e in x]
-        EOF
+      EOF
 
-        model = PythonModel.new dir, 'TestModel', :model, delta: 1
+      model = PythonModel.new dir, 'TestModel', :model, delta: 1
 
-        model.eval do |sample,list=nil|
-          init unless @state
-          if list
-            @state.eval(list)
-          else
-            @state.eval([sample])[0]
-          end
+      model.eval do |sample,list=nil|
+        init unless state
+        if list
+          state.eval(list)
+        else
+          state.eval([sample])[0]
         end
-
-        assert_equal 2, model.eval(1)
-        assert_equal [4, 6], model.eval_list([3, 5])
-
-        model.save
-
-        model = ScoutModel.new dir
-
-        assert_equal 2, model.eval(1)
-
-        model = ScoutModel.new dir, delta: 2
-
-        assert_equal 3, model.eval(1)
       end
+
+      assert_equal 2, model.eval(1)
+      assert_equal [4, 6], model.eval_list([3, 5])
+
+      model.save
+
+      model = ScoutModel.new dir
+
+      assert_equal 2, model.eval(1)
+
+      model = ScoutModel.new dir, delta: 2
+
+      assert_equal 3, model.eval(1)
     end
   end
 end

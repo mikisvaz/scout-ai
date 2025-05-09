@@ -1,5 +1,6 @@
 class ScoutModel
   def state_file
+    return nil unless directory
     directory.state
   end
 
