@@ -41,6 +41,7 @@ module LLM
       messages = LLM.chat(question)
       options = options.merge LLM.options messages
       tools = LLM.tools messages
+      associations = LLM.associations messages
 
       client, url, key, model, log_errors, return_messages, format = IndiferentHash.process_options options,
         :client, :url, :key, :model, :log_errors, :return_messages, :format,
@@ -68,14 +69,26 @@ module LLM
 
       parameters = options.merge(model: model)
 
-      if tools.any?
-        parameters[:tools] = tools.values.collect{|a| a.last }
+      if tools.any? || associations.any?
+        parameters[:tools] = []
+        parameters[:tools] += tools.values.collect{|a| a.last } if tools
+        parameters[:tools] += associations.values.collect{|a| a.last } if associations
         if not block_given?
           block = Proc.new do |name,parameters|
             IndiferentHash.setup parameters
-            workflow = tools[name].first
-            jobname = parameters.delete :jobname
-            workflow.job(name, jobname, parameters).run
+            if tools[name]
+              workflow = tools[name].first
+              jobname = parameters.delete :jobname
+              workflow.job(name, jobname, parameters).run
+            else
+              kb = associations[name].first
+              entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
+              if reverse
+                kb.parents(name, entities)
+              else
+                kb.children(name, entities)
+              end
+            end
           end
         end
       end

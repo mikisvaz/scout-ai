@@ -4,11 +4,21 @@ require_relative 'tools'
 
 module LLM
   def self.messages(question, role = nil)
-    return question if Array === question
+    default_role = "user"
+
+    if Array === question
+      return question.collect do |q|
+        if String === q
+          {role: default_role, content: q}
+        else
+          q
+        end
+      end
+    end
+
     messages = []
     current_role = nil
     current_content = ""
-    default_role = "user"
     in_protected_block = false
     protected_block_type = nil
     protected_stack = []
@@ -91,7 +101,7 @@ module LLM
   def self.imports(messages, original = nil)
     messages.collect do |message|
       if message[:role] == 'import' || message[:role] == 'continue'
-        file = message[:content].strip
+        file = message[:content].to_s.strip
         path = Scout.chats[file]
         original = original.find if Path === original
         relative = File.join(File.dirname(original), file) if original
@@ -144,7 +154,7 @@ module LLM
               files([{role: 'file', content: file}])
             }
         else
-          new = LLM.tag :file, file, Open.read(target)
+          new = LLM.tag :file, Open.read(target), file
           {role: 'user', content: new}
         end
       else
@@ -245,8 +255,9 @@ module LLM
 
   def self.chat(file)
     if Array === file
-      messages = file
+      messages = self.messages file
       messages = self.indiferent messages
+      messages = self.imports messages, Path.caller_lib_dir
     elsif Open.exists?(file)
       messages = self.messages Open.read(file)
       messages = self.indiferent messages
@@ -272,7 +283,7 @@ module LLM
     chat.each do |info|
       if Hash === info
         role = info[:role].to_s
-        if %w(endpoint format).include? role.to_s
+        if %w(endpoint format model backend persist).include? role.to_s
           options[role] = info[:content]
           next
         end
@@ -311,15 +322,94 @@ module LLM
     tool_definitions
   end
 
+  def self.associations(messages)
+    tool_definitions = {}
+    kb = nil
+    new = messages.collect do |message|
+      if message[:role] == 'association'
+        name, path, *options = message[:content].strip.split(/\s+/)
+
+        kb ||= KnowledgeBase.new Scout.var.Agent.Chat.knowledge_base
+        kb.register name, Path.setup(path), IndiferentHash.parse_options(message[:content])
+
+        definition = LLM.association_tool_definition name
+        tool_definitions[name] = [kb, definition]
+        next
+      else
+        message
+      end
+    end.compact.flatten
+    messages.replace new
+    tool_definitions
+  end
+
   def self.print(chat)
     return chat if String  === chat
     chat.collect do |message|
       IndiferentHash.setup message
-      if message[:content]
-        message[:role].to_s + ":\n\n" + message[:content]
-      else
+      case message[:content]
+      when Hash, Array
+        message[:role].to_s + ":\n\n" + message[:content].to_json
+      when nil
         message[:role].to_s + ":\n\n" + message.to_json
+      else
+        message[:role].to_s + ":\n\n" + message[:content].to_s
       end
     end * "\n\n"
+  end
+end
+
+module Chat
+  extend Annotation
+
+  def message(role, content)
+    self.append({role: role.to_s, content: content})
+  end
+
+  def user(content)
+    message(:user, content)
+  end
+
+  def system(content)
+    message(:system, content)
+  end
+
+  def assistant(content)
+    message(:assistant, content)
+  end
+
+  def import(file)
+    message(:import, file)
+  end
+
+  def continue(file)
+    message(:continue, file)
+  end
+
+  def format(format)
+    message(:format, format)
+  end
+
+  def tool(*parts)
+    content = parts * "\n"
+    message(:tool, content)
+  end
+
+  def ask(...)
+    LLM.ask(LLM.chat(self), ...)
+  end
+
+  def tag(content, name=nil, tag=:file, role=:user)
+    self.message role, LLM.tag(tag, content, name)
+  end
+
+  def chat text
+    self.concat(LLM.chat text)
+  end
+
+  def json(...)
+    self.format :json
+    output = ask(...)
+    JSON.parse output
   end
 end

@@ -13,22 +13,24 @@ user: write a script that sorts files in a directory
     ppp LLM::OLlama.ask prompt, model: 'mistral', mode: 'chat'
   end
 
-  def test_embeddings
+  def test_tool_call_output
     Log.severity = 0
-    text =<<-EOF
-Some text
-    EOF
-    emb = LLM::OLlama.embed text, model: 'mistral'
-    assert(Float === emb.first)
-  end
+    prompt =<<-EOF
+function_call:
 
-  def test_embedding_array
-    Log.severity = 0
-    text =<<-EOF
-Some text
+{"type":"function","function":{"name":"Baking-bake_muffin_tray","arguments":null},"id":"Baking_bake_muffin_tray_Default"}
+
+function_call_output:
+
+{"tool_call_id":"Baking_bake_muffin_tray_Default","role":"tool","content":"Baking batter (Mixing base (Whisking eggs from share/pantry/eggs) with mixer (share/pantry/flour))"}
+
+user:
+
+How do you bake muffins, according to the tool I provided you. Don't
+tell me the recipe you already know, use the tool call output. Let me
+know if you didn't get it.
     EOF
-    emb = LLM::OLlama.embed [text], model: 'mistral'
-    assert(Float === emb.first.first)
+    ppp LLM::OLlama.ask prompt, model: 'mistral', mode: 'chat'
   end
 
   def test_tool
@@ -67,6 +69,24 @@ What is the weather in London. Should I take an umbrella?
     end
 
     ppp respose
+  end
+
+  def test_embeddings
+    Log.severity = 0
+    text =<<-EOF
+Some text
+    EOF
+    emb = LLM::OLlama.embed text, model: 'mistral'
+    assert(Float === emb.first)
+  end
+
+  def test_embedding_array
+    Log.severity = 0
+    text =<<-EOF
+Some text
+    EOF
+    emb = LLM::OLlama.embed [text], model: 'mistral'
+    assert(Float === emb.first.first)
   end
 end
 

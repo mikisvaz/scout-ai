@@ -3,7 +3,7 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 class TestMessages < Test::Unit::TestCase
 
-  def _test_short
+  def test_short
 
     question =<<-EOF
 Hi
@@ -12,7 +12,7 @@ Hi
     iii LLM.chat(question)
   end
 
-  def _test_inline
+  def test_inline
     question =<<-EOF
 system:
 
@@ -30,7 +30,7 @@ that continues here
     iii LLM.chat(question)
   end
 
-  def _test_messages
+  def test_messages
     question =<<-EOF
 system:
 
@@ -78,7 +78,7 @@ assistant:
     assert messages.collect{|i| i[:role] }.include?("import")
   end
 
-  def _test_chat_import
+  def test_chat_import
     file1 =<<-EOF
 system: You are an assistant
     EOF
@@ -96,7 +96,7 @@ user: say something
     end
   end
 
-  def _test_clear
+  def test_clear
     question =<<-EOF
 system:
 
@@ -134,15 +134,17 @@ How are muffins made
   end
 
 
-  def _test_task
+  def test_task
     question =<<-EOF
 system:
 
 you are a terse assistant that only write in short sentences
 
+user:
+
 task: Baking bake_muffin_tray blueberries=true title="This is a title" list=one,two,"and three"
 
-How are muffins made
+How are muffins made?
 
     EOF
 
@@ -152,7 +154,7 @@ How are muffins made
     end
   end
 
-  def _test_structure
+  def test_structure
     require 'scout/llm/ask'
     sss 0
     question =<<-EOF
@@ -173,14 +175,35 @@ What other movies have the protagonists of the original gost busters played on, 
 
   def test_tools
     require 'scout/llm/ask'
+
+    question =<<-EOF
+user:
+
+Use the provided tool to learn the instructions of baking a tray of muffins. Don't
+give me your own recipe, return the one provided by the tool
+
+tool: Baking bake_muffin_tray
+    EOF
+
+    TmpFile.with_file question do |file|
+      ppp LLM.ask file
+    end
+  end
+
+  def test_knowledge_base
+    require 'scout/llm/ask'
     sss 0
     question =<<-EOF
 system:
 
-Use the provided tool to learn the instructions of baking a tray of muffins
+Query the knowledge base of familiar relationships to answer the question
 
-tool: Baking bake_muffin_tray
+user:
 
+Who is Miki's brother in law?
+
+association: brothers #{datafile_test(:person).brothers} undirected=true
+association: marriages #{datafile_test(:person).marriages} undirected=true source="=>Alias" target="=>Alias"
     EOF
 
     TmpFile.with_file question do |file|

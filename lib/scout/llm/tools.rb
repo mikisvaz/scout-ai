@@ -107,6 +107,33 @@ module LLM
       }
     }]
   end
+
+  def self.association_tool_definition(name)
+    properties = {
+      entities: {
+        type: "array",
+        items: { type: :string },
+        description: "Source entities in the association, or target entities if 'reverse' it true."
+      },
+      reverse: {
+        type: "boolean",
+        description: "Look for targets instead of sources, defaults to 'false'."
+      }
+    }
+
+    {
+      type: "function",
+      function: {
+        name: name,
+        description: "Find associations for a list of entities. Returns a list in the format source~target.",
+        parameters: {
+          type: "object",
+          properties: properties,
+          required: ['entities']
+        }
+      }
+    }
+  end
   
   def self.run_tools(messages)
     messages.collect do |info|
@@ -137,7 +164,7 @@ module LLM
   end
 
   def self.call_tools(tool_calls, &block)
-    tool_calls.collect{|tool_call| 
+    tool_calls.collect{|tool_call|
       response_message = LLM.tool_response(tool_call, &block)
       [
         {role: "function_call", content: tool_call.to_json},
