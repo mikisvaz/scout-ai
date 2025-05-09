@@ -167,7 +167,7 @@ module LLM
             type: "function",
             function: {
               name: step.full_task_name.sub('#', '-'),
-              arguments: step.provided_inputs.to_json
+              arguments: step.provided_inputs
             },
             id: step.short_path.gsub('/','_'),
           }

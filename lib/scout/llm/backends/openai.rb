@@ -12,9 +12,9 @@ module LLM
     def self.process_input(messages)
       messages.collect do |message|
         if message[:role] == 'function_call'
-          {role: 'assistant', tool_calls: [JSON.parse(message[:content])]}
+          {role: 'assistant', tool_calls: [message[:content]]}
         elsif message[:role] == 'function_call_output'
-          JSON.parse(message[:content])
+          message[:content]
         else
           message
         end
@@ -29,13 +29,7 @@ module LLM
         response.dig("choices", 0, "message", "tool_calls")
 
       if tool_calls && tool_calls.any?
-          tool_calls.collect{|tool_call| 
-            response_message = LLM.tool_response(tool_call, &block)
-            [
-              {role: "function_call", content: tool_call.to_json},
-              {role: "function_call_output", content: response_message.to_json},
-            ]
-          }.flatten
+          LLM.call_tools tool_calls, &block
       else
         [message]
       end
@@ -88,12 +82,12 @@ module LLM
 
       Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
 
-      parameters[:messages] = self.process_input messages
+      parameters[:messages] = LLM.tools_to_openai messages
 
       response = self.process_response client.chat(parameters: parameters), &block
 
       res = if response.last[:role] == 'function_call_output' 
-              response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true))
+              response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: parameters[:tools]), &block)
             else
               response
             end

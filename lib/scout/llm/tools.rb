@@ -14,7 +14,7 @@ module LLM
               when nil
                 "success"
               else
-                function_response
+                function_response.to_json
               end
     content = content.to_s if Numeric === content
     {
@@ -124,4 +124,25 @@ module LLM
   end
 
 
+  def self.tools_to_openai(messages)
+    messages.collect do |message|
+      if message[:role] == 'function_call'
+        {role: 'assistant', tool_calls: [JSON.parse(message[:content])]}
+      elsif message[:role] == 'function_call_output'
+        JSON.parse(message[:content])
+      else
+        message
+      end
+    end.flatten
+  end
+
+  def self.call_tools(tool_calls, &block)
+    tool_calls.collect{|tool_call| 
+      response_message = LLM.tool_response(tool_call, &block)
+      [
+        {role: "function_call", content: tool_call.to_json},
+        {role: "function_call_output", content: response_message.to_json},
+      ]
+    }.flatten
+  end
 end
