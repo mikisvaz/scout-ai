@@ -16,8 +16,8 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
     chat.rb
 
     backends=backends{
-     ollama.rb
      openai.rb
+     ollama.rb
      openwebui.rb
      huggingface.rb
      relay.rb
@@ -47,7 +47,25 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
       introspection.rb
       load_and_save.rb
      }
+     huggingface.rb
+     huggingface=huggingface{
+      classification.rb
+      causal.rb
+     }
     }
+   }
+  }
+ }
+ python=python filter="*.py"{
+  scout_ai=scout_ai{
+   __init__.py
+   language_model.py
+   util.py
+   huggingface=huggingface{
+    data.py
+    eval.py
+    model.py
+    train.py
    }
   }
  }
@@ -57,9 +75,13 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
   }
   doc=doc{
    chat
+   model.analysis
+   model
   }
   develop=develop{
    chat
+   model
+   causalLM
   }
   refactor=refactor{
    chat
@@ -88,14 +110,6 @@ scout-ai=/$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *
   agent=agent{
    ask
    kb
-  }
- }
- python=python filter="*.py"{
-  scout_ai=scout_ai{
-   __init__.py
-   huggingface.py
-   language_model.py
-   util.py
   }
  }
 }
