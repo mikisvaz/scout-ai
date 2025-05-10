@@ -3,25 +3,29 @@
 require 'scout'
 require 'scout-ai'
 
-$0 = "scout #{$previous_commands.any? ? $previous_commands*" " + " " : "" }#{ File.basename(__FILE__) }" if $previous_commands
+$0 = "scout-ai #{$previous_commands.any? ? $previous_commands*" " + " " : "" }#{ File.basename(__FILE__) }" if $previous_commands
 
 options = SOPT.setup <<EOF
+Ask an LLM model
 
-Ask GPT
+$ #{$0} [<options>] [<question>]
 
-$ #{$0} [<options>] [question]
-
-Use STDIN to add context to the question
+Use STDIN to add context to the question. The context can be referenced using
+three dots '...'. The model will be prompted with the question, unless the
+inline option is used. If the chat option is used, the response will be added
+to the end of the file. If the file option is used the file contents will be
+prepended before the question.  With the template option, the file will be read
+as if it were the question, and the actual question will be placed under the
+characters '???', if they are present.
 
 -h--help Print this help
--l--log* Log level
 -t--template* Use a template
 -c--chat* Follow a conversation
 -i--inline* Ask inline questions about a file
+-f--file* Incorporate file at the start
 -m--model* Model to use
 -e--endpoint* Endpoint to use
 -b--backend* Backend to use
--f--file* Incorporate file at the start
 -d--dry_run Dry run, don't ask
 EOF
 if options[:help]
@@ -73,7 +77,6 @@ if chat
   Open.write(chat, conversation)
 elsif inline
 
-  iii :INLINE
   file = Open.read inline
 
   new_file = ""
