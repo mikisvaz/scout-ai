@@ -163,42 +163,6 @@ module LLM
     end.flatten
   end
 
-  def self.jobs(messages, original = nil)
-    messages.collect do |message|
-      if message[:role] == 'job' || message[:role] == 'inline_job'
-        file = message[:content].strip
-
-        step = Step.load file
-
-        if message[:role] == 'inline_job'
-          {role: 'file', content: step.path}
-        else
-          tool_call = {
-            type: "function",
-            function: {
-              name: step.full_task_name.sub('#', '-'),
-              arguments: step.provided_inputs
-            },
-            id: step.short_path.gsub('/','_'),
-          }
-
-          tool_output = {
-            tool_call_id: step.short_path.gsub('/','_'),
-            role: "tool",
-            content: step.path.read
-          }
-
-          [
-            {role: 'function_call', content: tool_call.to_json},
-            {role: 'function_call_output', content: tool_output.to_json},
-          ]
-        end
-      else
-        message
-      end
-    end.flatten
-  end
-
   def self.tasks(messages, original = nil)
     jobs =  []
     new = messages.collect do |message|
@@ -227,6 +191,46 @@ module LLM
     Workflow.produce(jobs)
 
     new
+  end
+
+  def self.jobs(messages, original = nil)
+    messages.collect do |message|
+      if message[:role] == 'job' || message[:role] == 'inline_job'
+        file = message[:content].strip
+
+        step = Step.load file
+
+        id = step.short_path[0..39]
+        id = id.gsub('/','-')
+
+
+        if message[:role] == 'inline_job'
+          {role: 'file', content: step.path}
+        else
+          tool_call = {
+            type: "function",
+            function: {
+              name: step.full_task_name.sub('#', '-'),
+              arguments: step.provided_inputs.to_json
+            },
+            id: id,
+          }
+
+          tool_output = {
+            tool_call_id: id,
+            role: "tool",
+            content: step.path.read
+          }
+
+          [
+            {role: 'function_call', content: tool_call.to_json},
+            {role: 'function_call_output', content: tool_output.to_json},
+          ]
+        end
+      else
+        message
+      end
+    end.flatten
   end
 
   def self.clear(messages)
@@ -303,6 +307,8 @@ module LLM
     new = messages.collect do |message|
       if message[:role] == 'tool'
         workflow_name, task_name, *inputs = message[:content].strip.split(/\s+/)
+        inputs = nil if inputs.empty?
+        inputs = [] if inputs == ['none'] || inputs == ['noinputs']
         if Open.remote? workflow_name
           require 'rbbt'
           require 'scout/offsite/ssh'
@@ -395,21 +401,75 @@ module Chat
     message(:tool, content)
   end
 
-  def ask(...)
-    LLM.ask(LLM.chat(self), ...)
+  def task(workflow, task_name, inputs = {})
+    input_str = IndiferentHash.print_options inputs
+    content = [workflow, task_name, input_str]*" "
+    message(:task, content)
+  end
+
+  def job(step)
+    message(:job, step.path)
+  end
+
+  def association(name, path, options = {})
+    options_str = IndiferentHash.print_options options
+    content = [name, path, options_str]*" "
+    message(:association, name)
   end
 
   def tag(content, name=nil, tag=:file, role=:user)
     self.message role, LLM.tag(tag, content, name)
   end
 
-  def chat text
-    self.concat(LLM.chat text)
+  def ask(...)
+    LLM.ask(LLM.chat(self), ...)
+  end
+
+  def chat(...)
+    self.push({role: :assistant, content: self.ask(...)})
   end
 
   def json(...)
     self.format :json
     output = ask(...)
-    JSON.parse output
+    obj = JSON.parse output
+    if (Hash === obj) and obj.keys == ['content']
+      obj['content']
+    else
+      obj
+    end
+  end
+
+  def print
+    LLM.print self
+  end
+
+  def write(path, force = true)
+    path = path.to_s if Symbol === path
+    if not (Open.exists?(path) || Path === path || Path.located?(path))
+      path = Rbbt.chats.find[path]
+    end
+    return if Open.exists?(path) && ! force
+    Open.write path, self.print
+  end
+
+  def branch
+    self.annotate self.dup
+  end
+
+  def option(name, value)
+    self.message name, value
+  end
+
+  def endpoint(value)
+    option :endpoint, value
+  end
+
+  def model(value)
+    option :model, value
+  end
+
+  def shed
+    self.annotate [self.last]
   end
 end

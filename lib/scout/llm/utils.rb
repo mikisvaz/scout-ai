@@ -1,6 +1,6 @@
 module LLM
 
-  def self.tag(tag, content, name)
+  def self.tag(tag, content, name = nil)
     if name
       <<-EOF.strip
 <#{tag} name="#{name}">
@@ -8,6 +8,11 @@ module LLM
 </#{tag}>
       EOF
     else
+      <<-EOF.strip
+<#{tag}>
+#{content}
+</#{tag}>
+      EOF
     end
   end
 
