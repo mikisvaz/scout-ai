@@ -31,7 +31,24 @@ module LLM
       stripped = line.strip
 
       # Detect protected blocks
-      if stripped.start_with?("[[")
+      if stripped.start_with?("```")
+        if in_protected_block
+          in_protected_block = false
+          protected_block_type = nil
+          current_content << "\n" << line unless line.strip.empty?
+        else
+          in_protected_block = true
+          protected_block_type = :square
+          current_content << "\n" << line unless line.strip.empty?
+        end
+        next
+      elsif stripped.end_with?("]]") && in_protected_block && protected_block_type == :square
+        in_protected_block = false
+        protected_block_type = nil
+        line = line.sub("]]", "")
+        current_content << "\n" << line unless line.strip.empty?
+        next
+      elsif stripped.start_with?("[[")
         in_protected_block = true
         protected_block_type = :square
         line = line.sub("[[", "")
@@ -110,18 +127,23 @@ module LLM
     messages
   end
 
-  def self.imports(messages, original = nil)
+  def self.imports(messages, original = nil, caller_lib_dir = Path.caller_lib_dir(nil, 'chats'))
     messages.collect do |message|
       if message[:role] == 'import' || message[:role] == 'continue'
         file = message[:content].to_s.strip
         path = Scout.chats[file]
         original = original.find if Path === original
-        relative = File.join(File.dirname(original), file) if original
+        if original
+          relative = File.join(File.dirname(original), file)
+          relative_lib = File.join(caller_lib_dir, file)
+        end
 
         new = if Open.exist?(file)
                 LLM.chat file
               elsif relative && Open.exist?(relative)
                 LLM.chat relative
+              elsif relative_lib && Open.exist?(relative_lib)
+                LLM.chat relative_lib
               elsif path.exists?
                 LLM.chat path
               else
@@ -139,22 +161,27 @@ module LLM
     end.flatten
   end
 
-  def self.files(messages, original = nil)
+  def self.files(messages, original = nil, caller_lib_dir = Path.caller_lib_dir(nil, 'chats'))
     messages.collect do |message|
       if message[:role] == 'file' || message[:role] == 'directory'
         file = message[:content].strip
-        path = Scout.root[file]
+        path = Scout.chats[file]
         original = original.find if Path === original
-        relative = File.join(File.dirname(original), file) if original
+        if original
+          relative = File.join(File.dirname(original), file)
+          relative_lib = File.join(caller_lib_dir, file)
+        end
 
         target = if Open.exist?(file)
                    file
                  elsif relative && Open.exist?(relative)
                    relative
+                 elsif relative_lib && Open.exist?(relative_lib)
+                   relative_lib
                  elsif path.exists?
                    path
                  else
-                   raise "Import not found: #{file}"
+                   raise "File not found: #{file}"
                  end
 
         if message[:role] == 'directory'
@@ -217,7 +244,7 @@ module LLM
 
 
         if message[:role] == 'inline_job'
-          {role: 'file', content: step.path}
+          {role: 'file', content: step.path.find}
         else
           tool_call = {
             type: "function",
@@ -270,25 +297,28 @@ module LLM
   end
 
   def self.chat(file)
+    original = (String === file and Open.exists?(file)) ? file : Path.setup($0.dup)
+    caller_lib_dir = Path.caller_lib_dir(nil, 'chats')
+
     if Array === file
       messages = self.messages file
       messages = self.indiferent messages
-      messages = self.imports messages, Path.caller_lib_dir
+      messages = self.imports messages, original, caller_lib_dir
     elsif Open.exists?(file)
       messages = self.messages Open.read(file)
       messages = self.indiferent messages
-      messages = self.imports messages, file
+      messages = self.imports messages, original, caller_lib_dir
     else
       messages = self.messages file
       messages = self.indiferent messages
-      messages = self.imports messages, nil
+      messages = self.imports messages, original, caller_lib_dir
     end
 
     messages = self.clear messages
     messages = self.clean messages
     messages = self.tasks messages
     messages = self.jobs messages
-    messages = self.files messages
+    messages = self.files messages, original, caller_lib_dir
 
     messages
   end
@@ -400,6 +430,14 @@ module Chat
     message(:import, file)
   end
 
+  def file(file)
+    message(:file, file)
+  end
+
+  def directory(directory)
+    message(:directory, directory)
+  end
+
   def continue(file)
     message(:continue, file)
   end
@@ -417,6 +455,12 @@ module Chat
     input_str = IndiferentHash.print_options inputs
     content = [workflow, task_name, input_str]*" "
     message(:task, content)
+  end
+
+  def inline_task(workflow, task_name, inputs = {})
+    input_str = IndiferentHash.print_options inputs
+    content = [workflow, task_name, input_str]*" "
+    message(:inline_task, content)
   end
 
   def job(step)
@@ -453,7 +497,7 @@ module Chat
   end
 
   def print
-    LLM.print self
+    LLM.print LLM.chat(self)
   end
 
   def write(path, force = true)

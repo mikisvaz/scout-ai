@@ -18,8 +18,6 @@ module LLM
     end
 
     Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist) do
-      Log.low "Asking #{endpoint}: "  + LLM.print(question)
-
       backend = IndiferentHash.process_options options, :backend
       backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :openai
 

@@ -82,7 +82,7 @@ elsif inline
   new_file = ""
   while true
     pre, question, post = 
-      file.partition(/^\s*#\s*ask:(?:.*?)(?=^\s*[^\s#])/sm)
+      file.partition(/^\s*#\s*ask:(?:.*?)(?=^\s*[^\s#])/smu)
 
       break if post.empty?
 

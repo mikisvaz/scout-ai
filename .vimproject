@@ -27,6 +27,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     rag.rb
 
     agent.rb
+    agent=agent{
+     chat.rb
+    }
    }
    model=model{
     util=util{
@@ -67,6 +70,12 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   }
  }
  chats=chats{
+  test=test{
+   imports.rb
+  }
+  agent=agent{
+   chat
+  }
   system=system{
    scout-ai
   }

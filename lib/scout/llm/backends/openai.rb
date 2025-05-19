@@ -23,13 +23,14 @@ module LLM
 
     def self.process_response(response, &block)
       Log.debug "Respose: #{Log.fingerprint response}"
+      raise Exception, response["error"] if response["error"]
 
       message = response.dig("choices", 0, "message")
       tool_calls = response.dig("choices", 0, "tool_calls") ||
         response.dig("choices", 0, "message", "tool_calls")
 
       if tool_calls && tool_calls.any?
-          LLM.call_tools tool_calls, &block
+        LLM.call_tools tool_calls, &block
       else
         [message]
       end
@@ -93,8 +94,8 @@ module LLM
         end
       end
 
-      Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
-
+      Log.low "Calling openai #{url}: #{Log.fingerprint parameters}}"
+      Log.debug LLM.print messages
       parameters[:messages] = LLM.tools_to_openai messages
 
       response = self.process_response client.chat(parameters: parameters), &block
