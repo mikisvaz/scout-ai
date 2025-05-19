@@ -2,13 +2,12 @@ require_relative 'ask'
 
 module LLM
   class Agent
-    attr_accessor :system, :workflow, :knowledge_base
-    def initialize(system = nil, workflow: nil, knowledge_base: nil, model: nil, **kwargs)
-      @system = system
+    attr_accessor :workflow, :knowledge_base, :start_chat
+    def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
       @workflow = workflow
       @knowledge_base = knowledge_base
-      @model = model
       @other_options = kwargs
+      @start_chat = start_chat
     end
 
     def format_message(message, prefix = "user")
@@ -76,3 +75,4 @@ You have access to the following databases associating entities:
     end
   end
 end
+require_relative 'agent/chat'
