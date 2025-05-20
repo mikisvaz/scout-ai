@@ -1,5 +1,26 @@
 scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.txt *.conf" {
  Rakefile
+ chats=chats{
+  system=system{
+   scout-ai
+  }
+  doc=doc{
+   chat
+   model.analysis
+   model
+  }
+  develop=develop{
+   chat
+   model
+   causalLM
+  }
+  refactor=refactor{
+   chat
+  }
+  help=help{
+   tools
+  }
+ }
  bin=bin filter="*"{
   scout-ai
  }
@@ -14,6 +35,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
     backends=backends{
      openai.rb
+     responses.rb
      ollama.rb
      openwebui.rb
      huggingface.rb
@@ -27,9 +49,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     rag.rb
 
     agent.rb
-    agent=agent{
-     chat.rb
-    }
    }
    model=model{
     util=util{
@@ -67,30 +86,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     model.py
     train.py
    }
-  }
- }
- chats=chats{
-  test=test{
-   imports.rb
-  }
-  agent=agent{
-   chat
-  }
-  system=system{
-   scout-ai
-  }
-  doc=doc{
-   chat
-   model.analysis
-   model
-  }
-  develop=develop{
-   chat
-   model
-   causalLM
-  }
-  refactor=refactor{
-   chat
   }
  }
 

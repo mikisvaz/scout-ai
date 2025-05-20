@@ -18,7 +18,7 @@ module LLM
               end
     content = content.to_s if Numeric === content
     {
-      tool_call_id: tool_call_id,
+      id: tool_call_id,
       role: "tool",
       content: content
     }
@@ -154,7 +154,9 @@ module LLM
   def self.tools_to_openai(messages)
     messages.collect do |message|
       if message[:role] == 'function_call'
-        {role: 'assistant', tool_calls: [JSON.parse(message[:content])]}
+        tool_call = JSON.parse(message[:content])
+        tool_call['function']['arguments'] = (tool_call['function']['arguments'] || {}).to_json 
+        {role: 'assistant', tool_calls: [tool_call]}
       elsif message[:role] == 'function_call_output'
         JSON.parse(message[:content])
       else
