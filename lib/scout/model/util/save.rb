@@ -19,6 +19,7 @@ class ScoutModel
   end
 
   def load_ruby_code(file)
+    Log.debug "Loading ruby file #{file}"
     code = Open.read(file)
     code.sub!(/.*(\sdo\b|{)/, 'Proc.new\1')
     instance_eval code, file

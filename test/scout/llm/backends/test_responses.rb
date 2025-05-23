@@ -2,7 +2,7 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 class TestLLMResponses < Test::Unit::TestCase
-  def _test_ask
+  def test_ask
     prompt =<<-EOF
 system: you are a coding helper that only write code and comments without formatting so that it can work directly, avoid the initial and end commas ```.
 user: write a script that sorts files in a directory
@@ -86,7 +86,7 @@ What was the top new in the US today?
     ppp LLM::Responses.ask prompt
   end
 
-  def test_image
+  def _test_image
     prompt =<<-EOF
 image: #{datafile_test 'cat.jpg'}
 

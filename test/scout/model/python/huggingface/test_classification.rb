@@ -11,7 +11,7 @@ class TestSequenceClassification < Test::Unit::TestCase
   end
 
   def test_train_sequence_classification
-    model = HuggingfaceModel.new 'SequenceClassification', 'bert-base-uncased', nil,
+    model = SequenceClassificationModel.new 'bert-base-uncased', nil,
       class_labels: %w(Bad Good)
 
     model.init

@@ -216,4 +216,44 @@ module LLM
     end
 
   end
+
+  def self.image(question, options = {}, &block)
+    original_options = options.dup
+
+    messages = LLM.chat(question)
+    options = options.merge LLM.options messages
+    tools = LLM.tools messages
+    associations = LLM.associations messages
+
+    client, url, key, model, log_errors, return_messages, format = IndiferentHash.process_options options,
+      :client, :url, :key, :model, :log_errors, :return_messages, :format,
+      log_errors: true
+
+    if client.nil?
+      url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
+      key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :openai, env: 'OPENAI_KEY')
+      client = LLM::OpenAI.client url, key, log_errors
+    end
+
+    if model.nil?
+      url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
+      model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-image-1")
+    end
+
+    messages = self.process_input messages
+    input = [] 
+    messages.each do |message|
+      parameters[:tools] ||= []
+      if message[:role].to_s == 'tool'
+        parameters[:tools] << message[:content]
+      else
+        input << message
+      end
+    end
+    parameters[:prompt] = LLM.print(input) 
+
+    response = client.images.generate(parameters: parameters)
+
+    response[0]['b64_json']
+  end
 end

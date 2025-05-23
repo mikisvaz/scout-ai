@@ -15,5 +15,19 @@ class TestClass < Test::Unit::TestCase
       {role: :user, content: " 1 + 2 ="}
     ])
   end
+
+  def test_eval_train
+    #model = CausalModel.new 'BSC-LT/salamandra-2b-instruct'
+    model = CausalModel.new 'mistralai/Mistral-7B-Instruct-v0.3'
+
+    model.init
+
+    net, tok = model.state
+
+    iii model.eval([
+      {role: :system, content: "You are a calculator, just reply with the answer"},
+      {role: :user, content: " 1 + 2 ="}
+    ])
+  end
 end
 

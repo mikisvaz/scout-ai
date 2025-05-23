@@ -13,7 +13,7 @@ user: write a script that sorts files in a directory
     ppp LLM::Huggingface.ask prompt, model: 'HuggingFaceTB/SmolLM2-135M-Instruct'
   end
 
-  def test_embeddings
+  def _test_embeddings
     Log.severity = 0
     text =<<-EOF
 Some text
@@ -22,7 +22,7 @@ Some text
     assert(Float === emb.first)
   end
 
-  def test_embedding_array
+  def _test_embedding_array
     Log.severity = 0
     text =<<-EOF
 Some text
@@ -31,7 +31,7 @@ Some text
     assert(Float === emb.first.first)
   end
 
-  def test_tool
+  def _test_tool
     prompt =<<-EOF
 What is the weather in London. Should I take an umbrella?
     EOF

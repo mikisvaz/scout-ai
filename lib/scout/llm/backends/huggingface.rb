@@ -1,17 +1,18 @@
 require_relative '../parse'
 require_relative '../tools'
+require_relative '../chat'
 
 module LLM
   module Huggingface
 
     def self.model(model_options)
-      require 'rbbt-util'
-      require 'rbbt/vector/model/huggingface'
+      require 'scout/model/python/huggingface'
+      require 'scout/model/python/huggingface/causal'
 
       model, task, checkpoint, dir = IndiferentHash.process_options model_options, :model, :task, :checkpoint, :dir
       model ||= Scout::Config.get(:model, :huggingface, env: 'HUGGINGFACE_MODEL,HF_MODEL')
 
-      HuggingfaceModel.new task, model, dir, model_options
+      CausalModel.new model, dir, model_options
     end
 
     def self.ask(question, options = {}, &block)
@@ -36,23 +37,7 @@ module LLM
       parameters = options.merge(messages: messages)
       Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
 
-      response = model.eval(messages)
-      message = response[-1]
-      while message["role"] == "assistant" && message["tool_calls"]
-        messages << message
-
-        message["tool_calls"].each do |tool_call|
-          response_message = LLM.tool_response(tool_call, &block)
-          messages << response_message
-        end
-
-        parameters[:messages] = messages
-        Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
-        response = model.eval(parameters)
-        message = response[-1]
-      end
-
-      message["content"]
+      model.eval(messages)
     end
 
     def self.embed(text, options = {})

@@ -33,6 +33,7 @@ class ScoutModel
     else
       @state = execute @init
       load_state
+      @state
     end
   end
 
@@ -172,7 +173,7 @@ class ScoutModel
         list.each do |sample|
           @labels << labels[sample]
         end
-      else
+      elsif labels
         @labels.concat labels
       end
     end

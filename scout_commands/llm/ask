@@ -46,11 +46,17 @@ question = ARGV * " "
 if template
   if Open.exists?(template)
     template_question = Open.read(template)
-  else
+  elsif Scout.questions[template].exists?
     template_question = Scout.questions[template].read
+  elsif Scout.chats.system[template].exists?
+    template_question = Scout.chats.system[template].read
+  elsif Scout.chats[template].exists?
+    template_question = Scout.chats[template].read
   end
   if template_question.include?('???')
     question = template_question.sub('???', question)
+  elsif not question.empty?
+    question = template_question + "\nuser: #{question}"
   else
     question = template_question
   end

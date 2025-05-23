@@ -3,53 +3,63 @@ require_relative 'torch'
 class HuggingfaceModel < TorchModel
 
   def fix_options
+    @options[:training_options] = @options.delete(:training_args) if @options.include?(:training_args)
+    @options[:training_options] = @options.delete(:training_kwargs) if @options.include?(:training_kwargs)
+    training_args = IndiferentHash.pull_keys(@options, :training) || {}
+
     @options[:tokenizer_options] = @options.delete(:tokenizer_args) if @options.include?(:tokenizer_args)
     @options[:tokenizer_options] = @options.delete(:tokenizer_kwargs) if @options.include?(:tokenizer_kwargs)
     tokenizer_args = IndiferentHash.pull_keys(@options, :tokenizer) || {}
+
+    @options[:training_args] = training_args
     @options[:tokenizer_args] = tokenizer_args
   end
 
   def initialize(task=nil, checkpoint=nil, dir = nil, options = {})
     
     super(dir, nil, nil, options)
+    
+    fix_options
 
     options[:checkpoint] = checkpoint
     options[:task] = task
 
     init do 
       TorchModel.init_python
-      checkpoint = state_file && File.directory?(state_file) ? state_file : options[:checkpoint]
+      checkpoint = state_file && File.directory?(state_file) ? state_file : self.options[:checkpoint]
 
       model = ScoutPython.call_method("scout_ai.huggingface.model", :load_model, 
-                                     options[:task], checkpoint, 
+                                      self.options[:task], checkpoint, 
                                      **(IndiferentHash.setup(
-                                       options.except(
+                                       self.options.except(
                                          :training_args, :tokenizer_args, 
                                          :task, :checkpoint, :class_labels, 
                                          :model_options, :return_logits
                                        ))))
 
-      tokenizer_checkpoint = options[:tokenizer_args][:checkpoint] || checkpoint
+      tokenizer_checkpoint = self.options[:tokenizer_args][:checkpoint] || checkpoint
 
       tokenizer = ScoutPython.call_method("scout_ai.huggingface.model", :load_tokenizer, 
                                          tokenizer_checkpoint, 
-                                         **(IndiferentHash.setup(options[:tokenizer_args])))
+                                         **(IndiferentHash.setup(self.options[:tokenizer_args])))
 
       [model, tokenizer]
     end
 
     load_state do |state_file|
+      model, tokenizer = @state
       TorchModel.init_python
       if state_file && Open.directory?(state_file)
-        state.load_pretrained(state_file)
-        tokenizer.load_pretrained(state_file)
+        model.from_pretrained(state_file)
+        tokenizer.from_pretrained(state_file)
       end
     end
 
     save_state do |state_file,state|
+      model, tokenizer = @state
       TorchModel.init_python
       if state_file
-        state.save_pretrained(state_file)
+        model.save_pretrained(state_file)
         tokenizer.save_pretrained(state_file)
       end
     end

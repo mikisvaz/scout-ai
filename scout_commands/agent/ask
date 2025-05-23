@@ -40,56 +40,149 @@ file = options.delete(:file)
 
 agent, *question_parts = ARGV
 
-agent_dir = Scout.var.Agent[agent]
-workflow_tasks = options.delete(:workflow_tasks)
+agent_path = Scout.var.Agent[agent].find_with_extension(:rb)
 
-workflow = begin
-             if agent_dir.workflow.set_extension('rb').exists?
-               Workflow.require_workflow agent_dir.workflow.set_extension('rb').find
-             else
-               Misc.with_env "SCOUT_WORKFLOW_AUTOINSTALL", false do
-                 Workflow.require_workflow agent
-               end
-             end
-           rescue
-           end
+agent = LLM::Agent.load agent_path
 
-if workflow_tasks and workflow
-  workflow.clear_exports
-  workflow.export_asynchronous *workflow_tasks.split(',')
+#workflow_tasks = options.delete(:workflow_tasks)
+#
+#workflow = begin
+#             if agent_dir.workflow.set_extension('rb').exists?
+#               Workflow.require_workflow agent_dir.workflow.set_extension('rb').find
+#             else
+#               Misc.with_env "SCOUT_WORKFLOW_AUTOINSTALL", false do
+#                 Workflow.require_workflow agent
+#               end
+#             end
+#           rescue
+#           end
+#
+#if workflow_tasks and workflow
+#  workflow.clear_exports
+#  workflow.export_asynchronous *workflow_tasks.split(',')
+#end
+#
+#knowledge_base = KnowledgeBase.load(agent_dir.knowledge_base) if agent_dir.knowledge_base.exists?
+#knowledge_base ||= begin workflow.knowledge_base rescue nil end || KnowledgeBase.new(agent_dir.knowledge_base)
+#
+#agent = LLM::Agent.new **options.merge(workflow: workflow, knowledge_base: knowledge_base)
+
+#question = question_parts * " " 
+#
+#if template = options.delete(:template)
+#  if Open.exists?(template)
+#    template_question = Open.read(template)
+#  else
+#    template_question = Scout.questions[template].read
+#  end
+#  if template_question.include?('???')
+#    question = template_question.sub('???', question)
+#  else
+#    question = template_question
+#  end
+#end
+#
+#if question.include?('...')
+#  context = file ? Open.read(file) : STDIN.read 
+#  question = question.sub('...', context)
+#end
+#
+#if chat
+#  conversation = Open.exist?(chat)? Open.read(chat) : "" 
+#  question = question.empty? ? conversation : conversation + "\nuser:\n" +  question
+#  new = agent.ask(question, options)
+#  conversation = question + "\nassistant:\n" + new
+#  Open.write(chat, conversation)
+#else
+#  puts agent.ask(question, options)
+#end
+
+file, chat, inline, template, dry_run = IndiferentHash.process_options options, :file, :chat, :inline, :template, :dry_run
+
+agent, question = ARGV * " "
+
+agent_name ||= 'default'
+agent_file = Scout.chats[agent_name]
+
+agent_file = agent_file.find_with_extension('rb')
+
+if agent_file.exists?
+  if agent_file.directory?
+    agent = load agent_file.agent.find_with_extension('rb')
+  else
+    agent = load agent_file
+  end
+else
+  raise ParameterException agent_file
 end
 
-knowledge_base = KnowledgeBase.load(agent_dir.knowledge_base) if agent_dir.knowledge_base.exists?
-knowledge_base ||= begin workflow.knowledge_base rescue nil end || KnowledgeBase.new(agent_dir.knowledge_base)
-
-agent = LLM::Agent.new **options.merge(workflow: workflow, knowledge_base: knowledge_base)
-
-question = question_parts * " " 
-
-if template = options.delete(:template)
+if template
   if Open.exists?(template)
     template_question = Open.read(template)
-  else
+  elsif Scout.questions[template].exists?
     template_question = Scout.questions[template].read
+  elsif Scout.chats.system[template].exists?
+    template_question = Scout.chats.system[template].read
+  elsif Scout.chats[template].exists?
+    template_question = Scout.chats[template].read
   end
   if template_question.include?('???')
     question = template_question.sub('???', question)
+  elsif not question.empty?
+    question = template_question + "\nuser: #{question}"
   else
     question = template_question
   end
 end
 
 if question.include?('...')
-  context = file ? Open.read(file) : STDIN.read 
+  context = file ? Open.read(file) : STDIN.read
   question = question.sub('...', context)
+elsif file
+  question = "<file basename=#{File.basename file}>[[[\n" + Open.read(file) + "\n]]]</file>"
 end
 
 if chat
-  conversation = Open.exist?(chat)? Open.read(chat) : "" 
-  question = question.empty? ? conversation : conversation + "\nuser:\n" +  question
-  new = LLM.ask(question, options)
-  conversation = question + "\nassistant:\n" + new
+  conversation = Open.exist?(chat)? LLM.chat(chat) : [] 
+  convo_options = LLM.options conversation
+  conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
+
+  if dry_run
+    ppp LLM.print conversation
+    exit 0
+  end
+  new = agent.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
+  conversation = Open.read(chat) + LLM.print(new)
   Open.write(chat, conversation)
+elsif inline
+
+  file = Open.read inline
+
+  new_file = ""
+  while true
+    pre, question, post = 
+      file.partition(/^\s*#\s*ask:(?:.*?)(?=^\s*[^\s#])/smu)
+
+      break if post.empty?
+
+    new_file << pre
+    new_file << question
+    clean_question = question.gsub('#', '').gsub(/\s+/,' ').sub(/.*ask:\s*/,'').strip
+    chat = [
+      {role: :system, content: "Write a succint reply with no commentary and no formatting."}, 
+      {role: :user, content: "Find the following question as a comment in the file give a response to be placed inline: #{question}"},
+      LLM.tag('file', file, inline)
+    ]
+    response = LLM.ask(LLM.chat(chat))
+    new_file << <<-EOF
+# Response start
+#{response}
+# Response end
+    EOF
+    file = post
+  end
+  new_file << file
+  Open.write(inline, new_file)
 else
-  puts LLM.ask(question, options)
+  puts agent.ask(question, options)
 end

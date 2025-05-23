@@ -1,5 +1,11 @@
 scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.txt *.conf" {
  Rakefile
+ bin=bin filter="*"{
+  scout-ai
+ }
+ agents=agents{
+  analyst.rb
+ }
  chats=chats{
   system=system{
    scout-ai
@@ -10,19 +16,32 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    model
   }
   develop=develop{
+   training=training{
+    intro
+    basics
+    data=data{
+     main
+     next_token
+    }
+    data.tmp
+    python
+   }
    chat
    model
    causalLM
+   rf
   }
   refactor=refactor{
    chat
   }
   help=help{
    tools
+   from_pretrained
+   fine-tunning
   }
- }
- bin=bin filter="*"{
-  scout-ai
+  test=test{
+   rf.rb
+  }
  }
  lib=lib {
   scout-ai.rb
@@ -70,12 +89,15 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      huggingface=huggingface{
       classification.rb
       causal.rb
+      causal=causal{
+       next_token.rb
+      }
      }
     }
    }
   }
  }
- python=python filter="*.py"{
+ python=python filter="*"{
   scout_ai=scout_ai{
    __init__.py
    language_model.py
@@ -84,7 +106,11 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     data.py
     eval.py
     model.py
-    train.py
+    train=train{
+     __init__.py
+     next_token.py
+    }
+    rlhf.py
    }
   }
  }

@@ -25,7 +25,7 @@ class SequenceClassificationModel < HuggingfaceModel
 
       list ? res : res[0]
     end
-x,
+
     train do |texts,labels| 
       model, tokenizer = @state
       

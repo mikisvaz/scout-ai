@@ -15,25 +15,15 @@ class CausalModel < HuggingfaceModel
       )
     end
 
-    train do |texts,labels| 
+    train do |pairs,labels|
+      # data: array of [response, reward] or [prompt, response, reward]
       model, tokenizer = @state
 
-      if directory
-        tsv_file = File.join(directory, 'dataset.tsv')
-        checkpoint_dir = File.join(directory, 'checkpoints')
-      else
-        tmpdir = TmpFile.tmp_file
-        Open.mkdir tmpdir
-        tsv_file = File.join(tmpdir, 'dataset.tsv')
-        checkpoint_dir = File.join(tmpdir, 'checkpoints')
-      end
-
-      training_args_obj = ScoutPython.call_method("scout_ai.huggingface.train", :training_args, checkpoint_dir, options[:training_args])
-      dataset_file = HuggingfaceModel.text_dataset(tsv_file, texts, labels, options[:class_labels])
-
-      ScoutPython.call_method("scout_ai.huggingface.train", :train_model, model, tokenizer, training_args_obj, dataset_file, options[:class_weights])
-
-      Open.rm_rf tmpdir if tmpdir
+      ScoutPython.call_method(
+        "scout_ai.huggingface.rlhf", :train_rlhf, 
+        self.state_file, tokenizer, pairs, labels, options[:rlhf_config]
+      )
+      load_state
     end
   end
 end

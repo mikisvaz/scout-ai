@@ -1,6 +1,6 @@
 from transformers import TrainingArguments, Trainer
 from typing import Any
-from .data import json_dataset, tsv_dataset, tokenize_dataset
+from ..data import json_dataset, tsv_dataset, tokenize_dataset
 
 def training_args(*args, **kwargs) -> TrainingArguments:
     return TrainingArguments(*args, **kwargs)

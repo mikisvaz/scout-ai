@@ -4,6 +4,7 @@ require_relative 'backends/ollama'
 require_relative 'backends/openwebui'
 require_relative 'backends/bedrock'
 require_relative 'backends/relay'
+require_relative 'backends/responses'
 
 module LLM
   def self.ask(question, options = {}, &block)
@@ -24,6 +25,8 @@ module LLM
       case backend
       when :openai, "openai"
         LLM::OpenAI.ask(messages, options, &block)
+      when :responses, "responses"
+        LLM::Responses.ask(messages, options, &block)
       when :ollama, "ollama"
         LLM::OLlama.ask(messages, options, &block)
       when :openwebui, "openwebui"
