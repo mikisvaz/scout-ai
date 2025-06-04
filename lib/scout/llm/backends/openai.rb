@@ -96,6 +96,7 @@ module LLM
 
       Log.low "Calling openai #{url}: #{Log.fingerprint parameters}}"
       Log.debug LLM.print messages
+
       parameters[:messages] = LLM.tools_to_openai messages
 
       response = self.process_response client.chat(parameters: parameters), &block

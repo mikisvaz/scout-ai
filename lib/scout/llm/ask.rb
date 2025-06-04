@@ -9,7 +9,7 @@ require_relative 'backends/responses'
 module LLM
   def self.ask(question, options = {}, &block)
     messages = LLM.chat(question)
-    options = options.merge LLM.options messages
+    options = IndiferentHash.add_defaults LLM.options(messages), options
 
     endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
 

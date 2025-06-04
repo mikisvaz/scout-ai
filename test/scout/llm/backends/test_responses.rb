@@ -11,16 +11,16 @@ user: write a script that sorts files in a directory
     ppp LLM::Responses.ask prompt, model: 'gpt-4.1-nano'
   end
 
-  def _test_embeddings
+  def __test_embeddings
     Log.severity = 0
     text =<<-EOF
 Some text
     EOF
-    emb = LLM::OpenAI.embed text, log_errors: true
+    emb = LLM::Responses.embed text, log_errors: true
     assert(Float === emb.first)
   end
 
-  def _test_tool_call_output
+  def test_tool_call_output_weather
     Log.severity = 0
     prompt =<<-EOF
 function_call:
@@ -33,12 +33,12 @@ function_call_output:
 
 user:
 
-should i take an umbrella? 
+should i take an umbrella?
     EOF
     ppp LLM::Responses.ask prompt, model: 'gpt-4.1-nano'
   end
 
-  def _test_tool
+  def test_tool
     prompt =<<-EOF
 user:
 What is the weather in London. Should I take my umbrella?
@@ -75,7 +75,7 @@ What is the weather in London. Should I take my umbrella?
     ppp respose
   end
 
-  def _test_news
+  def test_news
     prompt =<<-EOF
 websearch: true
 
@@ -86,7 +86,7 @@ What was the top new in the US today?
     ppp LLM::Responses.ask prompt
   end
 
-  def _test_image
+  def test_image
     prompt =<<-EOF
 image: #{datafile_test 'cat.jpg'}
 
@@ -98,19 +98,7 @@ What animal is represented in the image?
     ppp LLM::Responses.ask prompt
   end
 
-  def _test_image
-    prompt =<<-EOF
-image: #{datafile_test 'cat.jpg'}
-
-user:
-
-What animal is represented in the image?
-    EOF
-    sss 0
-    ppp LLM::Responses.ask prompt
-  end
-
-  def _test_json_output
+  def test_json_output
     prompt =<<-EOF
 system:
 
@@ -121,7 +109,7 @@ user:
 What other movies have the protagonists of the original gost busters played on, just the top.
     EOF
     sss 0
-    ppp LLM::OpenAI.ask prompt, format: :json
+    ppp LLM::Responses.ask prompt, format: :json
   end
 end
 

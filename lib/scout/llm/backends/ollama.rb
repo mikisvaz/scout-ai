@@ -92,7 +92,8 @@ module LLM
 
       Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
 
-      parameters[:messages] = LLM.tools_to_openai messages
+      parameters[:messages] = LLM.tools_to_ollama messages
+
       parameters[:stream] = stream
 
       response = self.process_response client.chat(parameters), &block

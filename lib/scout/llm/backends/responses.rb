@@ -148,11 +148,24 @@ module LLM
         model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-4.1")
       end
 
-      case format.to_sym
-      when :json, :json_object
-        options[:response_format] = {type: 'json_object'}
-      else
-        options[:response_format] = {type: format}
+      case format
+      when :json, :json_object, "json", "json_object"
+        options['text'] = {format: {type: 'json_object'}}
+      when String, Symbol
+        options['text'] = {format: {type: format}}
+      when Hash
+        if format.include?('format')
+          options['text'] = format
+        elsif format['type'] == 'json_schema'
+          options['text'] = {format: format}
+        else
+          options['text'] = {format: {name: "response_schema",
+                                      type: "json_schema",
+                                      additionalProperties: false,
+                                      required: format['properties'].keys,
+                                      schema: format,
+          }}
+        end
       end if format
 
       parameters = options.merge(model: model)
@@ -161,8 +174,8 @@ module LLM
         parameters[:tools] ||= []
         parameters[:tools] += tools.values.collect{|a| a.last } if tools
         parameters[:tools] += associations.values.collect{|a| a.last } if associations
-        parameters[:tools] = parameters[:tools].collect{|tool| 
-          function = tool.delete :function; 
+        parameters[:tools] = parameters[:tools].collect{|tool|
+          function = tool.delete :function;
           tool.merge function
         }
         if not block_given?
@@ -188,7 +201,7 @@ module LLM
       Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
 
       messages = self.process_input messages
-      input = [] 
+      input = []
       messages.each do |message|
         parameters[:tools] ||= []
         if message[:role].to_s == 'tool'
@@ -197,12 +210,12 @@ module LLM
           input << message
         end
       end
-      parameters[:input] = input 
+      parameters[:input] = input
 
       response = client.responses.create(parameters: parameters)
       response = self.process_response response, &block
 
-      res = if response.last[:role] == 'function_call_output' 
+      res = if response.last[:role] == 'function_call_output'
               response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: parameters[:tools]), &block)
             else
               response

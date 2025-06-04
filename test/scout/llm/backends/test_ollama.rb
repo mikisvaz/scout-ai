@@ -13,16 +13,16 @@ user: write a script that sorts files in a directory
     ppp LLM::OLlama.ask prompt, model: 'mistral', mode: 'chat'
   end
 
-  def _test_tool_call_output
+  def test_tool_call_output
     Log.severity = 0
     prompt =<<-EOF
 function_call:
 
-{"type":"function","function":{"name":"Baking-bake_muffin_tray","arguments":null},"id":"Baking_bake_muffin_tray_Default"}
+{"type":"function","function":{"name":"Baking-bake_muffin_tray","arguments":{}},"id":"Baking_bake_muffin_tray_Default"}
 
 function_call_output:
 
-{"tool_call_id":"Baking_bake_muffin_tray_Default","role":"tool","content":"Baking batter (Mixing base (Whisking eggs from share/pantry/eggs) with mixer (share/pantry/flour))"}
+{"id":"Baking_bake_muffin_tray_Default","content":"Baking batter (Mixing base (Whisking eggs from share/pantry/eggs) with mixer (share/pantry/flour))"}
 
 user:
 
@@ -33,7 +33,25 @@ know if you didn't get it.
     ppp LLM::OLlama.ask prompt, model: 'mistral', mode: 'chat'
   end
 
-  def _test_tool
+  def test_tool_call_output_weather
+    Log.severity = 0
+    prompt =<<-EOF
+function_call:
+
+{"name":"get_current_temperature", "arguments":{"location":"London","unit":"Celsius"},"id":"tNTnsQq2s6jGh0npOh43AwDD"}
+
+function_call_output:
+
+{"id":"tNTnsQq2s6jGh0npOh43AwDD", "content":"It's 15 degrees and raining."}
+
+user:
+
+should i take an umbrella?
+    EOF
+    ppp LLM::OLlama.ask prompt, model: 'mistral'
+  end
+
+  def test_tool
     prompt =<<-EOF
 What is the weather in London. Should I take an umbrella?
     EOF
@@ -71,7 +89,7 @@ What is the weather in London. Should I take an umbrella?
     ppp respose
   end
 
-  def _test_embeddings
+  def test_embeddings
     Log.severity = 0
     text =<<-EOF
 Some text
@@ -80,7 +98,7 @@ Some text
     assert(Float === emb.first)
   end
 
-  def _test_embedding_array
+  def test_embedding_array
     Log.severity = 0
     text =<<-EOF
 Some text
