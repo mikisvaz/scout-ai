@@ -73,6 +73,18 @@ You have access to the following databases associating entities:
         end
       end
     end
+
+    def self.load_from_path(path, workflow: nil, knowledge_base: nil, chat: nil)
+      workflow_path = path['workflow.rb']
+      knowledge_base_path = path['knowledge_base']
+      chat_path = path['start_chat']
+
+      workflow = Workflow.require_workflow workflow_path if workflow_path.exists?
+      knowledge_base = KnowledgeBase.new knowledge_base_path if knowledge_base_path.exists?
+      chat = LLM.chat chat_path if chat_path.exists?
+
+      LLM::Agent.new workflow, knowledge_base, chat
+    end
   end
 end
 require_relative 'agent/chat'

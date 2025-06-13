@@ -42,7 +42,7 @@ agent, *question_parts = ARGV
 
 agent_path = Scout.var.Agent[agent].find_with_extension(:rb)
 
-agent = LLM::Agent.load agent_path
+agent = LLM::Agent.load_from_path agent_path
 
 #workflow_tasks = options.delete(:workflow_tasks)
 #
