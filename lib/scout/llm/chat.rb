@@ -42,17 +42,17 @@ module LLM
           current_content << "\n" << line unless line.strip.empty?
         end
         next
-      elsif stripped.start_with?("---")
-        if in_protected_block
-          in_protected_block = false
-          protected_block_type = nil
-          current_content << "\n" << line unless line.strip.empty?
-        else
-          in_protected_block = true
-          protected_block_type = :square
-          current_content << "\n" << line unless line.strip.empty?
-        end
-        next
+      #elsif stripped.start_with?("---")
+      #  if in_protected_block
+      #    in_protected_block = false
+      #    protected_block_type = nil
+      #    current_content << "\n" << line unless line.strip.empty?
+      #  else
+      #    in_protected_block = true
+      #    protected_block_type = :square
+      #    current_content << "\n" << line unless line.strip.empty?
+      #  end
+      #  next
       elsif stripped.end_with?("]]") && in_protected_block && protected_block_type == :square
         in_protected_block = false
         protected_block_type = nil
@@ -373,6 +373,8 @@ module LLM
         definition = LLM.task_tool_definition workflow, task_name, inputs
         tool_definitions[task_name] = [workflow, definition]
         next
+      elsif message[:role] == 'clear_tools'
+        tool_definitions = {}
       else
         message
       end
@@ -394,6 +396,8 @@ module LLM
         definition = LLM.association_tool_definition name
         tool_definitions[name] = [kb, definition]
         next
+      elsif message[:role] == 'clear_associations'
+        tool_definitions = {}
       else
         message
       end
