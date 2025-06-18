@@ -11,14 +11,12 @@ module LLM
 
     def self.process_input(messages)
       messages.collect do |message|
-        if message[:role] == 'function_call'
-          {role: 'assistant', tool_calls: [message[:content]]}
-        elsif message[:role] == 'function_call_output'
-          message[:content]
+        if message[:role] == 'image'
+          next
         else
           message
         end
-      end.flatten
+      end.flatten.compact
     end
 
     def self.process_response(response, &block)
@@ -93,6 +91,8 @@ module LLM
           end
         end
       end
+
+      messages = self.process_input messages
 
       Log.low "Calling openai #{url}: #{Log.fingerprint parameters}}"
       Log.debug LLM.print messages

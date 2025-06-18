@@ -540,6 +540,10 @@ module Chat
     option :model, value
   end
 
+  def image(file)
+    self.message :image, file
+  end
+
   def shed
     self.annotate [self.last]
   end
