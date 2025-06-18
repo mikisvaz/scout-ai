@@ -518,7 +518,7 @@ module Chat
   def write(path, force = true)
     path = path.to_s if Symbol === path
     if not (Open.exists?(path) || Path === path || Path.located?(path))
-      path = Rbbt.chats.find[path]
+      path = Scout.chats.find[path]
     end
     return if Open.exists?(path) && ! force
     Open.write path, self.print
