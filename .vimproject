@@ -56,6 +56,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      openai.rb
      responses.rb
      ollama.rb
+     bedrock.rb
      openwebui.rb
      huggingface.rb
      relay.rb
