@@ -1,8 +1,4 @@
 require 'scout'
-require_relative 'backends/ollama'
-require_relative 'backends/openai'
-require_relative 'backends/openwebui'
-require_relative 'backends/relay'
 
 module LLM
   def self.embed(text, options = {})
@@ -17,12 +13,16 @@ module LLM
 
     case backend
     when :openai, "openai"
+      require_relative 'backends/openai'
       LLM::OpenAI.embed(text, options)
     when :ollama, "ollama"
+      require_relative 'backends/ollama'
       LLM::OLlama.embed(text, options)
     when :openwebui, "openwebui"
+      require_relative 'backends/openwebui'
       LLM::OpenWebUI.embed(text, options)
     when :relay, "relay"
+      require_relative 'backends/relay'
       LLM::Relay.embed(text, options)
     else
       raise "Unknown backend: #{backend}"

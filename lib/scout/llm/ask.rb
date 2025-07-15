@@ -1,10 +1,4 @@
 require 'scout'
-require_relative 'backends/openai'
-require_relative 'backends/ollama'
-require_relative 'backends/openwebui'
-require_relative 'backends/bedrock'
-require_relative 'backends/relay'
-require_relative 'backends/responses'
 
 module LLM
   def self.ask(question, options = {}, &block)
@@ -24,16 +18,22 @@ module LLM
 
       case backend
       when :openai, "openai"
+        require_relative 'backends/openai'
         LLM::OpenAI.ask(messages, options, &block)
       when :responses, "responses"
+        require_relative 'backends/responses'
         LLM::Responses.ask(messages, options, &block)
+        require_relative 'backends/ollama'
       when :ollama, "ollama"
         LLM::OLlama.ask(messages, options, &block)
       when :openwebui, "openwebui"
+        require_relative 'backends/openwebui'
         LLM::OpenWebUI.ask(messages, options, &block)
       when :relay, "relay"
+        require_relative 'backends/relay'
         LLM::Relay.ask(messages, options, &block)
       when :bedrock, "bedrock"
+        require_relative 'backends/bedrock'
         LLM::Bedrock.ask(messages, options, &block)
       else
         raise "Unknown backend: #{backend}"
