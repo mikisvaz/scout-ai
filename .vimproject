@@ -6,40 +6,49 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  agents=agents{
   analyst.rb
  }
- chats=chats{
+ chats=chats filter="*"{
+  AGS
+  hello
+  high_level
   system=system{
    scout-ai
   }
   doc=doc{
    chat
-   model.analysis
    model
+   model.analysis
   }
   develop=develop{
+   causalLM
+   chat
+   digest
+   finetuning
+   model
+   rf
+   json_format
    training=training{
-    intro
     basics
+    data.tmp
+    intro
+    python
     data=data{
      main
      next_token
+     test.rb
     }
-    data.tmp
-    python
    }
-   chat
-   model
-   causalLM
-   rf
   }
   refactor=refactor{
    chat
   }
   help=help{
-   tools
-   from_pretrained
    fine-tunning
+   from_pretrained
   }
   test=test{
+   block
+   imports
+   imports.rb
    rf.rb
   }
  }
