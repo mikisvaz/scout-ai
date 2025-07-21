@@ -1,4 +1,5 @@
 require 'scout'
+require_relative 'chat'
 
 module LLM
   def self.ask(question, options = {}, &block)
