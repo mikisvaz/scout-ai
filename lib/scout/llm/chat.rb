@@ -180,7 +180,7 @@ module LLM
         original = original.find if Path === original
         if original
           relative = File.join(File.dirname(original), file)
-          relative_lib = File.join(caller_lib_dir, file)
+          relative_lib = File.join(caller_lib_dir, file) if caller_lib_dir
         end
 
         target = if Open.exist?(file)
