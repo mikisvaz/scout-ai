@@ -24,8 +24,8 @@ module LLM
       when :responses, "responses"
         require_relative 'backends/responses'
         LLM::Responses.ask(messages, options, &block)
-        require_relative 'backends/ollama'
       when :ollama, "ollama"
+        require_relative 'backends/ollama'
         LLM::OLlama.ask(messages, options, &block)
       when :openwebui, "openwebui"
         require_relative 'backends/openwebui'
