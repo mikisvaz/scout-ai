@@ -301,7 +301,8 @@ module LLM
 
   def self.clean(messages)
     messages.reject do |message|
-      message[:content] && message[:content].empty?
+      ((String === message[:content]) && message[:content].empty?) ||
+      message[:role] == 'skip'
     end
   end
 
