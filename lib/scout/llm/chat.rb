@@ -185,6 +185,8 @@ module LLM
 
         target = if Open.exist?(file)
                    file
+                 elsif Open.remote?(file)
+                   file
                  elsif relative && Open.exist?(relative)
                    relative
                  elsif relative_lib && Open.exist?(relative_lib)
