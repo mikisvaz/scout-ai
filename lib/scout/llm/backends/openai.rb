@@ -12,6 +12,7 @@ module LLM
     def self.process_input(messages)
       messages.collect do |message|
         if message[:role] == 'image'
+          Log.warn "Endpoint 'openai' does not support images, try 'responses': #{message[:content]}"
           next
         else
           message
