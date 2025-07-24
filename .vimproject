@@ -129,7 +129,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    }
   }
  }
-
  test=test {
   data=data filter="*"{
    person=person{
