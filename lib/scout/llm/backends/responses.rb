@@ -118,7 +118,7 @@ module LLM
             raise
           end
         elsif message[:role] == 'websearch'
-            {role: :tool, content: {type: "web_search_preview"} }
+          {role: :tool, content: {type: "web_search_preview"} }
         else
           message
         end
@@ -184,6 +184,7 @@ module LLM
           function = tool.delete :function;
           tool.merge function
         }
+
         if not block_given?
           block = Proc.new do |name,parameters|
             IndiferentHash.setup parameters
