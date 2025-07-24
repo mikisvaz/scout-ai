@@ -111,5 +111,93 @@ What other movies have the protagonists of the original gost busters played on, 
     sss 0
     ppp LLM::Responses.ask prompt, format: :json
   end
+
+  def _test_json_format
+    prompt =<<-EOF
+user:
+
+What other movies have the protagonists of the original gost busters played on.
+Name each actor and the top movie they took part of
+    EOF
+    sss 0
+
+    format = {
+      name: 'actors_and_top_movies',
+      type: 'object',
+      properties: {},
+      additionalProperties: {type: :string}
+    }
+    ppp LLM::Responses.ask prompt, format: format
+  end
+
+  def _test_json_format_list
+    prompt =<<-EOF
+user:
+
+What other movies have the protagonists of the original gost busters played on.
+Name each actor as keys and the top 3 movies they took part of as values
+    EOF
+    sss 0
+
+    format = {
+      name: 'actors_and_top_movies',
+      type: 'object',
+      properties: {},
+      additionalProperties: {type: :array, items: {type: :string}}
+    }
+    ppp LLM::Responses.ask prompt, format: format
+  end
+
+  def _test_json_format_actor_list
+    prompt =<<-EOF
+user:
+
+What other movies have the protagonists of the original gost busters played on.
+Name each actor as keys and the top 3 movies they took part of as values
+    EOF
+    sss 0
+
+    format = {
+      name: 'actors_and_top_movies',
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+      items: {
+        type: 'object', 
+        properties: {
+          name: {type: :string, description: 'actor name'}, 
+          movies: {type: :array, description: 'list of top 3 movies', items: {type: :string, description: 'movie title plus year in parenthesis'} }, 
+          additionalProperties: false
+        }
+      }
+    }
+
+    schema =  {
+      "type": "object",
+      "properties": {
+        "people": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "movies": {
+                "type": "array",
+                "items": { "type": "string" },
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
+            "required": ["name", "movies"],
+            additionalProperties: false
+          }
+        }
+      },
+      additionalProperties: false,
+      "required": ["people"]
+    }
+    ppp LLM::Responses.ask prompt, format: schema
+  end
+
 end
 

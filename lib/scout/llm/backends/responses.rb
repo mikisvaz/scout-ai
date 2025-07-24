@@ -154,15 +154,21 @@ module LLM
       when String, Symbol
         options['text'] = {format: {type: format}}
       when Hash
+        IndiferentHash.setup format
+
         if format.include?('format')
           options['text'] = format
         elsif format['type'] == 'json_schema'
           options['text'] = {format: format}
         else
-          options['text'] = {format: {name: "response_schema",
+          required = format.include?('properties') ? format['properties'].keys : []
+
+          name = format.include?('name') ? format.delete('name') : 'response'
+
+          options['text'] = {format: {name: name,
                                       type: "json_schema",
-                                      additionalProperties: false,
-                                      required: format['properties'].keys,
+                                      #additionalProperties: required.empty? ? {type: :string} : false,
+                                      required: required,
                                       schema: format,
           }}
         end

@@ -511,6 +511,18 @@ module Chat
     end
   end
 
+  def json_format(format, ...)
+    self.format format
+    output = ask(...)
+    obj = JSON.parse output
+    if (Hash === obj) and obj.keys == ['content']
+      obj['content']
+    else
+      obj
+    end
+  end
+
+
   def print
     LLM.print LLM.chat(self)
   end
