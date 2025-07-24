@@ -267,7 +267,7 @@ module LLM
           }
 
           tool_output = {
-            tool_call_id: id,
+            id: id,
             role: "tool",
             content: step.path.read
           }

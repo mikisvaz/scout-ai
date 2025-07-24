@@ -3,16 +3,29 @@ require 'scout/knowledge_base'
 module LLM
   def self.tool_response(tool_call, &block)
     tool_call_id = tool_call.dig("id")
-    function_name = tool_call.dig("function", "name")
-    function_arguments = tool_call.dig("function", "arguments")
+    if tool_call['function']
+      function_name = tool_call.dig("function", "name")
+      function_arguments = tool_call.dig("function", "arguments")
+    else
+      function_name = tool_call.dig("name")
+      function_arguments = tool_call.dig("arguments")
+    end
     function_arguments = JSON.parse(function_arguments, { symbolize_names: true }) if String === function_arguments
-    function_response = block.call function_name, function_arguments
+    Log.high "Calling function #{function_name} with arguments #{Log.fingerprint function_arguments}"
+
+    function_response = begin
+                          block.call function_name, function_arguments
+                        rescue
+                          $!
+                        end
 
     content = case function_response
               when String
                 function_response
               when nil
                 "success"
+              when Exception
+                {exception: function_response.message, stack: function_response.backtrace }
               else
                 function_response.to_json
               end
