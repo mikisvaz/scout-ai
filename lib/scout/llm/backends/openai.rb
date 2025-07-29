@@ -43,9 +43,9 @@ module LLM
       tools = LLM.tools messages
       associations = LLM.associations messages
 
-      client, url, key, model, log_errors, return_messages, format = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :log_errors, :return_messages, :format,
-        log_errors: true
+      client, url, key, model, log_errors, return_messages, format, tool_choice_next = IndiferentHash.process_options options,
+        :client, :url, :key, :model, :log_errors, :return_messages, :format, :tool_choice_next,
+        log_errors: true, tool_choice_next: :none
 
       if client.nil?
         url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
@@ -103,7 +103,7 @@ module LLM
       response = self.process_response client.chat(parameters: parameters), &block
 
       res = if response.last[:role] == 'function_call_output' 
-              response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: parameters[:tools]), &block)
+              response + self.ask(messages + response, original_options.merge(tool_choice: tool_choice_next, return_messages: true, tools: parameters[:tools]), &block)
             else
               response
             end

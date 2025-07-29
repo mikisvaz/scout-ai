@@ -52,7 +52,7 @@ You have access to the following databases associating entities:
       tools += LLM.workflow_tools(workflow) if workflow
       tools += LLM.knowledge_base_tool_definition(knowledge_base) if knowledge_base and knowledge_base.all_databases.any?
 
-      LLM.ask prompt(messages), @other_options.merge(log_errors: true, tools: tools) do |name,parameters|
+      LLM.ask messages, @other_options.merge(log_errors: true, tools: tools).merge(options) do |name,parameters|
         case name
         when 'children'
           parameters = IndiferentHash.setup(parameters)
@@ -74,8 +74,12 @@ You have access to the following databases associating entities:
       end
     end
 
+    def chat(...)
+      current_chat.push({role: :assistant, content: self.ask(current_chat, ...)})
+    end
+
     def self.load_from_path(path, workflow: nil, knowledge_base: nil, chat: nil)
-      workflow_path = path['workflow.rb']
+      workflow_path = path['workflow.rb'].find
       knowledge_base_path = path['knowledge_base']
       chat_path = path['start_chat']
 
@@ -83,7 +87,7 @@ You have access to the following databases associating entities:
       knowledge_base = KnowledgeBase.new knowledge_base_path if knowledge_base_path.exists?
       chat = LLM.chat chat_path if chat_path.exists?
 
-      LLM::Agent.new workflow, knowledge_base, chat
+      LLM::Agent.new workflow: workflow, knowledge_base: knowledge_base, start_chat: chat
     end
   end
 end

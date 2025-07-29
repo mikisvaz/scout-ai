@@ -25,7 +25,7 @@ module LLM
               when nil
                 "success"
               when Exception
-                {exception: function_response.message, stack: function_response.backtrace }
+                {exception: function_response.message, stack: function_response.backtrace }.to_json
               else
                 function_response.to_json
               end

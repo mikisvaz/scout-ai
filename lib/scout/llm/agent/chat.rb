@@ -20,5 +20,6 @@ module LLM
     def method_missing(name,...)
       current_chat.send(name, ...)
     end
+
   end
 end

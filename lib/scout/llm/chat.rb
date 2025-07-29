@@ -348,6 +348,12 @@ module LLM
           next
         end
 
+        if role.to_s == 'option'
+          key, value = info[:content].split(" ")
+          options[key] = value
+          next
+        end
+
         if role == 'assistant'
           options.clear
         end
@@ -359,7 +365,7 @@ module LLM
   end
 
   def self.tools(messages)
-    tool_definitions = {}
+    tool_definitions = IndiferentHash.setup({})
     new = messages.collect do |message|
       if message[:role] == 'tool'
         workflow_name, task_name, *inputs = message[:content].strip.split(/\s+/)
@@ -373,8 +379,16 @@ module LLM
         else
           workflow = Workflow.require_workflow workflow_name
         end
-        definition = LLM.task_tool_definition workflow, task_name, inputs
-        tool_definitions[task_name] = [workflow, definition]
+
+        if task_name
+          definition = LLM.task_tool_definition workflow, task_name, inputs
+          tool_definitions[task_name] = [workflow, definition]
+        else
+          workflow.all_exports.each do |task_name|
+            definition = LLM.task_tool_definition workflow, task_name, inputs
+            tool_definitions[task_name] = [workflow, definition]
+          end
+        end
         next
       elsif message[:role] == 'clear_tools'
         tool_definitions = {}
@@ -525,7 +539,6 @@ module Chat
     end
   end
 
-
   def print
     LLM.print LLM.chat(self)
   end
@@ -562,7 +575,11 @@ module Chat
   def shed
     self.annotate [self.last]
   end
-  
+
+  def answer
+    self.last[:content]
+  end
+
   def create_image(file, ...)
     base64_image = LLM.image(LLM.chat(self), ...)
     Open.write(file, Base64.decode(file_content), mode: 'wb')
