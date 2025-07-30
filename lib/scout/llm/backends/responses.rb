@@ -133,9 +133,13 @@ module LLM
       tools = LLM.tools messages
       associations = LLM.associations messages
 
-      client, url, key, model, log_errors, return_messages, format = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :log_errors, :return_messages, :format,
+      client, url, key, model, log_errors, return_messages, format, websearch = IndiferentHash.process_options options,
+        :client, :url, :key, :model, :log_errors, :return_messages, :format, :websearch,
         log_errors: true
+
+      if websearch
+        messages << {role: 'websearch', content: true}
+      end
 
       if client.nil?
         url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
