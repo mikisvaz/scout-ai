@@ -1,12 +1,11 @@
 scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.txt *.conf" {
  Rakefile
+ README.md
  bin=bin filter="*"{
   scout-ai
  }
- agents=agents{
-  analyst.rb
- }
  chats=chats filter="*"{
+  agent
   AGS
   hello
   high_level
@@ -14,6 +13,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    scout-ai
   }
   doc=doc{
+   agent
    chat
    model
    model.analysis
@@ -23,9 +23,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    chat
    digest
    finetuning
+   json_format
    model
    rf
-   json_format
    training=training{
     basics
     data.tmp
@@ -47,6 +47,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   }
   test=test{
    block
+   file
    imports
    imports.rb
    rf.rb
@@ -82,6 +83,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     agent.rb
     agent=agent{
      chat.rb
+     iterate.rb
     }
    }
    model=model{
