@@ -5,6 +5,7 @@ module LLM
     attr_accessor :workflow, :knowledge_base, :start_chat
     def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
       @workflow = workflow
+      @workflow = Workflow.require_workflow @workflow if String === @workflow
       @knowledge_base = knowledge_base
       @other_options = kwargs
       @start_chat = start_chat
@@ -48,34 +49,44 @@ You have access to the following databases associating entities:
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
 
-      tools = []
-      tools += LLM.workflow_tools(workflow) if workflow
-      tools += LLM.knowledge_base_tool_definition(knowledge_base) if knowledge_base and knowledge_base.all_databases.any?
+      if workflow || knowledge_base
+        tools = []
+        tools += LLM.workflow_tools(workflow) if workflow
+        tools += LLM.knowledge_base_tool_definition(knowledge_base) if knowledge_base and knowledge_base.all_databases.any?
 
-      LLM.ask messages, @other_options.merge(log_errors: true, tools: tools).merge(options) do |name,parameters|
-        case name
-        when 'children'
-          parameters = IndiferentHash.setup(parameters)
-          database, entities = parameters.values_at "database", "entities"
-          Log.high "Finding #{entities} children in #{database}"
-          knowledge_base.children(database, entities)
-        else
-          if workflow
-            begin
-              Log.high "Calling #{workflow}##{name} with #{Log.fingerprint parameters}"
-              workflow.job(name, parameters).run
-            rescue
-              $!.message
-            end
+        LLM.ask messages, @other_options.merge(log_errors: true, tools: tools).merge(options) do |name,parameters|
+          case name
+          when 'children'
+            parameters = IndiferentHash.setup(parameters)
+            database, entities = parameters.values_at "database", "entities"
+            Log.high "Finding #{entities} children in #{database}"
+            knowledge_base.children(database, entities)
           else
-            raise "What?"
+            if workflow
+              begin
+                Log.high "Calling #{workflow}##{name} with #{Log.fingerprint parameters}"
+                workflow.job(name, parameters).run
+              rescue
+                $!.message
+              end
+            else
+              raise "No workflow"
+            end
           end
         end
+      else
+        LLM.ask messages, @other_options.merge(log_errors: true).merge(options)
       end
     end
 
+    def respond(...)
+      self.ask(current_chat, ...)
+    end
+
     def chat(...)
-      current_chat.push({role: :assistant, content: self.ask(current_chat, ...)})
+      response = respond(...)
+      current_chat.push({role: :assistant, content: response})
+      response
     end
 
     def self.load_from_path(path, workflow: nil, knowledge_base: nil, chat: nil)
@@ -92,3 +103,4 @@ You have access to the following databases associating entities:
   end
 end
 require_relative 'agent/chat'
+require_relative 'agent/iterate'

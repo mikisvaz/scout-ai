@@ -138,28 +138,33 @@ module LLM
     messages
   end
 
+  def self.find_file(file, original = nil, caller_lib_dir = Path.caller_lib_dir(nil, 'chats'))
+    path = Scout.chats[file]
+    original = original.find if Path === original
+    if original
+      relative = File.join(File.dirname(original), file)
+      relative_lib = File.join(caller_lib_dir, file)
+    end
+
+    if Open.exist?(file)
+      file
+    elsif relative && Open.exist?(relative)
+      relative
+    elsif relative_lib && Open.exist?(relative_lib)
+      relative_lib
+    elsif path.exists?
+      path
+    end
+  end
+
   def self.imports(messages, original = nil, caller_lib_dir = Path.caller_lib_dir(nil, 'chats'))
     messages.collect do |message|
       if message[:role] == 'import' || message[:role] == 'continue'
         file = message[:content].to_s.strip
-        path = Scout.chats[file]
-        original = original.find if Path === original
-        if original
-          relative = File.join(File.dirname(original), file)
-          relative_lib = File.join(caller_lib_dir, file)
-        end
+        found_file = find_file(file, original, caller_lib_dir)
+        raise "Import not found: #{file}" if found_file.nil?
 
-        new = if Open.exist?(file)
-                LLM.chat file
-              elsif relative && Open.exist?(relative)
-                LLM.chat relative
-              elsif relative_lib && Open.exist?(relative_lib)
-                LLM.chat relative_lib
-              elsif path.exists?
-                LLM.chat path
-              else
-                raise "Import not found: #{file}"
-              end
+        new = LLM.chat found_file
 
         if message[:role] == 'continue'
           new.last
@@ -175,27 +180,11 @@ module LLM
   def self.files(messages, original = nil, caller_lib_dir = Path.caller_lib_dir(nil, 'chats'))
     messages.collect do |message|
       if message[:role] == 'file' || message[:role] == 'directory'
-        file = message[:content].strip
-        path = Scout.chats[file]
-        original = original.find if Path === original
-        if original
-          relative = File.join(File.dirname(original), file)
-          relative_lib = File.join(caller_lib_dir, file) if caller_lib_dir
-        end
+        file = message[:content].to_s.strip
+        found_file = find_file(file, original, caller_lib_dir)
+        raise "File not found: #{file}" if found_file.nil?
 
-        target = if Open.exist?(file)
-                   file
-                 elsif Open.remote?(file)
-                   file
-                 elsif relative && Open.exist?(relative)
-                   relative
-                 elsif relative_lib && Open.exist?(relative_lib)
-                   relative_lib
-                 elsif path.exists?
-                   path
-                 else
-                   raise "File not found: #{file}"
-                 end
+        target = found_file
 
         if message[:role] == 'directory'
           Path.setup target
@@ -302,7 +291,7 @@ module LLM
   def self.clean(messages)
     messages.reject do |message|
       ((String === message[:content]) && message[:content].empty?) ||
-      message[:role] == 'skip'
+        message[:role] == 'skip'
     end
   end
 
@@ -343,8 +332,18 @@ module LLM
     chat.each do |info|
       if Hash === info
         role = info[:role].to_s
-        if %w(endpoint format model backend persist).include? role.to_s
+        if %w(endpoint model backend persist).include? role.to_s
           options[role] = info[:content]
+          next
+        elsif %w(format).include? role.to_s
+          format = info[:content]
+          if Path.is_filename?(format)
+            file = find_file(format)
+            if file
+              format = Open.json(file)
+            end
+          end
+          options[role] = format
           next
         end
 
@@ -550,6 +549,15 @@ module Chat
     end
     return if Open.exists?(path) && ! force
     Open.write path, self.print
+  end
+
+  def write_answer(path, force = true)
+    path = path.to_s if Symbol === path
+    if not (Open.exists?(path) || Path === path || Path.located?(path))
+      path = Scout.chats.find[path]
+    end
+    return if Open.exists?(path) && ! force
+    Open.write path, self.answer
   end
 
   def branch
