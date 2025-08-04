@@ -215,7 +215,15 @@ module LLM
         options = IndiferentHash.parse_options info
         jobname = options.delete :jobname
 
-        job = Workflow.require_workflow(workflow).job(task, jobname, options)
+        if String === workflow
+          workflow = begin
+                       Kernel.const_get workflow
+                     rescue
+                       Workflow.require_workflow(workflow)
+                     end
+        end
+
+        job = workflow.job(task, jobname, options)
 
         jobs << job
 
