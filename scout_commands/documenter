@@ -1,0 +1,148 @@
+#!/usr/bin/env ruby
+
+require 'scout'
+
+$0 = "scout-ai #{$previous_commands.any? ? $previous_commands*" " + " " : "" }#{ File.basename(__FILE__) }" if $previous_commands
+
+options = SOPT.setup <<EOF
+Scout documenter tool
+
+$ #{$0} [<options>] <topic>
+
+Generates technical, example-driven documentation for a given Scout topic by
+analyzing Ruby source and corresponding test files. For a specified topic, it
+locates main and subtopic files, invokes an LLM agent to synthesize markdown
+documentation using real test behavior and examples, then outputs comprehensive
+topic and subtopic documentation files. 
+
+-h--help Print this help
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage 
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+require 'scout-ai'
+
+topic = ARGV.first
+
+raise MissingParameterException if topic.nil?
+
+src_files = Scout.lib.scout.glob("#{topic}*/**/*") + Scout.lib.scout.glob("#{topic}.rb")
+src_files.collect! do |file|
+  file.sub(Dir.pwd, '.')
+end
+
+bin_files = Scout.scout_commands.glob("**/*").select{|file| file.include?(topic) && ! file.directory? }
+
+main = src_files.select{|f| f.split("/").length == 4}.first
+subtopics = src_files.select{|f| f.split("/").length == 5}.collect{|f| File.basename(f).sub(".rb",'') }.uniq
+
+def source_to_test(file)
+  file.sub(%r{\A./lib/}, './test/').sub(%r{([^/]+)\.rb\z}, 'test_\1.rb')
+end
+
+documenter = LLM::Agent.new
+
+documenter.start_chat.system <<-EOF
+You are a world-class Ruby documentation author. For each (source, test) file
+pair given, produce technically precise module- and file-level documentation,
+incorporating specific code usage and behavior from the test file as worked
+examples, code idioms, and edge-case handling. 
+
+Never insert your own example code: always use live content from the tests as examples. 
+
+Integrate documentation and test-derived examples smoothly.
+
+You will be given first the main topic documentation for the main file and
+test_file, then you will be asked to produce documentation for a subtopic.
+
+Finally you will be ask to aggregate all the documentation portions into 
+a final topic documentation file
+
+User markdown
+
+Avoid initial and final comments like: Certainly! I'll do this and that
+EOF
+
+documenter.start_chat.file main
+documenter.start_chat.file source_to_test(main)
+
+documenter.start_chat.user <<-EOF
+This is the basic topic file. Write the markdown documentation for it.
+EOF
+
+docs = {}
+subtopics.each do |subtopic|
+  src = src_files.select{|f| f.include? subtopic}.select{|f| f.end_with?(".rb") }
+  test = src.collect{|f| source_to_test(f) }.select{|f| Open.exists? f  }.select{|f| f.end_with?(".rb")}
+
+  documenter.start
+  (src + test + bin_files).each do |file|
+    documenter.file file
+  end
+
+  documenter.start_chat.user <<-EOF
+Write documentation for topic #{topic} subtopic #{subtopic}
+  EOF
+  docs[subtopic] = documenter.respond
+end
+
+documenter.start
+
+docs.each do |subtopic, documentation|
+  documenter.user <<-EOF
+Please construct a comprehensive documentation on topic #{topic}. For each
+subtopic reproduce all the most important from the original documentation
+files. The subtopic documentation files will not be available anymore, so
+don't leave anything imporant out
+
+<file subtopic=#{subtopic}>
+#{documentation}
+<file>
+  EOF
+end
+
+main_documentation = documenter.chat
+
+documenter.start_chat.user <<-EOF
+This is the revise documentation for the topic:
+
+---
+
+#{main_documentation}
+
+---
+EOF
+
+revised_subtopics = {}
+docs.each do |subtopic, documentation|
+  documenter.start
+
+  src = src_files.select{|f| f.include? subtopic}.select{|f| f.end_with?(".rb") }
+  test = src.collect{|f| source_to_test(f) }.select{|f| Open.exists? f  }.select{|f| f.end_with?(".rb")}
+
+  documenter.start
+  (src + test + bin_files).each do |file|
+    documenter.file file
+  end
+
+  documenter.user <<-EOF
+Please revise the subtopic documentation in light of the revised main_documentation
+
+<file subtopic=#{subtopic}>
+#{documentation}
+<file>
+  EOF
+  revised_subtopics[subtopic] = documenter.respond
+end
+
+
+Open.write Scout.doc.lib.scout[topic + '.md'].find(:current), main_documentation
+revised_subtopics.each do |subtopic,documentation|
+  Open.write Scout.doc.lib.scout[topic][subtopic + '.md'].find(:current), documentation
+end

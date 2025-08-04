@@ -145,6 +145,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  data=data filter="*"{
  }
  scout_commands=scout_commands filter="*"{
+  documenter
   llm=llm{
    ask
    template
