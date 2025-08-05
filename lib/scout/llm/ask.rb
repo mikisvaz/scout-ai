@@ -58,4 +58,21 @@ module LLM
       knowledge_base.children(database, entities).collect{|e| e.sub('~', '=>')}
     end
   end
+
+  def self.rate_limit(&block)
+    begin
+      block.call
+    rescue
+      if $!.respond_to?(:response) && $!.response[:body].include?("error") &&
+          $!.response[:body]["error"]["message"] =~ /Please try again in ([\d.]+)s/
+
+        seconds = $1.to_f
+        Log.warn "Rate limited; waiting #{seconds}"
+        sleep seconds
+        retry
+      else
+        raise $!
+      end
+    end
+  end
 end
