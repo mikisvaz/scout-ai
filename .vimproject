@@ -150,10 +150,17 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    ask
    template
    process
+   server
   }
   agent=agent{
    ask
    kb
+  }
+ }
+ share=share{
+  server=server files="*"{
+   chat.html
+   chat.js
   }
  }
 }

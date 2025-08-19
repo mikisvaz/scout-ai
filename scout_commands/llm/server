@@ -1,0 +1,315 @@
+#!/usr/bin/env ruby
+
+require 'scout'
+require 'sinatra'
+require 'json'
+require 'fileutils'
+require 'digest'
+
+# Simple Sinatra server to back the offline notebook UI.
+# Provides endpoints to list, load, save and run chat files stored under ./chats
+
+set :bind, ENV.fetch('SCOUT_BIND', '127.0.0.1')
+set :port, ENV.fetch('SCOUT_PORT', 4567).to_i
+set :environment, :production
+
+CHATS_DIR = File.expand_path('./chats', Dir.pwd)
+FileUtils.mkdir_p(CHATS_DIR)
+
+helpers do
+  def json!(obj, status = 200)
+    content_type :json
+    halt status, JSON.generate(obj)
+  end
+
+  def parse_json_body
+    body = request.body.read
+    return {} if body.nil? || body.strip.empty?
+    JSON.parse(body)
+  rescue JSON::ParserError
+    {}
+  end
+
+  def sanitize_relpath(p)
+    return nil if p.nil? || p.to_s.strip.empty?
+    s = p.to_s.dup
+    s = s.sub(%r{\A/+}, '') # strip leading slashes
+    s = s.sub(%r{\Achats/}, '') # allow callers to include the prefix, normalize it away
+    return nil if s.include?('..')
+    s
+  end
+
+  def safe_path_for(rel)
+    rel_s = sanitize_relpath(rel)
+    raise Sinatra::NotFound unless rel_s
+    full = File.expand_path(File.join(CHATS_DIR, rel_s))
+    # ensure the resolved path is inside CHATS_DIR
+    unless full.start_with?(CHATS_DIR + File::SEPARATOR) || full == CHATS_DIR
+      raise Sinatra::NotFound
+    end
+    full
+  end
+
+  def etag_for(content)
+    Digest::SHA256.hexdigest(content.to_s)
+  end
+end
+
+# By default we return JSON for the API routes. Some routes will override the content_type.
+before do
+  content_type 'application/json'
+end
+
+# Serve the web UI from the embedded share unless not available. Override the before filter's JSON content type.
+get '/' do
+  begin
+    html = nil
+    if defined?(Scout) && Scout.respond_to?(:share) && Scout.share.respond_to?(:[]) && Scout.share['server'] && Scout.share['server']['chat.html']
+      html = Scout.share['server']['chat.html']
+    end
+    unless html && !html.to_s.empty?
+      # Fallback to the packaged file if the share entry isn't present
+      fallback = File.expand_path('../../../share/server/chat.html', __FILE__)
+      fallback = File.expand_path('./share/server/chat.html', Dir.pwd) unless File.file?(fallback)
+      html = File.read(fallback) if File.file?(fallback)
+    end
+    content_type 'text/html'
+    return html || '<html><body><h1>Chat UI not found</h1></body></html>'
+  rescue => e
+    content_type 'text/html'
+    return "<html><body><h1>Error rendering UI</h1><pre>#{Rack::Utils.escape_html(e.message)}</pre></body></html>"
+  end
+end
+
+# Serve the client JS (chat.js) from the embedded share if present
+get '/chat.js' do
+  begin
+    js = nil
+    if defined?(Scout) && Scout.respond_to?(:share) && Scout.share.respond_to?(:[]) && Scout.share['server'] && Scout.share['server']['chat.js']
+      js = Scout.share['server']['chat.js']
+    end
+    unless js && !js.to_s.empty?
+      fallback = File.expand_path('../../../share/server/chat.js', __FILE__)
+      fallback = File.expand_path('./share/server/chat.js', Dir.pwd) unless File.file?(fallback)
+      js = File.read(fallback) if File.file?(fallback)
+    end
+    content_type 'application/javascript'
+    return js || 'console.error("chat.js not found");'
+  rescue => e
+    content_type 'application/javascript'
+    return "console.error(#{e.message.inspect});"
+  end
+end
+
+# list files under chats directory. returns an array of relative paths (no leading 'chats/')
+get '/list' do
+  files = []
+  Dir.chdir(CHATS_DIR) do
+    Dir.glob('**/*', File::FNM_DOTMATCH).sort.each do |f|
+      next if f == '.' || f == '..'
+      full = File.join(CHATS_DIR, f)
+      next if File.directory?(full)
+      files << f
+    end
+  end
+  json!(files: files)
+end
+
+# load a file's content
+# GET /load?path=relative/path
+get '/load' do
+  rel = params['path']
+  begin
+    full = safe_path_for(rel)
+  rescue
+    status 404
+    return JSON.generate({error: 'not_found'})
+  end
+  unless File.file?(full)
+    status 404
+    return JSON.generate({error: 'not_found'})
+  end
+  content = File.read(full)
+  json!(path: sanitize_relpath(rel), content: content, mtime: File.mtime(full).to_i, etag: etag_for(content))
+end
+
+# save a file
+# POST /save with JSON { path: 'rel/path', content: '...' }
+post '/save' do
+  body = parse_json_body
+  rel = body['path']
+  content = body['content'] || ''
+  begin
+    full = safe_path_for(rel)
+  rescue
+    status 400
+    return JSON.generate({error: 'invalid_path'})
+  end
+  dir = File.dirname(full)
+  FileUtils.mkdir_p(dir)
+  File.write(full, content)
+  json!(path: sanitize_relpath(rel), etag: etag_for(content), mtime: File.mtime(full).to_i)
+end
+
+# run a chat: POST /run with JSON { path: 'rel/path', content?: 'unsaved content', convo_options?: {...}, options?: {...} }
+# Behavior: ensure file is saved, then run LLM chat flow and append results to the conversation file and return new content.
+post '/run' do
+  body = parse_json_body
+  rel = body['path']
+  unless rel
+    status 400
+    return JSON.generate({error: 'missing_path'})
+  end
+
+  begin
+    full = safe_path_for(rel)
+  rescue
+    status 400
+    return JSON.generate({error: 'invalid_path'})
+  end
+
+  # If unsaved content provided, write it first
+  if body.key?('content')
+    FileUtils.mkdir_p(File.dirname(full))
+    File.write(full, body['content'] || '')
+  end
+
+  unless File.file?(full)
+    status 404
+    return JSON.generate({error: 'not_found'})
+  end
+
+  begin
+    # Load the conversation file
+    file_text = File.read(full)
+
+    # Attempt to call LLM to run the chat. If LLM is not available, fall back to a simulated reply.
+    new_messages = nil
+
+    llm_defined = defined?(LLM) && (LLM.respond_to?(:chat) || LLM.respond_to?(:ask))
+
+    if llm_defined
+      # If an LLM integration is present, require it to succeed. If it errors, return that error to the client
+      begin
+        conversation = nil
+        begin
+          conversation = LLM.chat(file_text)
+        rescue => e
+          # try passing the filename if the helper expects a path
+          begin
+            conversation = LLM.chat(full)
+          rescue => ee
+            # If chat failed entirely, raise to outer rescue so we return an error response
+            raise e
+          end
+        end
+
+        convo_options = body['convo_options'] || {}
+        ask_options = body['options'] || {}
+
+        begin
+          new_messages = LLM.ask(conversation, convo_options.merge(ask_options.merge(return_messages: true)))
+        rescue => e
+          # propagate the error to the client rather than falling back
+          raise e
+        end
+
+        # If the LLM ran but returned no messages, treat that as an error and provide diagnostics
+        if new_messages.nil? || (new_messages.respond_to?(:empty?) && new_messages.empty?)
+          diag = { error: 'llm_no_messages', message: 'LLM did not return any messages' }
+          # include some diagnostic information where safe
+          begin
+            diag[:conversation_preview] = conversation.respond_to?(:to_s) ? conversation.to_s[0,2000] : conversation.inspect[0,2000]
+          rescue
+          end
+          begin
+            diag[:convo_options] = convo_options
+            diag[:ask_options] = ask_options
+          rescue
+          end
+          json!(diag, 500)
+        end
+      rescue => e
+        # Return the LLM error to the client with richer diagnostics
+        back = (e.backtrace || [])[0,50]
+        err = {
+          error: 'llm_error',
+          error_class: e.class.to_s,
+          message: e.message,
+          backtrace: back
+        }
+        # include conversation and request diagnostics when available
+        begin
+          err[:conversation_preview] = conversation.respond_to?(:to_s) ? conversation.to_s[0,2000] : conversation.inspect[0,2000] if defined?(conversation) && conversation
+        rescue
+        end
+        begin
+          err[:convo_options] = convo_options if defined?(convo_options)
+          err[:ask_options] = ask_options if defined?(ask_options)
+        rescue
+        end
+        # include any partial new_messages returned (inspect up to a limit)
+        begin
+          if defined?(new_messages) && new_messages
+            nm = new_messages.respond_to?(:to_s) ? new_messages.to_s : new_messages.inspect
+            err[:new_messages_preview] = nm[0,2000]
+          end
+        rescue
+        end
+
+        # Do not fall back to a simulated assistant reply when an LLM error occurred; return the diagnostics instead
+        json!(err, 500)
+      end
+    end
+
+    new_text = nil
+    if new_messages
+      # Try to render messages into text. Prefer LLM.print if available.
+      printed = nil
+      if defined?(LLM) && LLM.respond_to?(:print)
+        begin
+          printed = LLM.print(new_messages)
+        rescue
+          printed = nil
+        end
+      end
+      # If we couldn't print, try to stringify
+      printed ||= begin
+        if new_messages.respond_to?(:to_s)
+          new_messages.to_s
+        else
+          JSON.generate(new_messages)
+        end
+      end
+
+      new_text = file_text + "\n" + printed
+    else
+      # If no LLM is present at all, keep the previous fallback simulated reply behavior
+      simulated = "assistant: (simulated reply)\n"
+      new_text = file_text + "\n" + simulated
+    end
+
+    # Save the updated conversation back to disk
+    File.write(full, new_text)
+
+    json!(path: sanitize_relpath(rel), content: new_text, etag: etag_for(new_text), mtime: File.mtime(full).to_i)
+  rescue => e
+    status 500
+    back = (e.backtrace || [])[0,50]
+    resp = { error: 'run_failed', error_class: e.class.to_s, message: e.message, backtrace: back }
+    begin
+      resp[:file] = full if defined?(full)
+      resp[:path] = sanitize_relpath(rel) if defined?(rel)
+    rescue
+    end
+    json!(resp, 500)
+  end
+end
+
+# Basic health endpoint
+get '/ping' do
+  json!(ok: true, dir: CHATS_DIR)
+end
+
+$stderr.puts "Starting scout server on #{settings.bind}:#{settings.port}, chats dir=#{CHATS_DIR}\n"
+Sinatra::Application.run!
