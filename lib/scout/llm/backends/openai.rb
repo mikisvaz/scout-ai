@@ -79,7 +79,11 @@ module LLM
             if tools[name]
               workflow = tools[name].first
               jobname = parameters.delete :jobname
-              workflow.job(name, jobname, parameters).run
+              if workflow.exec_exports.include? name.to_sym
+                workflow.job(name, jobname, parameters).exec
+              else
+                workflow.job(name, jobname, parameters).run
+              end
             else
               kb = associations[name].first
               entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse

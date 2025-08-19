@@ -20,5 +20,38 @@ module LLM
     def method_missing(name,...)
       current_chat.send(name, ...)
     end
+
+    def respond(...)
+      self.ask(current_chat, ...)
+    end
+
+    def chat(...)
+      response = respond(...)
+      current_chat.push({role: :assistant, content: response})
+      response
+    end
+
+    def json(...)
+      current_chat.format :json
+      output = ask(current_chat, ...)
+      obj = JSON.parse output
+      if (Hash === obj) and obj.keys == ['content']
+        obj['content']
+      else
+        obj
+      end
+    end
+
+    def json_format(format, ...)
+      current_chat.format format
+      output = ask(current_chat, ...)
+      obj = JSON.parse output
+      if (Hash === obj) and obj.keys == ['content']
+        obj['content']
+      else
+        obj
+      end
+    end
+
   end
 end

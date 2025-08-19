@@ -24,22 +24,23 @@ module LLM
       file_content = File.binread(path)  # Replace with your file name
       Base64.strict_encode64(file_content)
     end
-    def self.tool_response(tool_call, &block)
-      tool_call_id = tool_call.dig("id").sub(/^fc_/, '')
-      function_name = tool_call.dig("function", "name")
-      function_arguments = tool_call.dig("function", "arguments")
-      function_arguments = JSON.parse(function_arguments, { symbolize_names: true }) if String === function_arguments
-      IndiferentHash.setup function_arguments
-      function_response = block.call function_name, function_arguments
 
-      content = case function_response
-                when nil
-                  "success"
-                else
-                  function_response
-                end
-      content = content.to_s if Numeric === content
-    end
+    #def self.tool_response(tool_call, &block)
+    #  tool_call_id = tool_call.dig("call_id").sub(/^fc_/, '')
+    #  function_name = tool_call.dig("function", "name")
+    #  function_arguments = tool_call.dig("function", "arguments")
+    #  function_arguments = JSON.parse(function_arguments, { symbolize_names: true }) if String === function_arguments
+    #  IndiferentHash.setup function_arguments
+    #  function_response = block.call function_name, function_arguments
+
+    #  content = case function_response
+    #            when nil
+    #              "success"
+    #            else
+    #              function_response
+    #            end
+    #  content = content.to_s if Numeric === content
+    #end
 
     def self.tools_to_responses(messages)
       messages.collect do |message|
@@ -52,7 +53,7 @@ module LLM
             "status" => "completed",
             "name" => info[:name],
             "arguments" => (info[:arguments] || {}).to_json,
-            "call_id"=>"call_#{id}",
+            "call_id"=>id,
           })
         elsif message[:role] == 'function_call_output'
           info = JSON.parse(message[:content])
@@ -61,7 +62,7 @@ module LLM
           {                               # append result message
             "type" => "function_call_output",
             "output" => info[:content],
-            "call_id"=>"call_#{id}",
+            "call_id"=>id,
           }
         else
           message
@@ -81,11 +82,14 @@ module LLM
               IndiferentHash.setup({role: 'assistant', content: content['text']})
             end
           end
+        when 'reasoning'
+          next
         when 'function_call'
           LLM.call_tools [output], &block
         when 'web_search_call'
           next
         else
+          eee response
           eee output
           raise 
         end
@@ -133,8 +137,8 @@ module LLM
       tools = LLM.tools messages
       associations = LLM.associations messages
 
-      client, url, key, model, log_errors, return_messages, format, websearch = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :log_errors, :return_messages, :format, :websearch,
+      client, url, key, model, log_errors, return_messages, format, websearch, previous_response_id = IndiferentHash.process_options options,
+        :client, :url, :key, :model, :log_errors, :return_messages, :format, :websearch, :previous_response_id,
         log_errors: true
 
       if websearch
@@ -195,7 +199,11 @@ module LLM
             if tools[name]
               workflow = tools[name].first
               jobname = parameters.delete :jobname
-              workflow.job(name, jobname, parameters).run
+              if workflow.exec_exports.include? name.to_sym
+                workflow.job(name, jobname, parameters).exec
+              else
+                workflow.job(name, jobname, parameters).run
+              end
             else
               kb = associations[name].first
               entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
@@ -209,6 +217,7 @@ module LLM
         end
       end
 
+      parameters['previous_response_id'] = previous_response_id if String === previous_response_id
       Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
 
       messages = self.process_input messages
@@ -224,10 +233,16 @@ module LLM
       parameters[:input] = input
 
       response = client.responses.create(parameters: parameters)
+      Thread.current["previous_response_id"] = previous_response_id = response['id']
       response = self.process_response response, &block
 
       res = if response.last[:role] == 'function_call_output'
-              response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: parameters[:tools]), &block)
+              case previous_response_id
+              when String
+                response + self.ask(response, original_options.except(:tool_choice).merge(return_messages: true, tools: parameters[:tools], previous_response_id: previous_response_id), &block)
+              else
+                response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: parameters[:tools]), &block)
+              end
             else
               response
             end

@@ -148,6 +148,8 @@ module LLM
 
     if Open.exist?(file)
       file
+    elsif Open.remote?(file)
+      file
     elsif relative && Open.exist?(relative)
       relative
     elsif relative_lib && Open.exist?(relative_lib)
@@ -268,7 +270,7 @@ module LLM
           tool_output = {
             id: id,
             role: "tool",
-            content: step.path.read
+            content: Open.read(step.path)
           }
 
           [
@@ -516,12 +518,19 @@ module Chat
     self.message role, LLM.tag(tag, content, name)
   end
 
+
   def ask(...)
     LLM.ask(LLM.chat(self), ...)
   end
 
+  def respond(...)
+    self.ask(current_chat, ...)
+  end
+
   def chat(...)
-    self.push({role: :assistant, content: self.ask(...)})
+    response = respond(...)
+    current_chat.push({role: :assistant, content: response})
+    response
   end
 
   def json(...)
@@ -550,6 +559,15 @@ module Chat
     LLM.print LLM.chat(self)
   end
 
+  def save(path, force = true)
+    path = path.to_s if Symbol === path
+    if not (Open.exists?(path) || Path === path || Path.located?(path))
+      path = Scout.chats.find[path]
+    end
+    return if Open.exists?(path) && ! force
+    Open.write path, LLM.print(self)
+  end
+
   def write(path, force = true)
     path = path.to_s if Symbol === path
     if not (Open.exists?(path) || Path === path || Path.located?(path))
@@ -573,7 +591,7 @@ module Chat
   end
 
   def option(name, value)
-    self.message name, value
+    self.message 'option', [name, value] * " "
   end
 
   def endpoint(value)

@@ -2,7 +2,7 @@ require 'scout/workflow'
 require 'scout/knowledge_base'
 module LLM
   def self.tool_response(tool_call, &block)
-    tool_call_id = tool_call.dig("id")
+    tool_call_id = tool_call.dig("call_id") || tool_call.dig("id")
     if tool_call['function']
       function_name = tool_call.dig("function", "name")
       function_arguments = tool_call.dig("function", "arguments")
@@ -72,18 +72,17 @@ module LLM
       task_info[:input_options].include?(input) && task_info[:input_options][input][:required]
     end
 
-    {
-      type: "function",
-      function: {
-        name: task_name,
-        description: task_info[:description],
-        parameters: {
-          type: "object",
-          properties: properties,
-          required: required_inputs
-        }
+    function = {
+      name: task_name,
+      description: task_info[:description],
+      parameters: {
+        type: "object",
+        properties: properties,
+        required: required_inputs
       }
     }
+
+    function.merge(type: 'function', function: function)
   end
 
   def self.workflow_tools(workflow, tasks = nil)
@@ -177,7 +176,7 @@ module LLM
         {role: 'assistant', tool_calls: [tool_call]}
       elsif message[:role] == 'function_call_output'
         info = JSON.parse(message[:content])
-        id = info.delete('id') || ''
+        id = info.delete('call_id') || info.dig('id')
         info['role'] = 'tool'
         info['tool_call_id'] = id
         info
@@ -210,25 +209,28 @@ module LLM
     end.flatten
   end
 
-  def self.tools_to_responses(messages)
-    messages.collect do |message|
-      if message[:role] == 'function_call'
-        tool_call = JSON.parse(message[:content])
-        tool_call['function']['arguments'] = (tool_call['function']['arguments'] || {}).to_json
-        {role: 'assistant', tool_calls: [tool_call]}
-      elsif message[:role] == 'function_call_output'
-        info = JSON.parse(message[:content])
-        info["tool_call_id"] = info['id']
-        info
-      else
-        message
-      end
-    end.flatten
-  end
+  #def self.tools_to_responses(messages)
+  #  raise
+  #  messages.collect do |message|
+  #    if message[:role] == 'function_call'
+  #      tool_call = JSON.parse(message[:content])
+  #      tool_call['function']['arguments'] = (tool_call['function']['arguments'] || {}).to_json
+  #      {role: 'assistant', tool_calls: [tool_call]}
+  #    elsif message[:role] == 'function_call_output'
+  #      info = JSON.parse(message[:content])
+  #      info["tool_call_id"] = info['call_id']
+  #      info
+  #    else
+  #      message
+  #    end
+  #  end.flatten
+  #end
 
   def self.call_tools(tool_calls, &block)
     tool_calls.collect{|tool_call|
       response_message = LLM.tool_response(tool_call, &block)
+      function_call = tool_call
+      function_call['id'] = tool_call.delete('call_id') if tool_call.dig('call_id')
       [
         {role: "function_call", content: tool_call.to_json},
         {role: "function_call_output", content: response_message.to_json},

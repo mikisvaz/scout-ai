@@ -199,5 +199,41 @@ Name each actor as keys and the top 3 movies they took part of as values
     ppp LLM::Responses.ask prompt, format: schema
   end
 
+  def test_tool_gpt5
+    prompt =<<-EOF
+user:
+What is the weather in London. Should I take my umbrella?
+    EOF
+
+    tools = [
+      {
+        "type": "function",
+        "name": "get_current_temperature",
+        "description": "Get the current temperature and raining conditions for a specific location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string",
+              "description": "The city and state, e.g., San Francisco, CA"
+            },
+            "unit": {
+              "type": "string",
+              "enum": ["Celsius", "Fahrenheit"],
+              "description": "The temperature unit to use. Infer this from the user's location."
+            }
+          },
+          "required": ["location", "unit"]
+        }
+      },
+    ]
+
+    sss 0
+    respose = LLM::Responses.ask prompt, tool_choice: 'required', tools: tools, model: "gpt-5", log_errors: true do |name,arguments|
+      "It's 15 degrees and raining."
+    end
+
+    ppp respose
+  end
 end
 

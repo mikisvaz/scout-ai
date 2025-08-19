@@ -1,6 +1,10 @@
 require_relative 'ask'
 
 module LLM
+  def self.agent(...)
+    LLM::Agent.new(...)
+  end
+
   class Agent
     attr_accessor :workflow, :knowledge_base, :start_chat
     def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
@@ -65,7 +69,12 @@ You have access to the following databases associating entities:
             if workflow
               begin
                 Log.high "Calling #{workflow}##{name} with #{Log.fingerprint parameters}"
-                workflow.job(name, parameters).run
+                jobname = parameters.delete :jobname
+                if workflow.exec_exports.include? name.to_sym
+                  workflow.job(name, jobname, parameters).exec
+                else
+                  workflow.job(name, jobname, parameters).run
+                end
               rescue
                 $!.message
               end
