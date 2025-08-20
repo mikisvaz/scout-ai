@@ -1,12 +1,13 @@
 (function(){
   const API_BASE = ''; // same origin, adjust if your server is hosted elsewhere
-  const PREDEFINED_KEYS = ['user','system','assistant','import','file','directory','option','endpoint','model','backend','format','websearch','tool','task','job','inline_job'];
+  const PREDEFINED_KEYS = ['user','system','assistant','import','file','directory', 'continue', 'option','endpoint','model','backend','previous_response_id', 'format','websearch','tool','task','job','inline_job'];
   const ROLE_ONLY = ['user','system','assistant'];
-  const FILE_KEYS = ['import','file','directory'];
+  const FILE_KEYS = ['import','file','directory', 'continue'];
   const MARKED_CDN = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
 
   // State
   let cells = [];
+  let filesListCache = [];
 
   // DOM
   const pathEl = document.getElementById('path');
@@ -214,6 +215,7 @@
     });
     cellCountEl.textContent = cells.length;
 
+    // preserve existing file datalist if available
     renderDatalists();
   }
 
@@ -229,6 +231,8 @@
     try{
       const res = await fetchJSON(API_BASE + '/list');
       const wsFiles = res.files || [];
+      filesListCache = wsFiles.slice();
+      const prevScroll = filesDiv.scrollTop;
       filesDiv.innerHTML = '';
       if(wsFiles.length===0) filesDiv.innerHTML = '<div class="small muted">(no files)</div>';
       wsFiles.forEach(k=>{
@@ -240,11 +244,15 @@
 
       // update datalist for files
       renderDatalists(wsFiles);
+      filesDiv.scrollTop = prevScroll;
       log('Listed', wsFiles.length, 'files');
     }catch(e){ log('Error listing files:', e.message || e); filesDiv.innerHTML = '<div class="small muted">(error)</div>'; renderDatalists([]); }
   }
 
   function renderDatalists(filesList){
+    // if filesList not provided, use cached list so we don't wipe the file suggestions when re-rendering cells
+    if(typeof filesList === 'undefined') filesList = filesListCache || [];
+
     const oldKeys = document.getElementById('keys_datalist'); if(oldKeys) oldKeys.remove();
     const oldFiles = document.getElementById('files_datalist'); if(oldFiles) oldFiles.remove();
 
@@ -255,6 +263,9 @@
     const files = document.createElement('datalist'); files.id='files_datalist';
     (filesList || []).slice().sort().forEach(k=>{ const o=document.createElement('option'); o.value=k; files.appendChild(o); });
     document.body.appendChild(files);
+
+    // ensure the top path input uses the files datalist
+    if(pathEl){ pathEl.setAttribute('list','files_datalist'); }
   }
 
   async function saveFile(){ const p = pathEl.value.trim(); if(!p){ alert('Enter path'); return; } const text = cellsToText(cells);

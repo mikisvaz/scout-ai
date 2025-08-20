@@ -105,8 +105,12 @@ end
 get '/list' do
   files = []
   Dir.chdir(CHATS_DIR) do
+    # include dotmatch in glob so we can filter hidden files/dirs uniformly
     Dir.glob('**/*', File::FNM_DOTMATCH).sort.each do |f|
       next if f == '.' || f == '..'
+      # Skip any file or directory that has a path segment starting with '.'
+      segments = f.split(File::SEPARATOR)
+      next if segments.any? { |seg| seg.start_with?('.') }
       full = File.join(CHATS_DIR, f)
       next if File.directory?(full)
       files << f
