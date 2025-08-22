@@ -1,303 +1,296 @@
 # scout-ai
 
-scout-ai adds machine-learning, LLM, and “agentic AI” capabilities to the Scout framework. It focuses on:
+Agentic AI and machine‑learning for Scout: a compact layer to train/evaluate models (Ruby, Python/PyTorch, Hugging Face), talk to LLMs across multiple backends, wire Workflow tasks as tools, and build persistent, declarative conversations and agents.
 
-- Training and inference with HuggingFace and Torch (via Python helpers).
-- Using TSV-based datasets and producing model artifacts reproducibly.
-- Running ad‑hoc Python from Ruby (PyCall), including pandas DataFrame <-> TSV conversions.
-- Building workflow-driven training/evaluation pipelines with provenance and caching.
+This package sits on top of the Scout stack:
 
-scout-ai sits on top of the core Scout packages:
-- scout-essentials — low-level utilities (Annotation, Open, Path, Persist, CMD, Log, ConcurrentStream, etc.)
-- scout-gear — basic modules such as TSV, Entity, KnowledgeBase, Workflow, WorkQueue, etc.
-- scout-rig — language bridges (Python, etc.)
-- scout-camp — remote servers, cloud deployments, web UIs, cross-site tools
-- scout-ai — ML/LLM training and agentic utilities (this repository)
+- scout-essentials — low level functionality (Open, TSV, Persist, Path, ConcurrentStream, Log, etc.)
+- scout-gear — core data modules (TSV, KnowledgeBase, Entity, Association, Workflow, WorkQueue, etc.)
+- scout-rig — language bridges (notably Python via PyCall)
+- scout-camp — remote servers, cloud deployments, web interfaces
+- scout-ai — LLMs, agents and model wrappers (this repository)
 
-Repositories are available under https://github.com/mikisvaz (e.g. https://github.com/mikisvaz/scout-gear).
-
-Rbbt is the bioinformatics framework Scout was refactored out of and still hosts many end-to-end examples and workflows. Explore https://github.com/Rbbt-Workflows for usage patterns and inspiration.
-
-
-## Contents
-
-- Overview and requirements
-- Python bridge and helpers (scout and scout_ai packages)
-- TSV datasets and pandas conversions
-- Training and inference examples
-- Workflows for ML/LLM pipelines
-- Command Line Interface (scout …) discovery
-- Documentation references
-
-
-## Overview and requirements
-
-scout-ai provides Ruby APIs and Python helpers you can call from Ruby to:
-- Prepare datasets from TSVs (tabular data is first-class in Scout).
-- Train HuggingFace models (classification, causal LM, RLHF scaffold).
-- Evaluate models and run chat-style generation.
-- Orchestrate the above with Workflow tasks that persist, stream, and track provenance.
-
-Requirements:
-- Ruby with the Scout stack (scout-essentials, scout-gear, scout-rig, scout-ai)
-- Python 3 with:
-  - numpy and pandas
-  - torch and transformers (for most training/inference)
-  - datasets, accelerate, peft, trl (for advanced cases like RLHF)
-- Ruby gem pycall to bridge Ruby and Python
-
-
-## Python bridge and helpers
-
-ScoutPython is the core bridge between Ruby and Python. scout-ai ships additional Python helpers under the python/scout_ai package.
-
-Highlights:
-- Initialize Python and import modules succinctly:
-  ```ruby
-  ScoutPython.run :numpy, as: :np do
-    np.arange(5).tolist   # => [0,1,2,3,4]
-  end
-  ```
-- Execute in a background Python thread and stop it when done:
-  ```ruby
-  out = ScoutPython.run_threaded :sys do
-    sys.version
-  end
-  ScoutPython.stop_thread
-  ```
-- Run ad‑hoc Python scripts with Ruby variables (including TSV). The script must set a Python variable named `result`:
-  ```ruby
-  res = ScoutPython.script <<~PY, value: 2
-    result = value * 3
-  PY
-  # => 6
-  ```
-
-Python-side packages:
-- scout
-  - TSV IO that respects Scout headers: `scout.tsv(path)` → pandas DataFrame
-  - `scout.save_tsv(path, df)` to persist DataFrames
-  - Minimal workflow helpers to call Scout CLI from Python
-- scout_ai
-  - Utilities for ML with HuggingFace/Torch:
-    - util: `set_seed`, `deterministic`, `device`, `model_device`
-    - TSV datasets: `tsv_dataset`, `TSVDataset`, `tsv_loader`
-    - huggingface.data: `load_tsv`, `load_json`, `tokenize_dataset`, `list_dataset`
-    - huggingface.model: `load_model`, `load_tokenizer`, `load_model_and_tokenizer`
-    - huggingface.eval: `eval_model`, `eval_causal_lm_chat`
-    - huggingface.train: `training_args`, `train_model`
-    - huggingface.train.next_token: `train_next_token` loop for causal LMs
-    - huggingface.rlhf: `train_rlhf` scaffold (TRL)
-    - visualization/toy data under `scout_ai.atcold.*`
-
-
-## TSV datasets and pandas conversions
-
-Scout treats TSVs as the lingua franca for data.
-
-From Ruby:
-- Convert TSV to pandas DataFrame and back:
-  ```ruby
-  df = ScoutPython.tsv2df(tsv)   # TSV → pandas DataFrame
-  tsv2 = ScoutPython.df2tsv(df)  # DataFrame → TSV
-  ```
-
-From Python:
-- Use `scout.tsv(path)` to read a TSV (headers and types are honored) and `scout.save_tsv(path, df)` to persist a DataFrame back to a TSV stream with headers.
-
-
-## Training and inference examples
-
-HuggingFace text classification (Ruby driving Python):
-
-```ruby
-# Prepare a simple TSV with columns: Text, label
-tsv = TSV.setup([], key_field: "Id", fields: %w[Text label], type: :list)
-tsv["ex1"] = ["a positive text", "pos"]
-tsv["ex2"] = ["a negative text", "neg"]
-
-TmpFile.with_dir do |dir|
-  data_file = dir["train.tsv"].tap { |p| Open.write(p, tsv.to_s) }
-  out_dir   = dir["model"]
-
-  ScoutPython.script <<~PY, train: data_file, outdir: out_dir
-    import scout
-    import scout_ai.huggingface.train as train_mod
-    from scout_ai.huggingface.model import load_model, load_tokenizer
-    from scout_ai.huggingface.train import training_args, train_model
-    import pandas as pd
-
-    df  = scout.tsv(train)                      # pandas DataFrame with index=Id
-    labels = sorted(df['label'].unique())
-    label2id = {l:i for i,l in enumerate(labels)}
-
-    model_name = "distilbert-base-uncased"
-    tok = load_tokenizer(model_name)
-    mdl = load_model(model_name, num_labels=len(labels), label2id=label2id)
-
-    args = training_args(
-      output_dir=outdir,
-      num_train_epochs=1,
-      per_device_train_batch_size=8,
-      logging_steps=10,
-      save_strategy="no",
-      evaluation_strategy="no",
-    )
-
-    # train_model accepts a dataset compatible with HF datasets or a DataFrame via helper pipeline
-    train_model(mdl, tok, args, df)
-
-    result = outdir
-  PY
-
-  # out_dir now contains the fine-tuned model; you can persist/link it as a Step artifact
-end
-```
-
-Causal LM chat-style inference:
-
-```ruby
-msg = ScoutPython.script <<~PY, model_name: "gpt2", prompt: "Hello! How are you?"
-  from scout_ai.huggingface.model import load_model_and_tokenizer
-  from scout_ai.huggingface.eval import eval_causal_lm_chat
-
-  tok, mdl = load_model_and_tokenizer(model_name)
-  responses = eval_causal_lm_chat(mdl, tok, [prompt], max_new_tokens=40, temperature=0.8)
-  result = responses[0]
-PY
-# => generated string
-```
-
-Torch datasets from TSV:
-
-```ruby
-ScoutPython.run 'scout_ai.huggingface.data', import: :load_tsv do
-  # In Python context load a TSV into a datasets.Dataset
-end
-
-# Or construct a torch Dataset / DataLoader in a single Python block
-ScoutPython.script <<~PY, path: "/path/to/data.tsv"
-  from scout_ai.huggingface.data import load_tsv
-  from scout_ai.huggingface.data import tokenize_dataset
-  from scout_ai.util import set_seed, device
-  import transformers as tr
-
-  ds = load_tsv(path)                             # HF datasets.Dataset
-  tokenizer = tr.AutoTokenizer.from_pretrained("distilbert-base-uncased")
-  ds_tok = tokenize_dataset(ds, tokenizer, text_field="Text")
-  result = len(ds_tok)
-PY
-```
-
-
-## Workflows for ML/LLM pipelines
-
-Use Workflow to codify training/inference with reproducible persistence and provenance.
-
-A minimal training Workflow task that calls Python:
-
-```ruby
-module HF
-  extend Workflow
-  self.name = "HF"
-
-  input :train_tsv, :path, "Training TSV (Id,Text,label)"
-  input :model_name, :string, "Base model", "distilbert-base-uncased"
-  task :train_classifier => :path do |train_tsv, model_name|
-    out = file("model") # Step-local output directory
-    ScoutPython.script <<~PY, train: train_tsv.find, outdir: out, base_model: model_name
-      import scout
-      from scout_ai.huggingface.model import load_model, load_tokenizer
-      from scout_ai.huggingface.train import training_args, train_model
-
-      df  = scout.tsv(train)
-      labels = sorted(df['label'].unique())
-      label2id = {l:i for i,l in enumerate(labels)}
-
-      tok = load_tokenizer(base_model)
-      mdl = load_model(base_model, num_labels=len(labels), label2id=label2id)
-      args = training_args(output_dir=outdir, num_train_epochs=1, per_device_train_batch_size=8)
-      train_model(mdl, tok, args, df)
-      result = outdir
-    PY
-    out
-  end
-end
-
-# Run and persist a job
-HF.job(:train_classifier, "demo", train_tsv: "/data/train.tsv").run
-```
-
-All Workflow features apply: dependency graphs, streaming, info files, provenance reporting, orchestrated production with resource limits, and inputs archiving.
-
-
-## Command Line Interface (scout …)
-
-Scout discovers command-line scripts under scout_commands across installed packages using the Path subsystem. You compose commands by adding terms until a script path is resolved; if a directory is reached, the CLI lists available subcommands.
-
-General usage:
-- Listing:
-  - `scout` shows top-level groups discovered.
-  - `scout tsv`, `scout workflow`, `scout kb` list their subcommands if a directory is selected.
-- Executing:
-  - `scout tsv <subcommand> [options]` runs `scout_commands/tsv/<subcommand>`.
-  - `scout workflow <subcommand> …` runs workflow-related scripts (installed by your workflows under share/scout_commands/workflow).
-  - `scout kb <subcommand> …` operates on KnowledgeBase registries and indices.
-
-Examples (from core packages):
-- TSV:
-  - `scout tsv` — discover TSV utilities (attach, translate, paste, etc., depending on installed scripts).
-- Workflow:
-  - `scout workflow list`
-  - `scout workflow task <Workflow> <task> [task-input-options...]`
-  - `scout workflow prov <step_path>`
-  - `scout workflow process --continuous --produce_cpus 8`
-- KnowledgeBase:
-  - `scout kb register <name> <file> --source "FieldA" --target "FieldB"`
-  - `scout kb query <name> "Miki~"`
-
-Under the hood, the dispatcher uses Path to find scripts provided by all Scout packages and your installed workflows. Arguments after the resolved script are parsed by the script itself using SOPT (SimpleOPT).
-
-
-## Documentation references
-
-scout-ai
-- Python (ScoutPython) — bridging Ruby and Python, pandas / TSV conversions, and bundled Python helpers (scout and scout_ai)
-  - doc/Python.md
-
-Foundations (from other Scout packages)
-- Annotation — lightweight annotations on objects and arrays
-- CMD — robust external command execution with streaming and error handling
-- ConcurrentStream — concurrency-aware IO streams with join/abort semantics
-- IndiferentHash — indifferent Hash access and option utilities
-- Log — logging, color, progress bars
-- NamedArray — arrays with named fields and accessors
-- Open — unified file/stream IO, pipes, gzip, remote fetch, locking
-- Path — logical-to-physical path mapping and discovery
-- Persist — typed serialization, locking, caching, TSV persistence engines
-
-Data and workflows (from scout-gear)
-- TSV — table model and rich streaming/transformation API
-- Entity — typed entities with properties and format/identifier translation
-- Association — build pairwise association indices from TSVs
-- KnowledgeBase — register and query multiple association databases
-- Workflow — define tasks, Steps, orchestration, CLI integration
-- WorkQueue — multi-process pipelines
-
-Each module has a doc/*.md in its respective repository. See:
+All packages are available under github.com/mikisvaz:
 - https://github.com/mikisvaz/scout-essentials
 - https://github.com/mikisvaz/scout-gear
 - https://github.com/mikisvaz/scout-rig
+- https://github.com/mikisvaz/scout-camp
+- https://github.com/mikisvaz/scout-ai
 
-Examples and larger pipelines
-- Rbbt-Workflows organization: https://github.com/Rbbt-Workflows
-  - Many examples of TSV processing, workflows, and end-to-end analyses that informed Scout’s design.
+Scout originates from the Rbbt ecosystem (bioinformatics workflows). Numerous end‑to‑end examples live in the Rbbt‑Workflows organization:
+- https://github.com/Rbbt-Workflows
+
+The sections below summarize the main components (LLM, Chat, Agent, Model), quick starts, and the command‑line interface. For full APIs, see the doc/ directory.
+
+- doc/LLM.md — multi‑backend LLM orchestration, tool calling, embeddings
+- doc/Chat.md — conversation builder/serializer
+- doc/Agent.md — stateful agents wired to Workflows and KnowledgeBases
+- doc/Model.md — model wrappers (ScoutModel, Python/Torch/Hugging Face)
 
 
-## Notes
+## Installation and requirements
 
-- Training helpers assume Python dependencies are installed in the environment where PyCall points. Use `ScoutPython.run_log(:sys) { ... }` to inspect `sys.executable` and `sys.path`.
-- All persisted artifacts (model checkpoints, logs, info JSON) created in Workflow tasks live under `var/jobs/<Workflow>/<task>/<id>` unless configured otherwise; use `Step.prov_report(step)` or `scout workflow prov` to inspect provenance.
-- For remote or queued execution, pair Scout workflows with scout-camp utilities and Workflow queue/SLURM helpers.
+Scout is a Ruby framework. Add scout-ai (and the other packages you need) to your project and require as needed.
 
-Use scout-ai to keep your ML/LLM experiments reproducible: compose TSV data wrangling, Python model training/evaluation, and CLI automation into robust, inspectable pipelines.
+- Ruby 3.x recommended
+- For Python‑backed models (Torch/Hugging Face):
+  - Python 3 (installed and visible in PATH)
+  - pycall gem (Ruby ↔ Python bridge)
+  - Python packages: torch, transformers, numpy, pandas (as needed)
+- For OpenAI or similar backends: set API keys in environment or config (see LLM backend docs)
+
+Typical Gemfile fragment:
+```ruby
+gem 'scout-essentials', git: 'https://github.com/mikisvaz/scout-essentials'
+gem 'scout-gear',       git: 'https://github.com/mikisvaz/scout-gear'
+gem 'scout-rig',        git: 'https://github.com/mikisvaz/scout-rig'
+gem 'scout-ai',         git: 'https://github.com/mikisvaz/scout-ai'
+```
+
+Backends and endpoints can be configured under Scout.etc.AI/<endpoint>.yaml (merged into asks), or via environment variables per backend (see doc/LLM.md).
+
+
+## Quick starts
+
+### Ask a model
+
+```ruby
+require 'scout-ai'
+answer = LLM.ask "What is the capital of France?", backend: :openai, model: "gpt-4.1-mini"
+puts answer
+```
+
+Chat builder:
+
+```ruby
+chat = Chat.setup []
+chat.system "You are a terse assistant"
+chat.user   "List three colors"
+puts chat.ask
+```
+
+### Tool calling with a Workflow
+
+Export Workflow tasks as callable tools—let the model call them functionally.
+
+```ruby
+require 'scout-gear'  # defines Workflow
+
+m = Module.new do
+  extend Workflow
+  self.name = "Registration"
+
+  input :name, :string
+  input :age, :integer
+  input :gender, :select, nil, select_options: %w(male female)
+  task :person => :yaml do inputs.to_hash end
+end
+
+puts LLM.workflow_ask(m, "Register Eduard Smith, a 25 yo male, using a tool call",
+                      backend: 'ollama', model: 'llama3')
+```
+
+### Stateful agent with a KnowledgeBase
+
+```ruby
+require 'scout-gear'  # defines KnowledgeBase
+
+TmpFile.with_dir do |dir|
+  kb = KnowledgeBase.new dir
+  kb.register :brothers, datafile_test(:person).brothers, undirected: true
+  kb.register :marriages, datafile_test(:person).marriages,
+             undirected: true, source: "=>Alias", target: "=>Alias"
+  kb.register :parents, datafile_test(:person).parents
+
+  agent = LLM::Agent.new knowledge_base: kb
+  puts agent.ask "Who is Miki's brother in law?"
+end
+```
+
+### Structured iteration
+
+```ruby
+agent = LLM::Agent.new
+agent.iterate("List three steps to bake bread") { |step| puts "- #{step}" }
+
+agent.iterate_dictionary("Give capital cities for FR, ES, IT") do |country, capital|
+  puts "#{country}: #{capital}"
+end
+```
+
+### Use a Hugging Face classifier inside a Workflow
+
+From the ExTRI2 workflow (see below):
+
+```ruby
+model = HuggingfaceModel.new 'SequenceClassification', tri_model_dir, nil,
+  tokenizer_args: { model_max_length: 512, truncation: true },
+  return_logits: true
+
+model.extract_features do |_, rows|
+  rows.map do |text, tf, tg|
+    text.sub("[TF]", "<TF>#{tf}</TF>").sub("[TG]", "<TG>#{tg}</TG>")
+  end
+end
+
+model.init
+preds = model.eval_list tsv.slice(%w(Text TF Gene)).values
+tsv.add_field "Valid score" do
+  non_valid, valid = preds.shift
+  Misc.softmax([valid, non_valid]).first rescue 0
+end
+```
+
+
+## Components overview
+
+### LLM (doc/LLM.md)
+
+A compact, multi‑backend layer to ask LLMs, wire function‑calling tools, parse/print chats, and compute embeddings.
+
+- ask(question, options={}, &block) — normalize a question to messages (LLM.chat), merge endpoint/model/format, run backend, and return assistant output (or messages with return_messages: true)
+- Backends: OpenAI‑style, Responses (multimodal, JSON schema), Ollama, OpenWebUI, AWS Bedrock, and a simple Relay
+- Tools: export Workflow tasks (LLM.workflow_tools) and KnowledgeBase lookups; tool calls are handled via a block
+- Embeddings and a tiny RAG helper
+- Chat/print pipeline: imports, clean, tasks/jobs as function calls, files/directories as tagged content
+- Configuration: endpoint defaults in Scout.etc.AI/endpoint.yaml are merged into options automatically
+
+### Chat (doc/Chat.md)
+
+A lightweight builder over an Array of {role:, content:} messages with helpers:
+
+- user/system/assistant, file/directory tagging, import/continue
+- tool/workflow task declarations, jobs/inline jobs
+- association declarations (KnowledgeBase)
+- option, endpoint, model, format (including JSON schema requests)
+- ask, chat, json/json_format, print/save/write/write_answer, branch/shed
+
+Use Chat to author “chat files” on disk or build conversations programmatically.
+
+### Agent (doc/Agent.md)
+
+A thin orchestrator around Chat and LLM that keeps state and injects tools:
+
+- Maintains a live conversation (start_chat, start, current_chat)
+- Auto‑exports Workflow tasks and a KnowledgeBase traversal tool
+- ask/chat/json/iterate helpers; structured iteration over lists/dictionaries
+- load_from_path(dir) — bootstrap from a directory containing workflow.rb, knowledge_base, start_chat
+
+### Model (doc/Model.md)
+
+A composable framework to wrap models with a consistent API:
+
+- ScoutModel — base: define init/eval/eval_list/extract_features/post_process/train; persist behavior and state to a directory
+- PythonModel — initialize and drive a Python class via ScoutPython
+- TorchModel — helpers for PyTorch: training loop, tensors, save/load state, layer introspection
+- HuggingfaceModel — Transformers convenience; specializations:
+  - SequenceClassificationModel — text classification, logits→labels
+  - CausalModel — chat/causal generation (supports apply_chat_template)
+  - NextTokenModel — simple next‑token fine‑tuning loop
+
+Pattern:
+- Keep feature extraction separate from evaluation
+- Use eval_list to batch large tables
+- Persist directory state and behavior to reuse
+
+
+## Example: ExTRI2 workflow (models in practice)
+
+The ExTRI2 Workflow (Rbbt‑Workflows) uses HuggingfaceModel to score TRI sentences and determine Mode of Regulation (MoR):
+
+- Feature extraction marks [TF]/[TG] spans as inline tags for the model
+- Batch evaluation over a TSV (“Text”, “TF”, “Gene” columns)
+- Adds fields “Valid score” and “Valid” to the TSV
+- Runs a second SequenceClassification model to produce “MoR” and “MoR scores”
+
+See workflows/ExTRI2/workflow.rb in that repository for the full implementation.
+
+
+## Command‑Line Interface
+
+The bin/scout dispatcher locates scripts under scout_commands across installed packages and workflows using the Path subsystem. Resolution works by adding terms until a file is found to execute:
+
+- If the fragment maps to a directory, a listing of available subcommands is shown
+- Scripts can be nested arbitrarily (e.g., agent/kb)
+- Other packages or workflows can define their own scripts under share/scout_commands, and bin/scout will find them
+
+### scout llm …
+
+Ask an LLM, manage chat files, run a minimal web UI, or process queued requests. Scripts live under scout_commands/llm.
+
+- Ask
+  - scout llm ask [options] [question]
+    - -t|--template <file_or_key> — load a prompt template; substitutes “???” or appends
+    - -c|--chat <chat_file> — load/extend a conversation (appends the reply)
+    - -i|--inline <file> — answer “# ask: …” directives inline in a source file
+    - -f|--file <file> — prepend file content or substitute where “...” appears
+    - -m|--model, -e|--endpoint, -b|--backend — select backend/model; merged with Scout.etc.AI
+    - -d|--dry_run — expand and print the conversation (no ask)
+
+- Relay processor (for the Relay backend)
+  - scout llm process [directory] — watches a queue directory and answers ask JSONs
+
+- Web UI server
+  - scout llm server — static chat UI over ./chats with a small JSON API
+
+- Templates
+  - scout llm template — list installed prompt templates (Scout.questions)
+
+Run “scout llm” alone to see available subcommands. If you target a directory (e.g., “scout llm”), a help‑like listing is printed.
+
+### scout agent …
+
+Stateful agents with Workflow and KnowledgeBase tooled up. Scripts live under scout_commands/agent.
+
+- Ask via an Agent
+  - scout agent ask [options] [agent_name] [question]
+    - -l|--log <level> — set log severity
+    - -t|--template <file_or_key>
+    - -c|--chat <chat_file>
+    - -m|--model, -e|--endpoint
+    - -f|--file <path>
+    - -wt|--workflow_tasks <comma_list> — export only selected tasks
+    - agent_name resolves via Scout.workflows[agent_name] (a workflow) or Scout.chats[agent_name] (an agent directory with workflow.rb/knowledge_base/start_chat)
+
+- KnowledgeBase passthrough
+  - scout agent kb <agent_name> <kb subcommand...>
+    - Loads the agent’s knowledge base and forwards to “scout kb …” (see scout-gear doc/KnowledgeBase.md for kb CLI)
+
+As with other Scout CLIs, if you target a directory of commands (e.g., “scout agent”), bin/scout will show the subcommand listing.
+
+Note: Workflows also have extensive CLI commands (scout workflow …) for job execution, provenance, orchestration, and queue processing. When you integrate models inside tasks, you drive them through the workflow CLI (see scout-gear doc/Workflow.md).
+
+
+## Configuration, persistence and reproducibility
+
+- Endpoint presets: place YAML under Scout.etc.AI/<endpoint>.yaml to preconfigure URLs, models, headers, etc.; CLI options and chat inline options override defaults
+- Tool calling: Workflow tasks are exported as JSON schemas per backend; results are serialized back to the model as tool replies
+- Caching: LLM.ask persists responses (by default) using Persist.persist; disable with persist: false
+- Models: pass a directory to persist options/behavior/state (Torch/HF use state files or save_pretrained directories); save/restore to reuse
+- Chats: save printable conversations with Chat#save; reuse with “scout llm ask -c <file>”
+
+For Python models, ensure scout-rig (ScoutPython) is installed and Python packages are present. See doc/Python.md in scout-rig for details.
+
+
+## Where to go next
+
+- Explore the API docs shipped in this repository:
+  - doc/LLM.md — orchestration, backends, tools, CLI
+  - doc/Chat.md — conversation DSL and file format
+  - doc/Agent.md — stateful agents, Workflow/KB wiring, iterate helpers
+  - doc/Model.md — model wrappers; ScoutModel, Python/Torch/Hugging Face
+
+- Browse real‑world workflows (including ExTRI2) in Rbbt‑Workflows:
+  - https://github.com/Rbbt-Workflows
+
+- Learn core building blocks (TSV, KnowledgeBase, Workflow, etc.) in scout-gear and scout-essentials:
+  - https://github.com/mikisvaz/scout-gear
+  - https://github.com/mikisvaz/scout-essentials
+
+- Integrate Python with scout-rig:
+  - https://github.com/mikisvaz/scout-rig
+
+
+## License and contributions
+
+Issues and PRs are welcome across the Scout repositories. Please open tickets in the relevant package (e.g., scout-ai for LLM/Agent/Model topics).
