@@ -1,308 +1,303 @@
-# Writing Scout-AI Agents: A Practical Guide
+# scout-ai
 
-## Table of Contents
+scout-ai adds machine-learning, LLM, and “agentic AI” capabilities to the Scout framework. It focuses on:
 
-1. **Introduction to Scout-AI Agents**
-2. **Basic Agent Lifecycle**
-3. **Advanced Features**
-   - **Working with Endpoints**
-   - **Integrating Tasks and Tools**
-   - **File and Directory Interaction**
-   - **Handling Images**
-   - **Iterating Over Dictionaries**
-4. **Structured Outputs**
-   - **Simple JSON Responses**
-   - **Structured Output with Custom Formats**
-   - **Schema-based Responses**
-5. **Maintaining and Extending Workflow Context**
-6. **Saving Chats and Answers**
-7. **Other Capabilities and Tips**
-8. **Best Practices & Scout-AI Principles**
-9. **Examples**
-   - **Minimal Agent**
-   - **Task-Integrating Agent**
-   - **Image Analysis Agent**
-10. **Conclusion**
+- Training and inference with HuggingFace and Torch (via Python helpers).
+- Using TSV-based datasets and producing model artifacts reproducibly.
+- Running ad‑hoc Python from Ruby (PyCall), including pandas DataFrame <-> TSV conversions.
+- Building workflow-driven training/evaluation pipelines with provenance and caching.
 
----
+scout-ai sits on top of the core Scout packages:
+- scout-essentials — low-level utilities (Annotation, Open, Path, Persist, CMD, Log, ConcurrentStream, etc.)
+- scout-gear — basic modules such as TSV, Entity, KnowledgeBase, Workflow, WorkQueue, etc.
+- scout-rig — language bridges (Python, etc.)
+- scout-camp — remote servers, cloud deployments, web UIs, cross-site tools
+- scout-ai — ML/LLM training and agentic utilities (this repository)
 
-## 1. Introduction to Scout-AI Agents
+Repositories are available under https://github.com/mikisvaz (e.g. https://github.com/mikisvaz/scout-gear).
 
-Scout-AI agents provide a high-level, scriptable interface to orchestrate conversations, integrate tasks from machine learning workflows, and automate data-driven analysis—all with an intuitive and extensible Ruby API. Agents are designed for reusability and modularity, supporting a wide range of interaction and workflow automation scenarios.
+Rbbt is the bioinformatics framework Scout was refactored out of and still hosts many end-to-end examples and workflows. Explore https://github.com/Rbbt-Workflows for usage patterns and inspiration.
 
----
 
-## 2. Basic Agent Lifecycle
+## Contents
 
-The core pattern for effective agent use aligns with Scout-AI’s lifecycle model: **initialize once, configure chat context, and reuse the agent for repeated runs**.
+- Overview and requirements
+- Python bridge and helpers (scout and scout_ai packages)
+- TSV datasets and pandas conversions
+- Training and inference examples
+- Workflows for ML/LLM pipelines
+- Command Line Interface (scout …) discovery
+- Documentation references
 
-```ruby
-require 'scout-ai'
 
-agent = LLM::Agent.new        # Initialize agent only once
+## Overview and requirements
 
-agent.start_chat.import 'system/biologist'
-agent.start_chat.import 'intro/setup'
-agent.start_chat.import 'intro/results'
+scout-ai provides Ruby APIs and Python helpers you can call from Ruby to:
+- Prepare datasets from TSVs (tabular data is first-class in Scout).
+- Train HuggingFace models (classification, causal LM, RLHF scaffold).
+- Evaluate models and run chat-style generation.
+- Orchestrate the above with Workflow tasks that persist, stream, and track provenance.
 
-# Now, whenever you want to start a new conversation with the same setup:
-agent.start                  # New clean chat with previous start_chat setup
-agent.user "What are the main findings?"
-agent.chat
-```
+Requirements:
+- Ruby with the Scout stack (scout-essentials, scout-gear, scout-rig, scout-ai)
+- Python 3 with:
+  - numpy and pandas
+  - torch and transformers (for most training/inference)
+  - datasets, accelerate, peft, trl (for advanced cases like RLHF)
+- Ruby gem pycall to bridge Ruby and Python
 
-- `start_chat` lets you **set the initial prompts, imports, or system messages** for all new conversations managed by this agent.
-- After calling `start`, the agent’s chat session is reinitialized with the contents of `start_chat`. This lets you rerun analyses or prompts with a consistent context at any time.
-- Agents are **reusable**: set up common context up front, and `start` as many times as you wish.
 
----
+## Python bridge and helpers
 
-## 3. Advanced Features
+ScoutPython is the core bridge between Ruby and Python. scout-ai ships additional Python helpers under the python/scout_ai package.
 
-### Working with Endpoints
+Highlights:
+- Initialize Python and import modules succinctly:
+  ```ruby
+  ScoutPython.run :numpy, as: :np do
+    np.arange(5).tolist   # => [0,1,2,3,4]
+  end
+  ```
+- Execute in a background Python thread and stop it when done:
+  ```ruby
+  out = ScoutPython.run_threaded :sys do
+    sys.version
+  end
+  ScoutPython.stop_thread
+  ```
+- Run ad‑hoc Python scripts with Ruby variables (including TSV). The script must set a Python variable named `result`:
+  ```ruby
+  res = ScoutPython.script <<~PY, value: 2
+    result = value * 3
+  PY
+  # => 6
+  ```
 
-Endpoints control which backend model or engine is used for a specific agent reply (for example, sending queries to "sambanova" or "websearch"):
+Python-side packages:
+- scout
+  - TSV IO that respects Scout headers: `scout.tsv(path)` → pandas DataFrame
+  - `scout.save_tsv(path, df)` to persist DataFrames
+  - Minimal workflow helpers to call Scout CLI from Python
+- scout_ai
+  - Utilities for ML with HuggingFace/Torch:
+    - util: `set_seed`, `deterministic`, `device`, `model_device`
+    - TSV datasets: `tsv_dataset`, `TSVDataset`, `tsv_loader`
+    - huggingface.data: `load_tsv`, `load_json`, `tokenize_dataset`, `list_dataset`
+    - huggingface.model: `load_model`, `load_tokenizer`, `load_model_and_tokenizer`
+    - huggingface.eval: `eval_model`, `eval_causal_lm_chat`
+    - huggingface.train: `training_args`, `train_model`
+    - huggingface.train.next_token: `train_next_token` loop for causal LMs
+    - huggingface.rlhf: `train_rlhf` scaffold (TRL)
+    - visualization/toy data under `scout_ai.atcold.*`
 
-```ruby
-agent.endpoint :sambanova
-agent.user "Explain the significance."
-agent.chat
-```
 
-- **Note**: The endpoint is only active for the *next* assistant reply. After each assistant message (i.e., after `.chat`), the endpoint variable is reset and must be set again if you wish to keep using the same backend.
+## TSV datasets and pandas conversions
 
-### Integrating Tasks and Tools
+Scout treats TSVs as the lingua franca for data.
 
-Agents can execute tasks within workflows or expose tools directly to the user:
+From Ruby:
+- Convert TSV to pandas DataFrame and back:
+  ```ruby
+  df = ScoutPython.tsv2df(tsv)   # TSV → pandas DataFrame
+  tsv2 = ScoutPython.df2tsv(df)  # DataFrame → TSV
+  ```
 
-```ruby
-# Run a specific workflow task and include its result
-agent.task AGS, :list_tfs, treatment: t, time_point: tp, direction: "down"
+From Python:
+- Use `scout.tsv(path)` to read a TSV (headers and types are honored) and `scout.save_tsv(path, df)` to persist a DataFrame back to a TSV stream with headers.
 
-# Offer tool access in the chat itself
-agent.tool "AGS", "list_tfs", "list_tgs" # Only makes these tasks available to the user
-agent.tool "AGS"                         # Makes all tasks in workflow AGS available
-```
 
-- If you add a `tool` role message, the user can directly request these tools during the chat.
-- If the workflow name is given without tasks, all tasks will be available; if you list space-separated tasks, only those are enabled.
+## Training and inference examples
 
-### File and Directory Interaction
-
-Agents work seamlessly with files and directories:
-
-```ruby
-agent.file 'workflow.rb'           # Attach a file’s contents to the chat context
-agent.directory 'theme/immune/'    # Attach all files in the directory
-```
-
-Results and logs can be persisted using:
-
-```ruby
-agent.write "results/summary"      # Save the entire chat history (including roles etc.)
-agent.write_answer "results/plain" # Save only the agent's last answer (text only)
-```
-
-### Handling Images
-
-To involve image processing or attach visuals, simply use:
-
-```ruby
-agent.image 'experiment.png'
-```
-
-### Iterating Over Dictionaries
-
-Process multiple items from a dictionary:
+HuggingFace text classification (Ruby driving Python):
 
 ```ruby
-agent.iterate_dictionary <<-EOF do |name, description|
-Return a dictionary of open-source projects by name and description.
-EOF
+# Prepare a simple TSV with columns: Text, label
+tsv = TSV.setup([], key_field: "Id", fields: %w[Text label], type: :list)
+tsv["ex1"] = ["a positive text", "pos"]
+tsv["ex2"] = ["a negative text", "neg"]
 
-  agent.start
-  agent.user "Analyze #{name}: #{description}"
-  agent.chat
-  agent.write "deep/#{name}"
+TmpFile.with_dir do |dir|
+  data_file = dir["train.tsv"].tap { |p| Open.write(p, tsv.to_s) }
+  out_dir   = dir["model"]
+
+  ScoutPython.script <<~PY, train: data_file, outdir: out_dir
+    import scout
+    import scout_ai.huggingface.train as train_mod
+    from scout_ai.huggingface.model import load_model, load_tokenizer
+    from scout_ai.huggingface.train import training_args, train_model
+    import pandas as pd
+
+    df  = scout.tsv(train)                      # pandas DataFrame with index=Id
+    labels = sorted(df['label'].unique())
+    label2id = {l:i for i,l in enumerate(labels)}
+
+    model_name = "distilbert-base-uncased"
+    tok = load_tokenizer(model_name)
+    mdl = load_model(model_name, num_labels=len(labels), label2id=label2id)
+
+    args = training_args(
+      output_dir=outdir,
+      num_train_epochs=1,
+      per_device_train_batch_size=8,
+      logging_steps=10,
+      save_strategy="no",
+      evaluation_strategy="no",
+    )
+
+    # train_model accepts a dataset compatible with HF datasets or a DataFrame via helper pipeline
+    train_model(mdl, tok, args, df)
+
+    result = outdir
+  PY
+
+  # out_dir now contains the fine-tuned model; you can persist/link it as a Step artifact
 end
 ```
 
----
-
-## 4. Structured Outputs
-
-Scout-AI agents enable you to request and receive structured data from models—such as hashes or arrays—parsed automatically as JSON. This makes it straightforward to chain outputs with downstream analysis or further scripting.
-
-### Simple JSON Responses
-
-To receive a structured object (such as a hash or array) in response to a prompt, add the request directly as a user role and use the `agent.json` method.
+Causal LM chat-style inference:
 
 ```ruby
-agent.user <<-EOF
-List the top 3 movies for each protagonist of the original Ghostbusters.
-EOF
-movies_by_actor = agent.json
+msg = ScoutPython.script <<~PY, model_name: "gpt2", prompt: "Hello! How are you?"
+  from scout_ai.huggingface.model import load_model_and_tokenizer
+  from scout_ai.huggingface.eval import eval_causal_lm_chat
+
+  tok, mdl = load_model_and_tokenizer(model_name)
+  responses = eval_causal_lm_chat(mdl, tok, [prompt], max_new_tokens=40, temperature=0.8)
+  result = responses[0]
+PY
+# => generated string
 ```
-- The model will respond in JSON. The hash is parsed and assigned to `movies_by_actor`.
-- This is best for simple structures where the expected format can be explained directly in the prompt.
 
-### Structured Output with Custom Formats (`json_format`)
-
-For more complex outputs or to tightly constrain the structure, use the `json_format` method with a format specification or schema. This can be either a Ruby hash describing the format, or a JSON Schema.
+Torch datasets from TSV:
 
 ```ruby
-schema = {
-  type: "object",
-  additionalProperties: {type: :array, items: {type: :string}}
-}
-agent.user <<-EOF
-Return, as a JSON object, the top 3 movies for each main actor of Ghostbusters. The actor names are the keys, and their movie lists are the values.
-EOF
-result = agent.json_format(schema)
+ScoutPython.run 'scout_ai.huggingface.data', import: :load_tsv do
+  # In Python context load a TSV into a datasets.Dataset
+end
+
+# Or construct a torch Dataset / DataLoader in a single Python block
+ScoutPython.script <<~PY, path: "/path/to/data.tsv"
+  from scout_ai.huggingface.data import load_tsv
+  from scout_ai.huggingface.data import tokenize_dataset
+  from scout_ai.util import set_seed, device
+  import transformers as tr
+
+  ds = load_tsv(path)                             # HF datasets.Dataset
+  tokenizer = tr.AutoTokenizer.from_pretrained("distilbert-base-uncased")
+  ds_tok = tokenize_dataset(ds, tokenizer, text_field="Text")
+  result = len(ds_tok)
+PY
 ```
 
-You can also load your format from a file or another source. This instructs the backend to validate and output the structured data according to your schema, making it suitable for downstream coding or automation.
 
-#### Example: Using a Format for Flat String Map
+## Workflows for ML/LLM pipelines
+
+Use Workflow to codify training/inference with reproducible persistence and provenance.
+
+A minimal training Workflow task that calls Python:
 
 ```ruby
-actor_format = {
-  name: 'actors_and_top_movies',
-  type: 'object',
-  properties: {},
-  additionalProperties: {type: :string}
-}
-agent.user <<-EOF
-Name each actor from Ghostbusters and the single top movie they took part in.
-EOF
-result = agent.json_format(actor_format)
+module HF
+  extend Workflow
+  self.name = "HF"
+
+  input :train_tsv, :path, "Training TSV (Id,Text,label)"
+  input :model_name, :string, "Base model", "distilbert-base-uncased"
+  task :train_classifier => :path do |train_tsv, model_name|
+    out = file("model") # Step-local output directory
+    ScoutPython.script <<~PY, train: train_tsv.find, outdir: out, base_model: model_name
+      import scout
+      from scout_ai.huggingface.model import load_model, load_tokenizer
+      from scout_ai.huggingface.train import training_args, train_model
+
+      df  = scout.tsv(train)
+      labels = sorted(df['label'].unique())
+      label2id = {l:i for i,l in enumerate(labels)}
+
+      tok = load_tokenizer(base_model)
+      mdl = load_model(base_model, num_labels=len(labels), label2id=label2id)
+      args = training_args(output_dir=outdir, num_train_epochs=1, per_device_train_batch_size=8)
+      train_model(mdl, tok, args, df)
+      result = outdir
+    PY
+    out
+  end
+end
+
+# Run and persist a job
+HF.job(:train_classifier, "demo", train_tsv: "/data/train.tsv").run
 ```
 
-#### Example: Using a Strict Schema
+All Workflow features apply: dependency graphs, streaming, info files, provenance reporting, orchestrated production with resource limits, and inputs archiving.
 
-```ruby
-schema =  {
-  "type": "object",
-  "properties": {
-    "people": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string" },
-          "movies": {
-            "type": "array",
-            "items": { "type": "string" },
-            "minItems": 3,
-            "maxItems": 3
-          }
-        },
-        "required": ["name", "movies"],
-        "additionalProperties": false
-      }
-    }
-  },
-  "required": ["people"],
-  "additionalProperties": false
-}
-agent.user <<-EOF
-List each actor in Ghostbusters and their top 3 movies in a structured format.
-EOF
-result = agent.json_format(schema)
-```
 
-See also: `test/scout/llm/backends/test_responses.rb` for several practical
-examples of format usage.
+## Command Line Interface (scout …)
 
----
+Scout discovers command-line scripts under scout_commands across installed packages using the Path subsystem. You compose commands by adding terms until a script path is resolved; if a directory is reached, the CLI lists available subcommands.
 
-## 5. Maintaining and Extending Workflow Context
+General usage:
+- Listing:
+  - `scout` shows top-level groups discovered.
+  - `scout tsv`, `scout workflow`, `scout kb` list their subcommands if a directory is selected.
+- Executing:
+  - `scout tsv <subcommand> [options]` runs `scout_commands/tsv/<subcommand>`.
+  - `scout workflow <subcommand> …` runs workflow-related scripts (installed by your workflows under share/scout_commands/workflow).
+  - `scout kb <subcommand> …` operates on KnowledgeBase registries and indices.
 
-Agents can refer back to, or continue from, previous outputs or chats for multi-stage workflows:
+Examples (from core packages):
+- TSV:
+  - `scout tsv` — discover TSV utilities (attach, translate, paste, etc., depending on installed scripts).
+- Workflow:
+  - `scout workflow list`
+  - `scout workflow task <Workflow> <task> [task-input-options...]`
+  - `scout workflow prov <step_path>`
+  - `scout workflow process --continuous --produce_cpus 8`
+- KnowledgeBase:
+  - `scout kb register <name> <file> --source "FieldA" --target "FieldB"`
+  - `scout kb query <name> "Miki~"`
 
-```ruby
-agent.continue :previous_session     # Continue from a prior saved chat
-agent.import 'schemas/dictionary'    # Import schema or helper context
-agent.user "Break down the analysis into themes."
-themes = agent.json                  # Parse structured output as JSON
-```
+Under the hood, the dispatcher uses Path to find scripts provided by all Scout packages and your installed workflows. Arguments after the resolved script are parsed by the script itself using SOPT (SimpleOPT).
 
----
 
-## 6. Saving Chats and Answers
+## Documentation references
 
-- Use `agent.write PATH` to persist the **entire chat**, including all context and roles, for provenance and future reference.
-- Use `agent.write_answer PATH` to store **only the agent's latest answer**, useful for downstream automation or reporting.
+scout-ai
+- Python (ScoutPython) — bridging Ruby and Python, pandas / TSV conversions, and bundled Python helpers (scout and scout_ai)
+  - doc/Python.md
 
----
+Foundations (from other Scout packages)
+- Annotation — lightweight annotations on objects and arrays
+- CMD — robust external command execution with streaming and error handling
+- ConcurrentStream — concurrency-aware IO streams with join/abort semantics
+- IndiferentHash — indifferent Hash access and option utilities
+- Log — logging, color, progress bars
+- NamedArray — arrays with named fields and accessors
+- Open — unified file/stream IO, pipes, gzip, remote fetch, locking
+- Path — logical-to-physical path mapping and discovery
+- Persist — typed serialization, locking, caching, TSV persistence engines
 
-## 7. Other Capabilities and Tips
+Data and workflows (from scout-gear)
+- TSV — table model and rich streaming/transformation API
+- Entity — typed entities with properties and format/identifier translation
+- Association — build pairwise association indices from TSVs
+- KnowledgeBase — register and query multiple association databases
+- Workflow — define tasks, Steps, orchestration, CLI integration
+- WorkQueue — multi-process pipelines
 
-- Agents can handle error situations gracefully via standard Ruby error handling.
-- The same agent instance can serve many different analyses if you consistently use `start` between runs.
-- You may combine advanced scripting (loops, conditions) as these are ordinary Ruby objects.
+Each module has a doc/*.md in its respective repository. See:
+- https://github.com/mikisvaz/scout-essentials
+- https://github.com/mikisvaz/scout-gear
+- https://github.com/mikisvaz/scout-rig
 
----
+Examples and larger pipelines
+- Rbbt-Workflows organization: https://github.com/Rbbt-Workflows
+  - Many examples of TSV processing, workflows, and end-to-end analyses that informed Scout’s design.
 
-## 8. Best Practices & Scout-AI Principles
 
-- **Keep Agent Setups Modular**: Use `start_chat` for foundational setup, and per-analysis blocks for specifics.
-- **Prefer Reuse**: Configure agents once, and call `start` for new, reproducible chats.
-- **Persist Everything Important**: Persist chats and answers as required for traceability and reproducibility.
-- **Expose Tools When Needed**: Use the `tool` role to let the user interactively access workflow tasks.
-- **Maintain Clarity**: Save only the chat (`write`) or only the assistant's answer (`write_answer`) as appropriate.
+## Notes
 
-Scout-AI enforces a shared, backend-agnostic model and strict persistence for data, options, and code artifacts—your agents should reflect these principles for maximum interoperability and maintainability.
+- Training helpers assume Python dependencies are installed in the environment where PyCall points. Use `ScoutPython.run_log(:sys) { ... }` to inspect `sys.executable` and `sys.path`.
+- All persisted artifacts (model checkpoints, logs, info JSON) created in Workflow tasks live under `var/jobs/<Workflow>/<task>/<id>` unless configured otherwise; use `Step.prov_report(step)` or `scout workflow prov` to inspect provenance.
+- For remote or queued execution, pair Scout workflows with scout-camp utilities and Workflow queue/SLURM helpers.
 
----
-
-## 9. Examples
-
-### Minimal Agent
-
-```ruby
-agent = LLM::Agent.new
-agent.start_chat.system "You are a helpful assistant."
-agent.start
-agent.user "Tell me about genome editing."
-agent.chat
-agent.write_answer "results/summary.txt"   # Only saves last response (plain text)
-```
-
-### Task-Integrating Agent
-
-```ruby
-Workflow.require_workflow "AGS"
-
-agent = LLM::Agent.new
-agent.start_chat.import 'system/biologist'
-agent.start
-
-agent.task AGS, :list_tfs, treatment: "INT", time_point: "6", direction: "up"
-agent.user "Explain which transcription factors are most significant."
-agent.endpoint :sambanova
-agent.chat
-agent.write "analysis/INT_tfs"
-```
-
-### Image Analysis Agent
-
-```ruby
-agent = LLM::Agent.new
-agent.start_chat.system "You are a microscopy image analyst."
-agent.file "experiment_script.rb"
-agent.image "well_plate.png"
-
-agent.user "Assess the image and suggest improvements for colony counting."
-agent.endpoint :responses
-agent.chat
-agent.write "colony_feedback.txt"
-```
-
----
-
-## 10. Conclusion
-
-Scout-AI agents offer a robust and flexible interface for orchestrating stateful, reproducible conversations and model-driven analyses. By following these guidelines, you can compose advanced workflows, request structured responses, integrate interactive tools for the user, and maintain a high level of clarity, reusability, and persistence—consistent with the Scout-AI engineering principles.
-
----
+Use scout-ai to keep your ML/LLM experiments reproducible: compose TSV data wrangling, Python model training/evaluation, and CLI automation into robust, inspectable pipelines.
