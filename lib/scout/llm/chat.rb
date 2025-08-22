@@ -42,17 +42,6 @@ module LLM
           current_content << "\n" << line unless line.strip.empty?
         end
         next
-      #elsif stripped.start_with?("---")
-      #  if in_protected_block
-      #    in_protected_block = false
-      #    protected_block_type = nil
-      #    current_content << "\n" << line unless line.strip.empty?
-      #  else
-      #    in_protected_block = true
-      #    protected_block_type = :square
-      #    current_content << "\n" << line unless line.strip.empty?
-      #  end
-      #  next
       elsif stripped.end_with?("]]") && in_protected_block && protected_block_type == :square
         in_protected_block = false
         protected_block_type = nil
@@ -114,8 +103,9 @@ module LLM
         role = $1
         inline_content = $2.strip
 
+        current_content = current_content.strip if current_content
         # Save current message if any
-        messages << { role: current_role, content: current_content.strip }
+        messages << { role: current_role, content: current_content }
 
         if inline_content.empty?
           # Block message
@@ -124,11 +114,14 @@ module LLM
         else
           # Inline message + next block is default role
           messages << { role: role, content: inline_content }
-          #current_role = default_role
           current_content = ""
         end
       else
-        current_content << "\n" << line
+        if current_content.nil?
+          current_content = line
+        else
+          current_content << "\n" << line
+        end
       end
     end
 
@@ -256,7 +249,9 @@ module LLM
 
 
         if message[:role] == 'inline_job'
-          {role: 'file', content: step.path.find}
+          path = step.path
+          path = path.find if Path === path
+          {role: 'file', content: step.path}
         else
           tool_call = {
             type: "function",
@@ -288,7 +283,10 @@ module LLM
     new = []
 
     messages.reverse.each do |message|
-      if message[:role] == 'clear'
+      if message[:role].to_s == 'clear'
+        break
+      elsif message[:role].to_s == 'previous_response_id'
+        new << message
         break
       else
         new << message
@@ -338,12 +336,18 @@ module LLM
 
   def self.options(chat)
     options = IndiferentHash.setup({})
+    strong_options = IndiferentHash.setup({})
     new = []
+
+    # Most options reset after an assistant reply, but not previous_response_id
     chat.each do |info|
       if Hash === info
         role = info[:role].to_s
         if %w(endpoint model backend persist).include? role.to_s
           options[role] = info[:content]
+          next
+        elsif %w(previous_response_id).include? role.to_s
+          strong_options[role] = info[:content]
           next
         elsif %w(format).include? role.to_s
           format = info[:content]
@@ -370,7 +374,7 @@ module LLM
       new << info
     end
     chat.replace new
-    options
+    strong_options.merge options
   end
 
   def self.tools(messages)
@@ -434,15 +438,19 @@ module LLM
 
   def self.print(chat)
     return chat if String  === chat
-    chat.collect do |message|
+    "\n" + chat.collect do |message|
       IndiferentHash.setup message
       case message[:content]
       when Hash, Array
         message[:role].to_s + ":\n\n" + message[:content].to_json
-      when nil
-        message[:role].to_s + ":\n\n" + message.to_json
+      when nil, ''
+        message[:role].to_s + ":"
       else
-        message[:role].to_s + ":\n\n" + message[:content].to_s
+        if %w(option previous_response_id).include? message[:role]
+          message[:role].to_s + ": " + message[:content].to_s
+        else
+          message[:role].to_s + ":\n\n" + message[:content].to_s
+        end
       end
     end * "\n\n"
   end
@@ -508,6 +516,11 @@ module Chat
     message(:job, step.path)
   end
 
+  def inline_job(step)
+    message(:inline_job, step.path)
+  end
+
+
   def association(name, path, options = {})
     options_str = IndiferentHash.print_options options
     content = [name, path, options_str]*" "
@@ -529,7 +542,7 @@ module Chat
 
   def chat(...)
     response = respond(...)
-    current_chat.push({role: :assistant, content: response})
+    current_chat.concat({role: :assistant, content: response})
     response
   end
 

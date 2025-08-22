@@ -5,8 +5,8 @@ require_relative '../chat'
 module LLM
   module OpenAI
 
-    def self.client(url, key, log_errors = false)
-      Object::OpenAI::Client.new(access_token:key, log_errors: log_errors, uri_base: url)
+    def self.client(url, key, log_errors = false, request_timeout: 1200)
+      Object::OpenAI::Client.new(access_token:key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout)
     end
 
     def self.process_input(messages)
@@ -43,8 +43,8 @@ module LLM
       tools = LLM.tools messages
       associations = LLM.associations messages
 
-      client, url, key, model, log_errors, return_messages, format, tool_choice_next = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :log_errors, :return_messages, :format, :tool_choice_next,
+      client, url, key, model, log_errors, return_messages, format, tool_choice_next, previous_response_id = IndiferentHash.process_options options,
+        :client, :url, :key, :model, :log_errors, :return_messages, :format, :tool_choice_next, :previous_response_id,
         log_errors: true, tool_choice_next: :none
 
       if client.nil?
@@ -100,7 +100,6 @@ module LLM
       messages = self.process_input messages
 
       Log.low "Calling openai #{url}: #{Log.fingerprint parameters}}"
-      Log.debug LLM.print messages
 
       parameters[:messages] = LLM.tools_to_openai messages
 

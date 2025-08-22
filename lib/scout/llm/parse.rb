@@ -1,3 +1,4 @@
+require 'scout/llm/utils'
 module LLM
   def self.process_inside(inside)
     header, content = inside.match(/([^\n]*)\n(.*)/).values_at 1, 2

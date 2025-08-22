@@ -233,7 +233,10 @@ module LLM
       parameters[:input] = input
 
       response = client.responses.create(parameters: parameters)
+
       Thread.current["previous_response_id"] = previous_response_id = response['id']
+      previous_response_message = {role: :previous_response_id, content: previous_response_id}
+
       response = self.process_response response, &block
 
       res = if response.last[:role] == 'function_call_output'
@@ -248,7 +251,7 @@ module LLM
             end
 
       if return_messages
-        res
+        [previous_response_message] + res
       else
         res.last['content']
       end

@@ -41,8 +41,8 @@ module LLM
       tools = LLM.tools messages
       associations = LLM.associations messages
 
-      client, url, key, model, return_messages, format, stream = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :return_messages, :format, :stream,
+      client, url, key, model, return_messages, format, stream, previous_response_id = IndiferentHash.process_options options,
+        :client, :url, :key, :model, :return_messages, :format, :stream, :previous_response_id,
         stream: false
 
       if client.nil?

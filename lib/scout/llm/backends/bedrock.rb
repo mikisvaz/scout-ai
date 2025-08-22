@@ -45,7 +45,7 @@ module LLM
       model ||= Scout::Config.get(:model, :bedrock_ask, :ask, :bedrock, env: 'BEDROCK_MODEL_ID')
       type ||= Scout::Config.get(:type, model, default: :messages)
 
-      role = IndiferentHash.process_options options, :role
+      role, previous_response_id = IndiferentHash.process_options options, :role, :previous_response_id
       messages = LLM.parse(question, role)
 
       case type.to_sym 

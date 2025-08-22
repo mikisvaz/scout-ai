@@ -25,10 +25,10 @@ module LLM
       self.ask(current_chat, ...)
     end
 
-    def chat(...)
-      response = respond(...)
-      current_chat.push({role: :assistant, content: response})
-      response
+    def chat(model = nil, options = {})
+      new = self.ask(current_chat, model, options.merge(return_messages: true))
+      current_chat.concat(new)
+      new.last['content']
     end
 
     def json(...)
