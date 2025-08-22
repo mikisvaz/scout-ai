@@ -144,87 +144,126 @@
     return lines.join('\n').replace(/\n{3,}/g,'\n\n');
   }
 
+  // Safe markdown render (strip scripts)
+  function sanitizeHtml(html){
+    return html.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+  }
+
+  function renderMarkdownSafe(md){
+    let html = '';
+    if(window.marked){
+      try{ html = marked.parse(md || ''); }catch(e){ html = escapeHtml(md || ''); }
+    } else {
+      html = '<pre style="white-space:pre-wrap">' + escapeHtml(md || '') + '</pre>';
+    }
+    html = sanitizeHtml(html);
+    return html;
+  }
+
   // Render
   function render(){
+    // Ensure there's always an empty user cell at the end (but don't force it into editing/focus)
+    ensureTrailingEmptyCell();
+
     cellsDiv.innerHTML = '';
     cells.forEach((c, idx)=>{
       const el = document.createElement('div'); el.className='cell panel';
+
       const header = document.createElement('div'); header.className='cell-header';
 
-      const keyInput = document.createElement('input');
-      keyInput.className = 'role-input';
-      keyInput.value = (c.type==='role' ? (c.role||'') : (c.key||''));
-      keyInput.setAttribute('list','keys_datalist');
-      keyInput.style.width = '160px';
-      keyInput.onchange = ()=>{
-        const v = keyInput.value.trim().toLowerCase();
-        if(ROLE_ONLY.includes(v)){
-          c.type = 'role'; c.role = v; c.key = undefined; if(c.inline === undefined) c.inline = false;
-        } else if(v.length===0){
-          // keep
-        } else {
-          c.type = 'option'; c.key = v; c.role = undefined; c.inline = true;
-        }
-        updateAndRender();
-      };
-      header.appendChild(keyInput);
+      const roleBadge = document.createElement('div'); roleBadge.className = 'role-badge ' + (c.role||c.key||'');
+      roleBadge.textContent = (c.type==='role' ? (c.role||'user') : (c.key||'option'));
+      roleBadge.onclick = (e)=>{ e.stopPropagation(); changeRolePrompt(c); };
+      header.appendChild(roleBadge);
 
-      const inlineToggle = document.createElement('label'); inlineToggle.className='inline-toggle small'; inlineToggle.textContent = (c.inline ? 'inline' : 'block');
-      inlineToggle.onclick = ()=>{ if(c.type==='option') return; c.inline = !c.inline; updateAndRender(); };
-      header.appendChild(inlineToggle);
+      const controls = document.createElement('div'); controls.className = 'cell-controls';
+      controls.innerHTML = '<div class="cell-actions"></div>';
+      const actionsContainer = controls.querySelector('.cell-actions');
 
-      const actions = document.createElement('div'); actions.className='cell-actions';
-      const up = document.createElement('button'); up.textContent='↑'; up.title='Move up'; up.onclick = ()=>{ if(idx>0){ const t = cells[idx-1]; cells[idx-1]=cells[idx]; cells[idx]=t; updateAndRender(); } };
-      const down = document.createElement('button'); down.textContent='↓'; down.title='Move down'; down.onclick = ()=>{ if(idx<cells.length-1){ const t = cells[idx+1]; cells[idx+1]=cells[idx]; cells[idx]=t; updateAndRender(); } };
-      const del = document.createElement('button'); del.textContent='✕'; del.title='Delete'; del.onclick = ()=>{ if(confirm('Delete this cell?')){ cells.splice(idx,1); updateAndRender(); } };
-      const convert = document.createElement('button'); convert.className='small';
-      if(c.type==='option') convert.textContent = 'option (inline)';
-      else convert.textContent = c.inline ? '→block' : '→inline';
-      convert.onclick = ()=>{ if(c.type==='option') return; c.inline = !c.inline; updateAndRender(); };
+      const up = document.createElement('button'); up.textContent='↑'; up.title='Move up'; up.onclick = (e)=>{ e.stopPropagation(); if(idx>0){ const t = cells[idx-1]; cells[idx-1]=cells[idx]; cells[idx]=t; updateAndRender(); } };
+      const down = document.createElement('button'); down.textContent='↓'; down.title='Move down'; down.onclick = (e)=>{ e.stopPropagation(); if(idx<cells.length-1){ const t = cells[idx+1]; cells[idx+1]=cells[idx]; cells[idx]=t; updateAndRender(); } };
+      const del = document.createElement('button'); del.textContent='✕'; del.title='Delete'; del.onclick = (e)=>{ e.stopPropagation(); if(confirm('Delete this cell?')){ cells.splice(idx,1); updateAndRender(); } };
+      const convert = document.createElement('button'); convert.className='small'; convert.textContent = (c.type==='option' ? 'opt' : (c.inline ? '→block' : '→inline'));
+      convert.onclick = (e)=>{ e.stopPropagation(); if(c.type==='option') return; c.inline = !c.inline; updateAndRender(); };
+      const editBtn = document.createElement('button'); editBtn.className='small'; editBtn.textContent='edit'; editBtn.title='Edit'; editBtn.onclick = (e)=>{ e.stopPropagation(); startEditing(c, idx); };
 
-      // preview markdown button (shows the cell content rendered as HTML assuming markdown)
-      const previewMd = document.createElement('button'); previewMd.className='small'; previewMd.textContent='Preview MD'; previewMd.title='Render this cell as markdown';
-      previewMd.onclick = ()=>{ showMarkdownModal(c.content || '', (c.type==='role' ? (c.role||'') : (c.key||'')).toUpperCase()); };
+      actionsContainer.appendChild(up); actionsContainer.appendChild(down); actionsContainer.appendChild(convert); actionsContainer.appendChild(editBtn); actionsContainer.appendChild(del);
 
-      actions.appendChild(up); actions.appendChild(down); actions.appendChild(convert); actions.appendChild(previewMd); actions.appendChild(del);
-      header.appendChild(actions);
-
+      header.appendChild(controls);
       el.appendChild(header);
 
-      if(c.inline){
-        const input = document.createElement('input'); input.className='cell-input'; input.value = c.content || '';
-        if(c.type==='option' && FILE_KEYS.includes((c.key||'').toLowerCase())){
-          input.setAttribute('list','files_datalist');
+      // content area
+      const contentWrap = document.createElement('div'); contentWrap.style.width='100%';
+
+      // If not editing and this is an assistant role, render markdown as HTML; other roles show plain text preview
+      if(!c.editing){
+        if(c.type==='role' && (c.role||'') === 'assistant'){
+          const preview = document.createElement('div'); preview.className = 'assistant-bubble message-preview';
+          preview.innerHTML = renderMarkdownSafe(c.content || '');
+          // clicking preview starts editing that cell
+          preview.onclick = (e)=>{ e.stopPropagation(); startEditing(c, idx); };
+          contentWrap.appendChild(preview);
+        } else {
+          // render plain preview text (for user/system/note and options)
+          const preview = document.createElement('div'); preview.className = ((c.type==='role' && (c.role||'')==='user')? 'user-bubble message-preview' : 'message-preview');
+          preview.textContent = c.content || '';
+          preview.onclick = (e)=>{ e.stopPropagation(); startEditing(c, idx); };
+          contentWrap.appendChild(preview);
         }
-        input.oninput = ()=>{ c.content = input.value; };
-        el.appendChild(input);
       } else {
-        const ta = document.createElement('textarea'); ta.className='cell-text'; ta.value = c.content || '';
-        ta.oninput = ()=>{ c.content = ta.value; };
-        el.appendChild(ta);
+        // editing mode: show input or textarea depending on inline
+        if(c.inline){
+          const input = document.createElement('input'); input.className='cell-input'; input.value = c.content || '';
+          if(c.type==='option' && FILE_KEYS.includes((c.key||'').toLowerCase())){ input.setAttribute('list','files_datalist'); }
+          input.oninput = (e)=>{ c.content = input.value; // when typing in an editing cell, maintain trailing empty cell
+            if(idx === cells.length - 1) ensureTrailingEmptyCell(); };
+          input.onblur = ()=>{ c.editing = false; updateAndRender(); };
+          input.onkeydown = (e)=>{ if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)){ input.blur(); } };
+          contentWrap.appendChild(input);
+          // autofocus only if this cell was explicitly put into editing mode
+          if(c._shouldFocus){ setTimeout(()=>{ input.focus(); input.selectionStart = input.value.length; c._shouldFocus = false; }, 0); }
+        } else {
+          const ta = document.createElement('textarea'); ta.className='cell-text'; ta.value = c.content || '';
+          ta.oninput = (e)=>{ c.content = ta.value; if(idx === cells.length - 1) ensureTrailingEmptyCell(); };
+          ta.onblur = ()=>{ c.editing = false; updateAndRender(); };
+          ta.onkeydown = (e)=>{ if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)){ ta.blur(); } };
+          contentWrap.appendChild(ta);
+          if(c._shouldFocus){ setTimeout(()=>{ ta.focus(); ta.selectionStart = ta.value.length; c._shouldFocus = false; }, 0); }
+        }
       }
 
-      const footer = document.createElement('div'); footer.style.display='flex'; footer.style.marginTop='6px';
-      const preview = document.createElement('div'); preview.className='small muted';
-      if(c.type==='role') preview.textContent = (c.role + (c.inline ? ': ' + (c.content||'') : ' (block)'));
-      else preview.textContent = (c.key + ': ' + (c.content||''));
-      footer.appendChild(preview);
-      el.appendChild(footer);
-
+      el.appendChild(contentWrap);
       cellsDiv.appendChild(el);
     });
     cellCountEl.textContent = cells.length;
-
-    // preserve existing file datalist if available
     renderDatalists();
+  }
+
+  function startEditing(c, idx){ c.editing = true; c._shouldFocus = true; updateAndRender(); }
+
+  // Always keep a trailing empty user cell, but do not force it into editing/focus when unrelated actions occur
+  function ensureTrailingEmptyCell(){
+    if(cells.length === 0){
+      cells.push({type:'role', role:'user', inline:false, content:'', editing:false});
+      return;
+    }
+    const last = cells[cells.length - 1];
+    if(!(last.type === 'role' && (last.role || '') === 'user' && (!last.content || last.content.trim() === ''))){
+      // append a non-editing empty user cell
+      cells.push({type:'role', role:'user', inline:false, content:'', editing:false});
+    }
+    // do not change editing state of existing cells
   }
 
   function updateAndRender(){ render(); }
 
   // Actions
-  function addCell(role){ if(ROLE_ONLY.includes(role)) cells.push({type:'role', role:role, inline:false, content:''}); else cells.push({type:'option', key:role, inline:true, content:''}); updateAndRender(); }
-  function addOptionCell(){ cells.push({type:'option', key:'import', inline:true, content:''}); updateAndRender(); }
-  function clearCells(){ if(confirm('Clear all cells?')){ cells=[]; updateAndRender(); } }
+  function addCell(role){ if(ROLE_ONLY.includes(role)) cells.push({type:'role', role:role, inline:false, content:'', editing:false}); else cells.push({type:'option', key:role, inline:true, content:'', editing:false}); updateAndRender(); }
+  function addOptionCell(){ cells.push({type:'option', key:'import', inline:true, content:'', editing:false}); updateAndRender(); }
+  function clearCells(){ if(confirm('Clear all cells?')){ cells=[]; ensureTrailingEmptyCell(); updateAndRender(); } }
+
+  // role change prompt (simple)
+  function changeRolePrompt(c){ const ans = prompt('Set role (user, system, assistant, or option key):', (c.type==='role'? c.role : c.key)); if(ans===null) return; const v = ans.trim().toLowerCase(); if(ROLE_ONLY.includes(v)){ c.type='role'; c.role=v; c.key=undefined; } else if(v.length===0){ return; } else { c.type='option'; c.key=v; c.role=undefined; } updateAndRender(); }
 
   // Server interactions
   async function renderFileList(){
@@ -250,7 +289,6 @@
   }
 
   function renderDatalists(filesList){
-    // if filesList not provided, use cached list so we don't wipe the file suggestions when re-rendering cells
     if(typeof filesList === 'undefined') filesList = filesListCache || [];
 
     const oldKeys = document.getElementById('keys_datalist'); if(oldKeys) oldKeys.remove();
@@ -264,7 +302,6 @@
     (filesList || []).slice().sort().forEach(k=>{ const o=document.createElement('option'); o.value=k; files.appendChild(o); });
     document.body.appendChild(files);
 
-    // ensure the top path input uses the files datalist
     if(pathEl){ pathEl.setAttribute('list','files_datalist'); }
   }
 
@@ -279,6 +316,8 @@
       const res = await fetchJSON(API_BASE + '/load?path=' + encodeURIComponent(p));
       const txt = res.content || '';
       cells = parseTextToCells(txt);
+      // after loading, ensure trailing empty cell
+      ensureTrailingEmptyCell();
       updateAndRender(); log('Loaded ' + p);
     }catch(e){ log('Load failed:', e.message || e); alert('Load failed: ' + (e.body && e.body.error) ? e.body.error : (e.message || 'error')); }
   }
@@ -299,8 +338,8 @@
       const res = await fetchJSON(API_BASE + '/run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path: p, content: text})});
       const newText = res.content || '';
       cells = parseTextToCells(newText);
-      // After running, open a new blank block user cell at the end
-      cells.push({type:'role', role:'user', inline:false, content:''});
+      // After running, ensure trailing empty cell
+      ensureTrailingEmptyCell();
       updateAndRender(); await renderFileList(); log('Ran and appended assistant reply to ' + p);
     }catch(e){ log('Run failed:', e.message || e); alert('Run failed: ' + (e.message || e)); }
     finally{ setLoading(false); }
@@ -314,17 +353,14 @@
   // Updated: showMarkdownModal now ensures the generated HTML is inserted as real DOM using marked if available
   function showMarkdownModal(md, title){
     mdTitle.textContent = title || 'Preview';
-    // Generate HTML from markdown using marked if available
     let html = '';
     if(window.marked){
       try{ html = marked.parse(md || ''); }catch(e){ html = escapeHtml(md || ''); }
     } else {
-      // If marked isn't loaded yet, insert escaped markdown and try to load marked in the background for future previews
       html = '<pre style="white-space:pre-wrap">' + escapeHtml(md || '') + '</pre>';
       loadMarked().then(m=>{ /* noop - next previews will use marked */ }).catch(e=>{ console.warn('Could not load marked:', e); });
     }
 
-    // Basic safety: strip <script> tags to avoid executing inline scripts
     html = html.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
 
     mdBody.innerHTML = html;
@@ -341,7 +377,6 @@
     const html = mdBody.innerHTML || '';
     const text = mdBody.innerText || mdBody.textContent || '';
     if(!navigator.clipboard){
-      // last resort, try execCommand on a temporary element
       try{
         const temp = document.createElement('div'); temp.style.position='fixed'; temp.style.left='-10000px'; temp.innerText = text; document.body.appendChild(temp);
         const range = document.createRange(); range.selectNodeContents(temp);
@@ -354,7 +389,6 @@
       }catch(e){ alert('Copy not supported: ' + e.message); return; }
     }
 
-    // Preferred: write both text/html and text/plain to the clipboard so Word can accept formatted content
     if(window.ClipboardItem){
       try{
         const blobHtml = new Blob([html], {type: 'text/html'});
@@ -367,7 +401,6 @@
       }catch(e){ console.warn('ClipboardItem write failed, falling back to plain text:', e); }
     }
 
-    // Fallback: copy plain text only
     try{
       await navigator.clipboard.writeText(text);
       log('Copied modal content as plain text (fallback)');
@@ -388,8 +421,8 @@
   runBtn.onclick = runFile;
   runBtnBottom.onclick = runFile;
   exportBtn.onclick = exportText;
-  listBtn.onclick = renderFileList;
-  deleteBtn.onclick = deletePath;
+  listBtn && (listBtn.onclick = renderFileList);
+  deleteBtn && (deleteBtn.onclick = deletePath);
   addUser.onclick = ()=>addCell('user');
   addSystem.onclick = ()=>addCell('system');
   addAssistant.onclick = ()=>addCell('assistant');
@@ -399,10 +432,9 @@
   // Init
   (async function init(){
     await renderFileList();
-    // attempt to load marked for better markdown previews; failures are non-fatal
     try{ await loadMarked(); log('marked.js loaded'); }catch(e){ log('marked.js not available, falling back to plain preview'); }
-    // Prefill with a minimal conversation if nothing loaded yet
     cells = [{type:'role', role:'system', inline:false, content:'You are a helpful assistant.'}, {type:'role', role:'user', inline:false, content:'Tell me about genome editing.'}];
+    ensureTrailingEmptyCell();
     updateAndRender();
     log('Notebook editor ready (server-backed).');
   })();

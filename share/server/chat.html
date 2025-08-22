@@ -7,31 +7,34 @@
 <style>
   :root{--bg:#0f1115;--panel:#151821;--muted:#9aa3b2;--border:#222838;--text:#e6e6e6;--accent:#3b82f6}
   body{font-family:Inter,system-ui,Arial; margin:16px; background:var(--bg); color:var(--text)}
-  .wrap{max-width:1100px;margin:0 auto}
+  .wrap{max-width:880px;margin:0 auto}
   header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-  h1{font-size:18px;margin:0}
+  h1{font-size:16px;margin:0}
   .panel{background:var(--panel);padding:12px;border-radius:8px;border:1px solid var(--border)}
   .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
   .row{display:flex;gap:8px;align-items:center}
   input[type="text"]{flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:#0c0f16;color:var(--text)}
-  button{padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:#0c0f16;color:var(--text);cursor:pointer}
-  button.small{padding:6px 8px;font-size:13px}
-  .cells{margin-top:12px;display:flex;flex-direction:column;gap:10px}
-  .cell{border:1px solid var(--border);border-radius:8px;padding:8px;background:#0b0d11}
-  .cell-header{display:flex;gap:8px;align-items:center}
-  .role-input{padding:6px;border-radius:6px;background:#0c0f16;border:1px solid var(--border);color:var(--text)}
-  .inline-toggle{font-size:12px;color:var(--muted);cursor:pointer}
-  textarea.cell-text{width:100%;min-height:80px;max-height:300px;padding:8px;border-radius:6px;border:1px solid var(--border);background:#081018;color:var(--text);font-family:ui-monospace,monospace}
-  input.cell-input{width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:#081018;color:var(--text)}
-  input[type="text"].path-input{width:320px}
-  .cell-actions{margin-left:auto;display:flex;gap:6px}
-  .small{font-size:13px;color:var(--muted)}
-  #log{height:120px; overflow:auto; background:#0b0d11;padding:8px;border-radius:6px;border:1px solid var(--border);color:var(--muted);font-size:13px}
-  .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#0c0f16;border:1px solid var(--border);color:#cbd5e1;margin-right:6px}
-  .file-list{max-height:180px;overflow:auto;margin-top:8px}
-  .file-item{Padding:6px;border-radius:6px;display:flex;justify-content:space-between;gap:8px}
+  button{padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:#0c0f16;color:var(--text);cursor:pointer}
+  button.small{padding:5px 6px;font-size:12px}
+  .cells{margin-top:8px;display:flex;flex-direction:column;gap:10px}
+  .cell{border:1px solid transparent;border-radius:12px;padding:10px 12px;background:linear-gradient(180deg,#0b0d11, #0b0d11);position:relative;transition:box-shadow .12s, border-color .12s}
+  .cell:hover{box-shadow:0 4px 18px rgba(0,0,0,.6);border-color:rgba(255,255,255,0.02)}
+  .cell-header{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+  .role-badge{padding:6px 8px;border-radius:999px;background:#081018;border:1px solid var(--border);color:var(--muted);font-weight:600;font-size:12px;cursor:pointer}
+  .role-badge.user{color:#9fdfff}
+  .role-badge.system{color:#c9b6ff}
+  .role-badge.assistant{color:#a7f3d0}
+  .role-badge.note{color:var(--muted)}
+  .cell-controls{margin-left:auto;display:flex;gap:6px;align-items:center;opacity:0;transition:opacity .12s}
+  .cell:hover .cell-controls{opacity:1}
+  .cell-actions button{background:transparent;border:1px solid transparent;padding:4px 6px;border-radius:6px;color:var(--muted);font-size:12px}
+  .cell-text{width:100%;min-height:56px;max-height:300px;padding:8px;border-radius:8px;border:1px solid var(--border);background:#081018;color:var(--text);font-family:ui-monospace,monospace}
+  .cell-input{width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:#081018;color:var(--text)}
+  .muted{color:var(--muted);font-size:13px}
+  #log{height:72px; overflow:auto; background:#0b0d11;padding:8px;border-radius:6px;border:1px solid var(--border);color:var(--muted);font-size:13px}
+  .file-list{max-height:72px;overflow:auto;margin-top:8px}
+  .file-item{padding:4px 6px;border-radius:6px;display:flex;justify-content:space-between;gap:8px}
   .file-item a{color:var(--accent);text-decoration:none}
-  .muted{color:var(--muted)}
 
   /* loading indicator */
   .loading {display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-weight:600}
@@ -44,67 +47,76 @@
   .modal-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   .modal-body{background:#081018;padding:12px;border-radius:6px}
   .modal-close{margin-left:auto}
+
+  /* assistant message preview styling */
+  .message-preview{white-space:pre-wrap;color:var(--text)}
+  .assistant-bubble{background:linear-gradient(180deg,#071017,#091623);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.02)}
+  .user-bubble{background:transparent;padding:8px}
+
+  /* compact toolbar */
+  .top-helpers{display:flex;gap:12px;align-items:flex-start}
+  .top-left{flex:1}
+  .top-right{width:280px}
+
+  @media(max-width:900px){ .wrap{margin:8px} .top-right{display:none} }
 </style>
 </head>
 <body>
   <div class="wrap">
     <header>
-      <h1>Scout-AI Notebook Editor — Cells</h1>
-      <div class="small">Server-backed demo. Connects to the local scout server.</div>
+      <h1>Scout-AI Notebook Editor</h1>
+      <div class="small">Server-backed chat-style editor</div>
     </header>
 
     <div class="panel">
       <div class="toolbar">
-        <div style="width:320px;display:flex;flex-direction:column">
-          <label class="small">Path</label>
-          <input id="path" class="path-input" placeholder="chats/doc/new_chat" list="files_datalist" />
-        </div>
-        <div class="row">
-          <button id="newFileBtn">New</button>
-          <button id="loadBtn">Load</button>
-          <button id="saveBtn">Save</button>
-          <button id="runBtn">Run</button>
-          <button id="exportBtn">Export Text</button>
-        </div>
-        <div style="flex:1"></div>
-        <div class="small">Cells: <span id="cellCount">0</span></div>
-        <div style="width:12px"></div>
-        <div id="loadingIndicator" style="display:none" class="loading"><div class="spinner"></div><div>Running…</div></div>
-      </div>
+        <div class="top-helpers" style="width:100%">
+          <div class="top-left">
+            <div style="display:flex;gap:8px;align-items:center">
+              <div style="width:320px;display:flex;flex-direction:column">
+                <label class="small">Path</label>
+                <input id="path" class="path-input" placeholder="chats/doc/new_chat" list="files_datalist" />
+              </div>
 
-      <div style="display:flex;gap:12px">
-        <div style="flex:1">
-          <div style="display:flex;gap:8px;margin-bottom:8px">
-            <button id="addUser">+ user</button>
-            <button id="addSystem">+ system</button>
-            <button id="addAssistant">+ assistant</button>
-            <button id="addOption">+ option</button>
-            <button id="clearBtn" class="small">Clear Cells</button>
-          </div>
+              <div class="row">
+                <button id="newFileBtn">New</button>
+                <button id="loadBtn">Load</button>
+                <button id="saveBtn">Save</button>
+                <button id="runBtn">Run</button>
+                <button id="exportBtn">Export Text</button>
+              </div>
 
-          <div id="cells" class="cells"></div>
-
-          <!-- Run button duplicated at the end for convenience -->
-          <div style="margin-top:10px">
-            <button id="runBtnBottom">Run</button>
-          </div>
-        </div>
-
-        <aside style="width:320px">
-          <div class="panel">
-            <div class="small">Workspace Files (server)</div>
-            <div id="files" class="file-list"></div>
-            <hr style="border:0;border-top:1px solid var(--border);margin:8px 0">
-            <div class="small">Quick actions</div>
-            <div style="display:flex;gap:8px;margin-top:8px">
-              <button id="listBtn" class="small">Refresh List</button>
-              <button id="deleteBtn" class="small">Truncate Path</button>
+              <div style="flex:1"></div>
             </div>
+
+            <div style="display:flex;gap:8px;margin-top:8px;align-items:flex-start">
+              <div style="display:flex;gap:8px">
+                <button id="addUser">+ user</button>
+                <button id="addSystem">+ system</button>
+                <button id="addAssistant">+ assistant</button>
+                <button id="addOption">+ option</button>
+                <button id="clearBtn" class="small">Clear</button>
+              </div>
+              <div style="margin-left:12px" class="muted">Cells: <span id="cellCount">0</span></div>
+              <div style="width:12px"></div>
+              <div id="loadingIndicator" style="display:none" class="loading"><div class="spinner"></div><div>Running…</div></div>
+            </div>
+          </div>
+
+          <div class="top-right">
+            <div class="small">Workspace Files</div>
+            <div id="files" class="file-list"></div>
             <hr style="border:0;border-top:1px solid var(--border);margin:8px 0">
             <div class="small">Log</div>
             <div id="log"></div>
           </div>
-        </aside>
+        </div>
+      </div>
+
+      <div id="cells" class="cells"></div>
+
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+        <button id="runBtnBottom">Run</button>
       </div>
     </div>
   </div>
