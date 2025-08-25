@@ -193,6 +193,13 @@ module LLM
           new = LLM.tag :file, Open.read(target), file
           {role: 'user', content: new}
         end
+      elsif message[:role] == 'pdf' || message[:role] == 'image'
+        file = message[:content].to_s.strip
+        found_file = find_file(file, original, caller_lib_dir)
+        raise "File not found: #{file}" if found_file.nil?
+
+        message[:content] = found_file
+        message
       else
         message
       end

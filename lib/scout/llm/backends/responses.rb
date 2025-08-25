@@ -15,14 +15,16 @@ module LLM
         mime = "image/extension"
       end
 
-      base64_image = Base64.strict_encode64(file_content)
+      base64_string = Base64.strict_encode64(file_content)
 
-      "data:#{mime};base64,#{base64_image}"
+      "data:#{mime};base64,#{base64_string}"
     end
 
     def self.encode_pdf(path)
       file_content = File.binread(path)  # Replace with your file name
-      Base64.strict_encode64(file_content)
+      base64_string = Base64.strict_encode64(file_content)
+
+      "data:application/pdf;base64,#{base64_string}"
     end
 
     #def self.tool_response(tool_call, &block)
@@ -103,6 +105,7 @@ module LLM
         IndiferentHash.setup(message)
         if message[:role] == 'image'
           path = message[:content]
+          path = LLM.find_file path
           if Open.remote?(path) 
             {role: :user, content: {type: :input_image, image_url: path }}
           elsif Open.exists?(path)
@@ -112,12 +115,12 @@ module LLM
             raise
           end
         elsif message[:role] == 'pdf'
-          path = message[:content]
+          path = original_path = message[:content]
           if Open.remote?(path) 
             {role: :user, content: {type: :input_file, file_url: path }}
           elsif Open.exists?(path)
             data = self.encode_pdf(path)
-            {role: :user, content: [{type: :input_file, file_data: data }]}
+            {role: :user, content: [{type: :input_file, file_data: data, filename: File.basename(path) }]}
           else
             raise
           end
