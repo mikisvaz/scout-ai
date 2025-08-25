@@ -254,7 +254,7 @@ module LLM
             end
 
       if return_messages
-        [previous_response_message] + res
+        res + [previous_response_message]
       else
         res.last['content']
       end
