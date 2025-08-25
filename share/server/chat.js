@@ -1,5 +1,29 @@
 (function(){
-  const API_BASE = ''; // same origin, adjust if your server is hosted elsewhere
+  // Compute API base path so this script works behind a path-prefix proxy (e.g. /sandbox2)
+  function computeApiBase(){
+    // Use location.pathname to derive the directory this UI is served from.
+    // Examples:
+    //  /sandbox2/             -> API base: /sandbox2
+    //  /sandbox2/chat.html    -> API base: /sandbox2
+    //  /                      -> API base: "" (root)
+    const locPath = (window.location && window.location.pathname) ? window.location.pathname : '';
+    let base = locPath || '';
+    // remove trailing slash
+    if(base.length > 1 && base.endsWith('/')) base = base.slice(0, -1);
+    // if the last segment looks like a file (contains a dot), remove it
+    const segs = base.split('/');
+    const last = segs[segs.length - 1] || '';
+    if(last.includes('.')){
+      segs.pop();
+      base = segs.join('/') || '';
+    }
+    // ensure base is empty string for root so concatenation yields '/list' etc.
+    if(base === '/') base = '';
+    return base;
+  }
+
+  const API_BASE = computeApiBase(); // e.g. '/sandbox2' or ''
+
   const PREDEFINED_KEYS = ['user','system','assistant','import','file','directory', 'continue', 'option','endpoint','model','backend','previous_response_id', 'format','websearch','tool','task','job','inline_job'];
   const ROLE_ONLY = ['user','system','assistant'];
   const FILE_KEYS = ['import','file','directory', 'continue'];
@@ -42,6 +66,8 @@
 
   // HTTP helpers
   async function fetchJSON(url, opts){
+    // If the url is relative and doesn't start with '/', respect it; otherwise ensure we don't accidentally
+    // strip our computed API_BASE if callers pass absolute URLs. Expect callers to use API_BASE + '/path'.
     const res = await fetch(url, opts);
     const text = await res.text();
     let json = null;
@@ -268,7 +294,7 @@
   // Server interactions
   async function renderFileList(){
     try{
-      const res = await fetchJSON(API_BASE + '/list');
+      const res = await fetchJSON((API_BASE || '') + '/list');
       const wsFiles = res.files || [];
       filesListCache = wsFiles.slice();
       const prevScroll = filesDiv.scrollTop;
@@ -307,13 +333,13 @@
 
   async function saveFile(){ const p = pathEl.value.trim(); if(!p){ alert('Enter path'); return; } const text = cellsToText(cells);
     try{
-      const res = await fetchJSON(API_BASE + '/save', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path: p, content: text})});
+      const res = await fetchJSON((API_BASE || '') + '/save', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path: p, content: text})});
       await renderFileList(); log('Saved ' + p);
     }catch(e){ log('Save failed:', e.message || e); alert('Save failed: ' + (e.message || e)); }
   }
 
   async function loadFile(){ const p = pathEl.value.trim(); if(!p){ alert('Enter path'); return; } try{
-      const res = await fetchJSON(API_BASE + '/load?path=' + encodeURIComponent(p));
+      const res = await fetchJSON((API_BASE || '') + '/load?path=' + encodeURIComponent(p));
       const txt = res.content || '';
       cells = parseTextToCells(txt);
       // after loading, ensure trailing empty cell
@@ -326,7 +352,7 @@
 
   // Truncate file content (server has no delete endpoint in this simple server)
   async function deletePath(){ const p = pathEl.value.trim(); if(!p){ alert('Enter path'); return; } if(!confirm('Truncate ' + p + ' ? This will clear the file content.')) return; try{
-      const res = await fetchJSON(API_BASE + '/save', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path: p, content: ''})});
+      const res = await fetchJSON((API_BASE || '') + '/save', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path: p, content: ''})});
       await renderFileList(); log('Truncated ' + p);
     }catch(e){ log('Truncate failed:', e.message || e); alert('Truncate failed: ' + (e.message || e)); }
   }
@@ -335,7 +361,7 @@
     // show loading state
     setLoading(true);
     try{
-      const res = await fetchJSON(API_BASE + '/run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path: p, content: text})});
+      const res = await fetchJSON((API_BASE || '') + '/run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path: p, content: text})});
       const newText = res.content || '';
       cells = parseTextToCells(newText);
       // After running, ensure trailing empty cell
