@@ -235,9 +235,9 @@ module LLM
         jobs << job
 
         if message[:role] == 'inline_task'
-          {role: 'inline_job', content: job.short_path}
+          {role: 'inline_job', content: job.path.find}
         else
-          {role: 'job', content: job.short_path}
+          {role: 'job', content: job.path.find}
         end
       else
         message
