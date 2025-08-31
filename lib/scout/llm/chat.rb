@@ -155,18 +155,22 @@ module LLM
 
   def self.imports(messages, original = nil, caller_lib_dir = Path.caller_lib_dir(nil, 'chats'))
     messages.collect do |message|
-      if message[:role] == 'import' || message[:role] == 'continue'
+      if message[:role] == 'import' || message[:role] == 'continue' || message[:role] == 'last'
         file = message[:content].to_s.strip
         found_file = find_file(file, original, caller_lib_dir)
         raise "Import not found: #{file}" if found_file.nil?
 
-        new = LLM.chat found_file
+        new = LLM.messages Open.read(found_file)
 
-        if message[:role] == 'continue'
-          new.last
-        else
-          new
-        end
+        new = if message[:role] == 'continue'
+                [new.reject{|msg| msg[:content].nil? || msg[:content].strip.empty? }.last]
+              elsif message[:role] == 'last'
+                [new.reject{|msg| msg[:role].to_s == 'previous_response_id' }.last]
+              else
+                new.reject{|msg| msg[:role].to_s == 'previous_response_id' }
+              end
+
+        LLM.chat new, found_file
       else
         message
       end
@@ -315,8 +319,8 @@ module LLM
     messages.collect{|msg| IndiferentHash.setup msg }
   end
 
-  def self.chat(file)
-    original = (String === file and Open.exists?(file)) ? file : Path.setup($0.dup)
+  def self.chat(file, original = nil)
+    original ||= (String === file and Open.exists?(file)) ? file : Path.setup($0.dup)
     caller_lib_dir = Path.caller_lib_dir(nil, 'chats')
 
     if Array === file
@@ -457,6 +461,13 @@ module LLM
       end
     end * "\n\n"
   end
+
+  def self.purge(chat)
+    chat.reject do |msg|
+      IndiferentHash.setup msg
+      msg[:role].to_s == 'previous_response_id'
+    end
+  end
 end
 
 module Chat
@@ -480,6 +491,10 @@ module Chat
 
   def import(file)
     message(:import, file)
+  end
+
+  def import_last(file)
+    message(:last, file)
   end
 
   def file(file)
@@ -539,14 +554,15 @@ module Chat
     LLM.ask(LLM.chat(self), ...)
   end
 
-  def respond(...)
-    self.ask(current_chat, ...)
-  end
-
   def chat(...)
-    response = respond(...)
-    current_chat.concat({role: :assistant, content: response})
-    response
+    response = ask(...)
+    if Array === response
+      current_chat.concat(response)
+      final(response)
+    else
+      current_chat.push({role: :assistant, content: response})
+      response
+    end
   end
 
   def json(...)
@@ -571,9 +587,45 @@ module Chat
     end
   end
 
+  def branch
+    self.annotate self.dup
+  end
+
+  def option(name, value)
+    self.message 'option', [name, value] * " "
+  end
+
+  def endpoint(value)
+    option :endpoint, value
+  end
+
+  def model(value)
+    option :model, value
+  end
+
+  def image(file)
+    self.message :image, file
+  end
+
+  # Reporting
+
   def print
     LLM.print LLM.chat(self)
   end
+
+  def final
+    LLM.purge(self).last
+  end
+
+  def shed
+    self.annotate [final]
+  end
+
+  def answer
+    final[:content]
+  end
+
+  # Write and save
 
   def save(path, force = true)
     path = path.to_s if Symbol === path
@@ -602,34 +654,7 @@ module Chat
     Open.write path, self.answer
   end
 
-  def branch
-    self.annotate self.dup
-  end
-
-  def option(name, value)
-    self.message 'option', [name, value] * " "
-  end
-
-  def endpoint(value)
-    option :endpoint, value
-  end
-
-  def model(value)
-    option :model, value
-  end
-
-  def image(file)
-    self.message :image, file
-  end
-
-  def shed
-    self.annotate [self.last]
-  end
-
-  def answer
-    self.last[:content]
-  end
-
+  # Image
   def create_image(file, ...)
     base64_image = LLM.image(LLM.chat(self), ...)
     Open.write(file, Base64.decode(file_content), mode: 'wb')

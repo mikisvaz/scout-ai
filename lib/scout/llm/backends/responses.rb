@@ -282,7 +282,7 @@ module LLM
       if return_messages
         res + [previous_response_message]
       else
-        res.last['content']
+        LLM.purge(res).last['content']
       end
     end
 
