@@ -143,6 +143,12 @@ module LLM
         :client, :url, :key, :model, :log_errors, :return_messages, :format, :websearch, :previous_response_id, :tools,
         log_errors: true
 
+      reasoning_options = IndiferentHash.pull_keys options, :reasoning
+      options[:reasoning] = reasoning_options if reasoning_options.any?
+
+      text_options = IndiferentHash.pull_keys options, :text
+      options[:text] = text_options if text_options.any?
+
       if websearch
         messages << {role: 'websearch', content: true}
       end
