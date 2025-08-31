@@ -53,49 +53,28 @@ You have access to the following databases associating entities:
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
 
-      if workflow || knowledge_base
-        tools = []
-        tools += LLM.workflow_tools(workflow) if workflow
-        tools += LLM.knowledge_base_tool_definition(knowledge_base) if knowledge_base and knowledge_base.all_databases.any?
-
-        LLM.ask messages, @other_options.merge(log_errors: true, tools: tools).merge(options) do |name,parameters|
-          case name
-          when 'children'
-            parameters = IndiferentHash.setup(parameters)
-            database, entities = parameters.values_at "database", "entities"
-            Log.high "Finding #{entities} children in #{database}"
-            knowledge_base.children(database, entities)
+      begin
+        if workflow || knowledge_base
+          tools = options[:tools] || {}
+          tools.merge!(LLM.workflow_tools(workflow)) if workflow
+          tools.merge!(LLM.knowledge_base_tool_definition(knowledge_base)) if knowledge_base and knowledge_base.all_databases.any?
+          options[:tools] = tools
+          LLM.ask messages, @other_options.merge(log_errors: true).merge(options)
+        else
+          LLM.ask messages, @other_options.merge(log_errors: true).merge(options)
+        end
+      rescue
+        exception = $!
+        if Proc === self.process_exception
+          try_again = self.process_exception.call exception
+          if try_again
+            retry
           else
-            if workflow
-              begin
-                Log.high "Calling #{workflow}##{name} with #{Log.fingerprint parameters}"
-                jobname = parameters.delete :jobname
-                if workflow.exec_exports.include? name.to_sym
-                  workflow.job(name, jobname, parameters).exec
-                else
-                  workflow.job(name, jobname, parameters).run
-                end
-              rescue
-                $!.message
-              end
-            else
-              raise "No workflow"
-            end
+            raise exception
           end
         end
-      else
-        LLM.ask messages, @other_options.merge(log_errors: true).merge(options)
       end
-    end
 
-    def respond(...)
-      self.ask(current_chat, ...)
-    end
-
-    def chat(...)
-      response = respond(...)
-      current_chat.push({role: :assistant, content: response})
-      response
     end
 
     def self.load_from_path(path, workflow: nil, knowledge_base: nil, chat: nil)
@@ -111,5 +90,6 @@ You have access to the following databases associating entities:
     end
   end
 end
+
 require_relative 'agent/chat'
 require_relative 'agent/iterate'

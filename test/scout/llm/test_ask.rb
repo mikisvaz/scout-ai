@@ -38,9 +38,11 @@ user: write a script that sorts files in a directory
           "1 minute"
         end
       end
+      export :recipe_steps, :step_time
     end
 
-    ppp LLM.workflow_ask(m, "How much time does it take to prepare a cake recipe")
+    sss 0
+    ppp LLM.workflow_ask(m, "How much time does it take to prepare a 'vanilla' cake recipe, use the tools provided to find out")
   end
 
   def test_knowledbase

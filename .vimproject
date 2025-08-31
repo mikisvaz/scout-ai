@@ -60,6 +60,11 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     utils.rb
     parse.rb
     tools.rb
+    tools=tools{
+     workflow.rb
+     knowledge_base.rb
+     call.rb
+    }
     chat.rb
 
     backends=backends{

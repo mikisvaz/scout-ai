@@ -17,7 +17,7 @@ module LLM
     end
 
     messages = []
-    current_role = nil
+    current_role = default_role
     current_content = ""
     in_protected_block = false
     protected_block_type = nil
@@ -114,6 +114,7 @@ module LLM
         else
           # Inline message + next block is default role
           messages << { role: role, content: inline_content }
+          current_role = 'user' if role == 'previous_response_id'
           current_content = ""
         end
       else
@@ -404,10 +405,7 @@ module LLM
           definition = LLM.task_tool_definition workflow, task_name, inputs
           tool_definitions[task_name] = [workflow, definition]
         else
-          workflow.all_exports.each do |task_name|
-            definition = LLM.task_tool_definition workflow, task_name, inputs
-            tool_definitions[task_name] = [workflow, definition]
-          end
+          tool_definitions.merge!(LLM.workflow_tools(workflow))
         end
         next
       elsif message[:role] == 'clear_tools'
@@ -420,9 +418,8 @@ module LLM
     tool_definitions
   end
 
-  def self.associations(messages)
+  def self.associations(messages, kb = nil)
     tool_definitions = {}
-    kb = nil
     new = messages.collect do |message|
       if message[:role] == 'association'
         name, path, *options = message[:content].strip.split(/\s+/)
@@ -430,8 +427,7 @@ module LLM
         kb ||= KnowledgeBase.new Scout.var.Agent.Chat.knowledge_base
         kb.register name, Path.setup(path), IndiferentHash.parse_options(message[:content])
 
-        definition = LLM.association_tool_definition name
-        tool_definitions[name] = [kb, definition]
+        tool_definitions.merge!(LLM.knowledge_base_tool_definition( kb, [name]))
         next
       elsif message[:role] == 'clear_associations'
         tool_definitions = {}

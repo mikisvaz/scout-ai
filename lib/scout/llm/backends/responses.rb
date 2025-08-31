@@ -48,12 +48,13 @@ module LLM
       messages.collect do |message|
         if message[:role] == 'function_call'
           info = JSON.parse(message[:content])
+          name = info[:name] || IndiferentHash.dig(info,:function, :name)
           IndiferentHash.setup info
           id = info[:id].sub(/^fc_/, '')
           IndiferentHash.setup({
             "type" => "function_call",
             "status" => "completed",
-            "name" => info[:name],
+            "name" => name,
             "arguments" => (info[:arguments] || {}).to_json,
             "call_id"=>id,
           })
@@ -72,7 +73,7 @@ module LLM
       end.flatten
     end
 
-    def self.process_response(response, &block)
+    def self.process_response(response, tools, &block)
       Log.debug "Respose: #{Log.fingerprint response}"
 
       response['output'].collect do |output|
@@ -87,7 +88,7 @@ module LLM
         when 'reasoning'
           next
         when 'function_call'
-          LLM.call_tools [output], &block
+          LLM.process_calls(tools, [output], &block)
         when 'web_search_call'
           next
         else
@@ -137,11 +138,9 @@ module LLM
 
       messages = LLM.chat(question)
       options = options.merge LLM.options messages
-      tools = LLM.tools messages
-      associations = LLM.associations messages
 
-      client, url, key, model, log_errors, return_messages, format, websearch, previous_response_id = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :log_errors, :return_messages, :format, :websearch, :previous_response_id,
+      client, url, key, model, log_errors, return_messages, format, websearch, previous_response_id, tools, = IndiferentHash.process_options options,
+        :client, :url, :key, :model, :log_errors, :return_messages, :format, :websearch, :previous_response_id, :tools,
         log_errors: true
 
       if websearch
@@ -187,38 +186,58 @@ module LLM
 
       parameters = options.merge(model: model)
 
-      if tools.any? || associations.any?
-        parameters[:tools] ||= []
-        parameters[:tools] += tools.values.collect{|a| a.last } if tools
-        parameters[:tools] += associations.values.collect{|a| a.last } if associations
-        parameters[:tools] = parameters[:tools].collect{|tool|
-          function = tool.delete :function;
-          tool.merge function
-        }
+      # Process tools
 
-        if not block_given?
-          block = Proc.new do |name,parameters|
-            IndiferentHash.setup parameters
-            if tools[name]
-              workflow = tools[name].first
-              jobname = parameters.delete :jobname
-              if workflow.exec_exports.include? name.to_sym
-                workflow.job(name, jobname, parameters).exec
-              else
-                workflow.job(name, jobname, parameters).run
-              end
-            else
-              kb = associations[name].first
-              entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
-              if reverse
-                kb.parents(name, entities)
-              else
-                kb.children(name, entities)
-              end
-            end
-          end
+      case tools
+      when Array
+        tools = tools.inject({}) do |acc,definition|
+          IndiferentHash.setup definition
+          name = definition.dig('name') || definition.dig('function', 'name')
+          acc.merge(name => definition)
         end
+      when nil
+        tools = {}
       end
+
+      tools.merge!(LLM.tools messages)
+      tools.merge!(LLM.associations messages)
+
+      if tools.any?
+        parameters[:tools] = tools.values.collect{|obj,definition| Hash === obj ? obj : definition}
+      end
+
+      #if tools.any? || associations.any?
+      #  parameters[:tools] ||= []
+      #  parameters[:tools] += tools.values.collect{|a| a.last } if tools
+      #  parameters[:tools] += associations.values.collect{|a| a.last } if associations
+      #  parameters[:tools] = parameters[:tools].collect{|tool|
+      #    function = tool.delete :function;
+      #    tool.merge function
+      #  }
+
+      #  if not block_given?
+      #    block = Proc.new do |name,parameters|
+      #      IndiferentHash.setup parameters
+      #      if tools[name]
+      #        workflow = tools[name].first
+      #        jobname = parameters.delete :jobname
+      #        if workflow.exec_exports.include? name.to_sym
+      #          workflow.job(name, jobname, parameters).exec
+      #        else
+      #          workflow.job(name, jobname, parameters).run
+      #        end
+      #      else
+      #        kb = associations[name].first
+      #        entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
+      #        if reverse
+      #          kb.parents(name, entities)
+      #        else
+      #          kb.children(name, entities)
+      #        end
+      #      end
+      #    end
+      #  end
+      #end
 
       parameters['previous_response_id'] = previous_response_id if String === previous_response_id
       Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
@@ -233,21 +252,22 @@ module LLM
           input << message
         end
       end
-      parameters[:input] = input
+
+      parameters[:input] = LLM.tools_to_openai input
 
       response = client.responses.create(parameters: parameters)
 
       Thread.current["previous_response_id"] = previous_response_id = response['id']
       previous_response_message = {role: :previous_response_id, content: previous_response_id}
 
-      response = self.process_response response, &block
+      response = self.process_response response, tools, &block
 
       res = if response.last[:role] == 'function_call_output'
               case previous_response_id
               when String
-                response + self.ask(response, original_options.except(:tool_choice).merge(return_messages: true, tools: parameters[:tools], previous_response_id: previous_response_id), &block)
+                response + self.ask(response, original_options.except(:tool_choice).merge(return_messages: true, tools: tools, previous_response_id: previous_response_id), &block)
               else
-                response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: parameters[:tools]), &block)
+                response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: tools), &block)
               end
             else
               response

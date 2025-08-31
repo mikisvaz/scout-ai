@@ -17,7 +17,7 @@ module LLM
     end
 
 
-    def self.process_response(responses, &block)
+    def self.process_response(responses, tools, &block)
       responses.collect do |response|
         Log.debug "Respose: #{Log.fingerprint response}"
 
@@ -26,7 +26,7 @@ module LLM
           response.dig("message", "tool_calls")
 
         if tool_calls && tool_calls.any?
-          LLM.call_tools tool_calls, &block
+          LLM.process_calls tools, tool_calls, &block
         else
           [message]
         end
@@ -38,11 +38,9 @@ module LLM
 
       messages = LLM.chat(question)
       options = options.merge LLM.options messages
-      tools = LLM.tools messages
-      associations = LLM.associations messages
 
-      client, url, key, model, return_messages, format, stream, previous_response_id = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :return_messages, :format, :stream, :previous_response_id,
+      client, url, key, model, return_messages, format, stream, previous_response_id, tools = IndiferentHash.process_options options,
+        :client, :url, :key, :model, :return_messages, :format, :stream, :previous_response_id, :tools,
         stream: false
 
       if client.nil?
@@ -66,28 +64,24 @@ module LLM
 
       parameters = options.merge(model: model)
 
-      if tools.any? || associations.any?
-        parameters[:tools] = []
-        parameters[:tools] += tools.values.collect{|a| a.last } if tools
-        parameters[:tools] += associations.values.collect{|a| a.last } if associations
-        if not block_given?
-          block = Proc.new do |name,parameters|
-            IndiferentHash.setup parameters
-            if tools[name]
-              workflow = tools[name].first
-              jobname = parameters.delete :jobname
-              workflow.job(name, jobname, parameters).run
-            else
-              kb = associations[name].first
-              entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
-              if reverse
-                kb.parents(name, entities)
-              else
-                kb.children(name, entities)
-              end
-            end
-          end
+      # Process tools
+
+      case tools
+      when Array
+        tools = tools.inject({}) do |acc,definition|
+          IndiferentHash.setup definition
+          name = definition.dig('name') || definition.dig('function', 'name')
+          acc.merge(name => definition)
         end
+      when nil
+        tools = {}
+      end
+
+      tools.merge!(LLM.tools messages)
+      tools.merge!(LLM.associations messages)
+
+      if tools.any?
+        parameters[:tools] = tools.values.collect{|obj,definition| Hash === obj ? obj : definition}
       end
 
       Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
@@ -96,10 +90,10 @@ module LLM
 
       parameters[:stream] = stream
 
-      response = self.process_response client.chat(parameters), &block
+      response = self.process_response client.chat(parameters), tools, &block
 
       res = if response.last[:role] == 'function_call_output' 
-              response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: parameters[:tools]), &block)
+              response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: tools), &block)
             else
               response
             end

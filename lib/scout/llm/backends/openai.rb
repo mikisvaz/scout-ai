@@ -20,7 +20,7 @@ module LLM
       end.flatten.compact
     end
 
-    def self.process_response(response, &block)
+    def self.process_response(response, tools, &block)
       Log.debug "Respose: #{Log.fingerprint response}"
       raise Exception, response["error"] if response["error"]
 
@@ -29,7 +29,7 @@ module LLM
         response.dig("choices", 0, "message", "tool_calls")
 
       if tool_calls && tool_calls.any?
-        LLM.call_tools tool_calls, &block
+        LLM.process_calls(tools, tool_calls, &block)
       else
         [message]
       end
@@ -40,11 +40,9 @@ module LLM
 
       messages = LLM.chat(question)
       options = options.merge LLM.options messages
-      tools = LLM.tools messages
-      associations = LLM.associations messages
 
-      client, url, key, model, log_errors, return_messages, format, tool_choice_next, previous_response_id = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :log_errors, :return_messages, :format, :tool_choice_next, :previous_response_id,
+      client, url, key, model, log_errors, return_messages, format, tool_choice_next, previous_response_id, tools, = IndiferentHash.process_options options,
+        :client, :url, :key, :model, :log_errors, :return_messages, :format, :tool_choice_next, :previous_response_id, :tools,
         log_errors: true, tool_choice_next: :none
 
       if client.nil?
@@ -58,8 +56,6 @@ module LLM
         model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-4.1")
       end
 
-      #role = IndiferentHash.process_options options, :role
-
       case format.to_sym
       when :json, :json_object
         options[:response_format] = {type: 'json_object'}
@@ -69,33 +65,54 @@ module LLM
 
       parameters = options.merge(model: model)
 
-      if tools.any? || associations.any?
-        parameters[:tools] = []
-        parameters[:tools] += tools.values.collect{|a| a.last } if tools
-        parameters[:tools] += associations.values.collect{|a| a.last } if associations
-        if not block_given?
-          block = Proc.new do |name,parameters|
-            IndiferentHash.setup parameters
-            if tools[name]
-              workflow = tools[name].first
-              jobname = parameters.delete :jobname
-              if workflow.exec_exports.include? name.to_sym
-                workflow.job(name, jobname, parameters).exec
-              else
-                workflow.job(name, jobname, parameters).run
-              end
-            else
-              kb = associations[name].first
-              entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
-              if reverse
-                kb.parents(name, entities)
-              else
-                kb.children(name, entities)
-              end
-            end
-          end
+      # Process tools
+
+      case tools
+      when Array
+        tools = tools.inject({}) do |acc,definition|
+          IndiferentHash.setup definition
+          name = definition.dig('name') || definition.dig('function', 'name')
+          acc.merge(name => definition)
         end
+      when nil
+        tools = {}
       end
+
+      tools.merge!(LLM.tools messages)
+      tools.merge!(LLM.associations messages)
+
+      if tools.any?
+        parameters[:tools] = tools.values.collect{|obj,definition| Hash === obj ? obj : definition}
+      end
+
+
+      #if tools.any? || associations.any?
+      #  parameters[:tools] = []
+      #  parameters[:tools] += tools.values.collect{|a| a.last } if tools
+      #  parameters[:tools] += associations.values.collect{|a| a.last } if associations
+      #  if not block_given?
+      #    block = Proc.new do |name,parameters|
+      #      IndiferentHash.setup parameters
+      #      if tools[name]
+      #        workflow = tools[name].first
+      #        jobname = parameters.delete :jobname
+      #        if workflow.exec_exports.include? name.to_sym
+      #          workflow.job(name, jobname, parameters).exec
+      #        else
+      #          workflow.job(name, jobname, parameters).run
+      #        end
+      #      else
+      #        kb = associations[name].first
+      #        entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
+      #        if reverse
+      #          kb.parents(name, entities)
+      #        else
+      #          kb.children(name, entities)
+      #        end
+      #      end
+      #    end
+      #  end
+      #end
 
       messages = self.process_input messages
 
@@ -103,10 +120,10 @@ module LLM
 
       parameters[:messages] = LLM.tools_to_openai messages
 
-      response = self.process_response client.chat(parameters: parameters), &block
+      response = self.process_response client.chat(parameters: parameters), tools, &block
 
       res = if response.last[:role] == 'function_call_output' 
-              response + self.ask(messages + response, original_options.merge(tool_choice: tool_choice_next, return_messages: true, tools: parameters[:tools]), &block)
+              response + self.ask(messages + response, original_options.merge(tool_choice: tool_choice_next, return_messages: true, tools: tools ), &block)
             else
               response
             end

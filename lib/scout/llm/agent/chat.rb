@@ -1,7 +1,7 @@
 module LLM
   class Agent
     def start_chat
-      @start_chat ||= Chat.setup []
+      @start_chat ||= Chat.setup([])
     end
 
     def start(chat=nil)
@@ -30,6 +30,18 @@ module LLM
       current_chat.concat(new)
       new.last['content']
     end
+
+    def chat(model = nil, options = {})
+      response = ask(current_chat, model, options.merge(return_messages: true))
+      if Array === response
+        current_chat.concat(response)
+        current_chat.answer
+      else
+        current_chat.push({role: :assistant, content: response})
+        response
+      end
+    end
+
 
     def json(...)
       current_chat.format :json
