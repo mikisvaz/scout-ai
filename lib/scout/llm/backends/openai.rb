@@ -5,7 +5,9 @@ require_relative '../chat'
 module LLM
   module OpenAI
 
-    def self.client(url, key, log_errors = false, request_timeout: 1200)
+    def self.client(url = nil, key = nil, log_errors = false, request_timeout: 1200)
+      url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
+      key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :openai, env: 'OPENAI_KEY')
       Object::OpenAI::Client.new(access_token:key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout)
     end
 
