@@ -73,7 +73,7 @@ module LLM
       if message[:role] == 'function_call'
         tool_call = JSON.parse(message[:content])
         arguments = tool_call.delete('arguments') || {}
-        name = tool_call.delete('name')
+        name = tool_call[:name]
         tool_call['type'] = 'function'
         tool_call['function'] ||= {}
         tool_call['function']['name'] ||= name

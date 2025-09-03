@@ -48,6 +48,7 @@ module LLM
       messages.collect do |message|
         if message[:role] == 'function_call'
           info = JSON.parse(message[:content])
+          IndiferentHash.setup info
           name = info[:name] || IndiferentHash.dig(info,:function, :name)
           IndiferentHash.setup info
           id = info[:id].sub(/^fc_/, '')

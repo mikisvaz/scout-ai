@@ -53,9 +53,11 @@ You have access to the following databases associating entities:
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
 
+      tools = options[:tools] || {}
+      tools = tools.merge @other_options[:tools] if @other_options[:tools]
+      options[:tools] = tools
       begin
         if workflow || knowledge_base
-          tools = options[:tools] || {}
           tools.merge!(LLM.workflow_tools(workflow)) if workflow
           tools.merge!(LLM.knowledge_base_tool_definition(knowledge_base)) if knowledge_base and knowledge_base.all_databases.any?
           options[:tools] = tools
@@ -74,7 +76,6 @@ You have access to the following databases associating entities:
           end
         end
       end
-
     end
 
     def self.load_from_path(path, workflow: nil, knowledge_base: nil, chat: nil)
@@ -93,3 +94,4 @@ end
 
 require_relative 'agent/chat'
 require_relative 'agent/iterate'
+require_relative 'agent/delegate'

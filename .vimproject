@@ -47,6 +47,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     agent=agent{
      chat.rb
      iterate.rb
+     delegate.rb
     }
    }
    model=model{
