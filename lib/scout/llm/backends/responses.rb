@@ -134,6 +134,54 @@ module LLM
       end.flatten
     end
 
+    def self.process_format(format)
+      case format
+      when :json, :json_object, "json", "json_object"
+        {format: {type: 'json_object'}}
+      when String, Symbol
+        {format: {type: format}}
+      when Hash
+        IndiferentHash.setup format
+
+        if format.include?('format')
+          format
+        elsif format['type'] == 'json_schema'
+          {format: format}
+        else
+
+          if ! format.include?('properties')
+            format = IndiferentHash.setup({properties: format})
+          end
+
+          properties = format['properties']
+          new_properties = {}
+          properties.each do |name,info|
+            case info
+            when Symbol, String
+              new_properties[name] = {type: info}
+            when Array
+              new_properties[name] = {type: info[0], description: info[1], default: info[2]}
+            else
+              new_properties[name] = info
+            end
+          end
+          format['properties'] = new_properties
+
+          required = format['properties'].reject{|p,i| i[:default] }.collect{|p,i| p }
+
+          name = format.include?('name') ? format.delete('name') : 'response'
+
+          format['type'] ||= 'object'
+          format[:additionalProperties] = required.empty? ? {type: :string} : false
+          format[:required] = required
+          {format: {name: name,
+                    type: "json_schema",
+                    schema: format,
+          }}
+        end
+      end
+    end
+
     def self.ask(question, options = {}, &block)
       original_options = options.dup
 
@@ -165,31 +213,52 @@ module LLM
         model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-4.1")
       end
 
-      case format
-      when :json, :json_object, "json", "json_object"
-        options['text'] = {format: {type: 'json_object'}}
-      when String, Symbol
-        options['text'] = {format: {type: format}}
-      when Hash
-        IndiferentHash.setup format
+      options['text'] = self.process_format format if format
+      #case format
+      #when :json, :json_object, "json", "json_object"
+      #  options['text'] = {format: {type: 'json_object'}}
+      #when String, Symbol
+      #  options['text'] = {format: {type: format}}
+      #when Hash
+      #  IndiferentHash.setup format
 
-        if format.include?('format')
-          options['text'] = format
-        elsif format['type'] == 'json_schema'
-          options['text'] = {format: format}
-        else
-          required = format.include?('properties') ? format['properties'].keys : []
+      #  if format.include?('format')
+      #    options['text'] = format
+      #  elsif format['type'] == 'json_schema'
+      #    options['text'] = {format: format}
+      #  else
 
-          name = format.include?('name') ? format.delete('name') : 'response'
+      #    if ! format.include?('properties')
+      #      format = IndiferentHash.setup({properties: format})
+      #    end
 
-          options['text'] = {format: {name: name,
-                                      type: "json_schema",
-                                      #additionalProperties: required.empty? ? {type: :string} : false,
-                                      required: required,
-                                      schema: format,
-          }}
-        end
-      end if format
+      #    properties = format['properties']
+      #    new_properties = {}
+      #    properties.each do |name,info|
+      #      case info
+      #      when Symbol, String
+      #        new_properties[name] = {type: info}
+      #      when Array
+      #        new_properties[name] = {type: info[0], description: info[1], default: info[2]}
+      #      else
+      #        new_properties[name] = info
+      #      end
+      #    end
+      #    format['properties'] = new_properties
+
+      #    required = format['properties'].reject{|p,i| i[:default] }.collect{|p,i| p }
+
+      #    name = format.include?('name') ? format.delete('name') : 'response'
+
+      #    format['type'] ||= 'object'
+      #    format[:additionalProperties] = required.empty? ? {type: :string} : false
+      #    format[:required] = required
+      #    options['text'] = {format: {name: name,
+      #                                type: "json_schema",
+      #                                schema: format,
+      #    }}
+      #  end
+      #end if format
 
       parameters = options.merge(model: model)
 
@@ -212,39 +281,6 @@ module LLM
       if tools.any?
         parameters[:tools] = tools.values.collect{|obj,definition| Hash === obj ? obj : definition}
       end
-
-      #if tools.any? || associations.any?
-      #  parameters[:tools] ||= []
-      #  parameters[:tools] += tools.values.collect{|a| a.last } if tools
-      #  parameters[:tools] += associations.values.collect{|a| a.last } if associations
-      #  parameters[:tools] = parameters[:tools].collect{|tool|
-      #    function = tool.delete :function;
-      #    tool.merge function
-      #  }
-
-      #  if not block_given?
-      #    block = Proc.new do |name,parameters|
-      #      IndiferentHash.setup parameters
-      #      if tools[name]
-      #        workflow = tools[name].first
-      #        jobname = parameters.delete :jobname
-      #        if workflow.exec_exports.include? name.to_sym
-      #          workflow.job(name, jobname, parameters).exec
-      #        else
-      #          workflow.job(name, jobname, parameters).run
-      #        end
-      #      else
-      #        kb = associations[name].first
-      #        entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
-      #        if reverse
-      #          kb.parents(name, entities)
-      #        else
-      #          kb.children(name, entities)
-      #        end
-      #      end
-      #    end
-      #  end
-      #end
 
       parameters['previous_response_id'] = previous_response_id if String === previous_response_id
       Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
