@@ -165,9 +165,9 @@ module LLM
         new = if message[:role] == 'continue'
                 [new.reject{|msg| msg[:content].nil? || msg[:content].strip.empty? }.last]
               elsif message[:role] == 'last'
-                [new.reject{|msg| msg[:role].to_s == 'previous_response_id' }.last]
+                [LLM.purge(new).reject{|msg| msg[:content].empty?}.last]
               else
-                new.reject{|msg| msg[:role].to_s == 'previous_response_id' }
+                LLM.purge(new)
               end
 
         LLM.chat new, found_file
