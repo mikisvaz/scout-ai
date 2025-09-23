@@ -348,7 +348,7 @@ module LLM
 
   def self.options(chat)
     options = IndiferentHash.setup({})
-    strong_options = IndiferentHash.setup({})
+    stiky_options = IndiferentHash.setup({})
     new = []
 
     # Most options reset after an assistant reply, but not previous_response_id
@@ -359,7 +359,7 @@ module LLM
           options[role] = info[:content]
           next
         elsif %w(previous_response_id).include? role.to_s
-          strong_options[role] = info[:content]
+          stiky_options[role] = info[:content]
           next
         elsif %w(format).include? role.to_s
           format = info[:content]
@@ -379,6 +379,12 @@ module LLM
           next
         end
 
+        if role.to_s == 'stiky_option'
+          key, value = info[:content].split(" ")
+          stiky_options[key] = value
+          next
+        end
+
         if role == 'assistant'
           options.clear
         end
@@ -386,7 +392,7 @@ module LLM
       new << info
     end
     chat.replace new
-    strong_options.merge options
+    stiky_options.merge options
   end
 
   def self.tools(messages)
