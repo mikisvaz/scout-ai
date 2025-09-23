@@ -74,6 +74,8 @@ You have access to the following databases associating entities:
           else
             raise exception
           end
+        else
+          raise exception
         end
       end
     end
