@@ -65,5 +65,10 @@ module LLM
       end
     end
 
+    def get_previous_response_id
+      msg = current_chat.reverse.find{|msg| msg[:role].to_sym == :previous_response_id }
+      msg.nil? ? nil : msg['content']
+    end
+
   end
 end
