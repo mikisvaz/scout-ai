@@ -5,6 +5,73 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  bin=bin filter="*"{
   scout-ai
  }
+ chats=chats filter="*"{
+  chat
+  text_options
+
+  multi_agent.rb
+
+  pdf
+  agent
+  AGS
+  documenter.rb
+  genome_editing
+  hello
+  high_level
+  test_chat
+  system=system{
+   scout-ai
+  }
+  doc=doc{
+   agent
+   chat
+   model
+   model.analysis
+  }
+  develop=develop{
+   causalLM
+   chat
+   digest
+   finetuning
+   json_format
+   model
+   rf
+   training=training{
+    basics
+    data.tmp
+    intro
+    python
+    data=data{
+     main
+     next_token
+     test.rb
+    }
+   }
+  }
+  refactor=refactor{
+   chat
+  }
+  help=help{
+   fine-tunning
+   from_pretrained
+   previous_response
+  }
+  test=test{
+   agent_chat.rb
+   block
+   file
+   imports
+   imports.rb
+   prev
+   rf.rb
+   tool
+  }
+  web=web{
+   chat
+   cmd
+   web
+  }
+ }
  doc=doc filter="*"{
   Agent.md
   Chat.md
