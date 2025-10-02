@@ -6,12 +6,12 @@ module LLM
   end
 
   class Agent
-    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception
+    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options
     def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
       @workflow = workflow
       @workflow = Workflow.require_workflow @workflow if String === @workflow
       @knowledge_base = knowledge_base
-      @other_options = kwargs
+      @other_options = IndiferentHash.setup(kwargs.dup)
       @start_chat = start_chat
     end
 
