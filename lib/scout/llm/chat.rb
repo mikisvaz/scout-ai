@@ -379,7 +379,7 @@ module LLM
           next
         end
 
-        if role.to_s == 'stiky_option'
+        if role.to_s == 'sticky_option'
           key, value = info[:content].split(" ")
           stiky_options[key] = value
           next
