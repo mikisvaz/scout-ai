@@ -623,6 +623,10 @@ module Chat
     LLM.purge(self).last
   end
 
+  def purge
+    Chat.setup(LLM.purge(self))
+  end
+
   def shed
     self.annotate [final]
   end
