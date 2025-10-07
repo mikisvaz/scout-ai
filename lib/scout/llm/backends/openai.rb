@@ -87,35 +87,6 @@ module LLM
         parameters[:tools] = tools.values.collect{|obj,definition| Hash === obj ? obj : definition}
       end
 
-
-      #if tools.any? || associations.any?
-      #  parameters[:tools] = []
-      #  parameters[:tools] += tools.values.collect{|a| a.last } if tools
-      #  parameters[:tools] += associations.values.collect{|a| a.last } if associations
-      #  if not block_given?
-      #    block = Proc.new do |name,parameters|
-      #      IndiferentHash.setup parameters
-      #      if tools[name]
-      #        workflow = tools[name].first
-      #        jobname = parameters.delete :jobname
-      #        if workflow.exec_exports.include? name.to_sym
-      #          workflow.job(name, jobname, parameters).exec
-      #        else
-      #          workflow.job(name, jobname, parameters).run
-      #        end
-      #      else
-      #        kb = associations[name].first
-      #        entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
-      #        if reverse
-      #          kb.parents(name, entities)
-      #        else
-      #          kb.children(name, entities)
-      #        end
-      #      end
-      #    end
-      #  end
-      #end
-
       messages = self.process_input messages
 
       Log.low "Calling openai #{url}: #{Log.fingerprint parameters}}"

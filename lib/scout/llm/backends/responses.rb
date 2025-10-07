@@ -214,55 +214,8 @@ module LLM
       end
 
       options['text'] = self.process_format format if format
-      #case format
-      #when :json, :json_object, "json", "json_object"
-      #  options['text'] = {format: {type: 'json_object'}}
-      #when String, Symbol
-      #  options['text'] = {format: {type: format}}
-      #when Hash
-      #  IndiferentHash.setup format
-
-      #  if format.include?('format')
-      #    options['text'] = format
-      #  elsif format['type'] == 'json_schema'
-      #    options['text'] = {format: format}
-      #  else
-
-      #    if ! format.include?('properties')
-      #      format = IndiferentHash.setup({properties: format})
-      #    end
-
-      #    properties = format['properties']
-      #    new_properties = {}
-      #    properties.each do |name,info|
-      #      case info
-      #      when Symbol, String
-      #        new_properties[name] = {type: info}
-      #      when Array
-      #        new_properties[name] = {type: info[0], description: info[1], default: info[2]}
-      #      else
-      #        new_properties[name] = info
-      #      end
-      #    end
-      #    format['properties'] = new_properties
-
-      #    required = format['properties'].reject{|p,i| i[:default] }.collect{|p,i| p }
-
-      #    name = format.include?('name') ? format.delete('name') : 'response'
-
-      #    format['type'] ||= 'object'
-      #    format[:additionalProperties] = required.empty? ? {type: :string} : false
-      #    format[:required] = required
-      #    options['text'] = {format: {name: name,
-      #                                type: "json_schema",
-      #                                schema: format,
-      #    }}
-      #  end
-      #end if format
 
       parameters = options.merge(model: model)
-
-      # Process tools
 
       case tools
       when Array
