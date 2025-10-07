@@ -1,4 +1,5 @@
 require 'scout/knowledge_base'
+require_relative 'tools/mcp'
 require_relative 'tools/workflow'
 require_relative 'tools/knowledge_base'
 require_relative 'tools/call'

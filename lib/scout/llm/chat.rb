@@ -398,7 +398,20 @@ module LLM
   def self.tools(messages)
     tool_definitions = IndiferentHash.setup({})
     new = messages.collect do |message|
-      if message[:role] == 'tool'
+      if message[:role] == 'mcp'
+        url, *tools = message[:content].strip.split(/\s+/)
+
+        mcp_tool_definitions = LLM.mcp_tools(url)
+
+        if tools.any?
+          tools.each do |tool|
+            tool_definitions[tool] = mcp_tool_definitions[tool]
+          end
+        else
+          tool_definitions.merge!(mcp_tool_definitions)
+        end
+        next
+      elsif message[:role] == 'tool'
         workflow_name, task_name, *inputs = message[:content].strip.split(/\s+/)
         inputs = nil if inputs.empty?
         inputs = [] if inputs == ['none'] || inputs == ['noinputs']
