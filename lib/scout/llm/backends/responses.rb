@@ -270,7 +270,11 @@ module LLM
             end
 
       if return_messages
-        res + [previous_response_message]
+        if res.last[:role] == :previous_response_id
+          res
+        else
+          res + [previous_response_message]
+        end
       else
         LLM.purge(res).last['content']
       end
