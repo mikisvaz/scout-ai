@@ -3,15 +3,19 @@ require 'mcp_client'
 
 module LLM
   def self.mcp_tools(url, options = {})
-    type = IndiferentHash.process_options options, :type,
-      type: (Open.remote?(url) ? :http : :stdio)
+    if url == 'stdio'
+      client = MCPClient.create_client(mcp_server_configs: [options.merge(type: 'stdio')])
+    else
+      type = IndiferentHash.process_options options, :type,
+        type: (Open.remote?(url) ? :http : :stdio)
 
-    if url && Open.remote?(url)
-      token ||= LLM.get_url_config(:key, url, :mcp)
-      options[:headers] = { 'Authorization' => "Bearer #{token}" }
+      if url && Open.remote?(url)
+        token ||= LLM.get_url_config(:key, url, :mcp)
+        options[:headers] = { 'Authorization' => "Bearer #{token}" }
+      end
+
+      client = MCPClient.create_client(mcp_server_configs: [options.merge(type: 'http', url: url)])
     end
-
-    client = MCPClient.create_client(mcp_server_configs: [options.merge(type: 'http', url: url)])
 
     tools = client.list_tools
 

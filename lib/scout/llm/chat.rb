@@ -1,6 +1,7 @@
 require_relative 'utils'
 require_relative 'parse'
 require_relative 'tools'
+require 'shellwords'
 
 module LLM
   def self.messages(question, role = nil)
@@ -399,9 +400,14 @@ module LLM
     tool_definitions = IndiferentHash.setup({})
     new = messages.collect do |message|
       if message[:role] == 'mcp'
-        url, *tools = message[:content].strip.split(/\s+/)
+        url, *tools = Shellwords.split(message[:content].strip)
 
-        mcp_tool_definitions = LLM.mcp_tools(url)
+        if url == 'stdio'
+          command = tools.shift
+          mcp_tool_definitions = LLM.mcp_tools(url, command: command, url: nil, type: :stdio)
+        else
+          mcp_tool_definitions = LLM.mcp_tools(url)
+        end
 
         if tools.any?
           tools.each do |tool|
