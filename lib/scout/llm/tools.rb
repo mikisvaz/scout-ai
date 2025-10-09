@@ -92,6 +92,29 @@ module LLM
     end.flatten
   end
 
+  def self.tools_to_anthropic(messages)
+    messages.collect do |message|
+      if message[:role] == 'function_call'
+        tool_call = JSON.parse(message[:content])
+        arguments = tool_call.delete('arguments') || {}
+        name = tool_call[:name]
+        tool_call['type'] = 'tool_use'
+        tool_call['name'] ||= name
+        tool_call['input'] = arguments
+        {role: 'assistant', content: [tool_call]}
+      elsif message[:role] == 'function_call_output'
+        info = JSON.parse(message[:content])
+        id = info.delete('call_id') || info.delete('id')
+        info.delete "role"
+        info['tool_use_id'] = id
+        info['type'] = 'tool_result'
+        {role: 'user', content: [info]}
+      else
+        message
+      end
+    end.flatten
+  end
+
   def self.tools_to_ollama(messages)
     messages.collect do |message|
       if message[:role] == 'function_call'
@@ -114,5 +137,4 @@ module LLM
       end
     end.flatten
   end
-
 end

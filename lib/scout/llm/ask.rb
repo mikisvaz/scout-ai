@@ -23,6 +23,9 @@ module LLM
       when :openai, "openai"
         require_relative 'backends/openai'
         LLM::OpenAI.ask(messages, options, &block)
+      when :anthropic, "anthropic"
+        require_relative 'backends/anthropic'
+        LLM::Anthropic.ask(messages, options, &block)
       when :responses, "responses"
         require_relative 'backends/responses'
         LLM::Responses.ask(messages, options, &block)
