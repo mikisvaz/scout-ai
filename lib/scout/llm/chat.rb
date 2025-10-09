@@ -4,6 +4,10 @@ require_relative 'tools'
 require 'shellwords'
 
 module LLM
+  def self.content_tokens(message)
+    Shellwords.split(message[:content].strip)
+  end
+
   def self.messages(question, role = nil)
     default_role = "user"
 
@@ -349,7 +353,7 @@ module LLM
 
   def self.options(chat)
     options = IndiferentHash.setup({})
-    stiky_options = IndiferentHash.setup({})
+    sticky_options = IndiferentHash.setup({})
     new = []
 
     # Most options reset after an assistant reply, but not previous_response_id
@@ -360,7 +364,7 @@ module LLM
           options[role] = info[:content]
           next
         elsif %w(previous_response_id).include? role.to_s
-          stiky_options[role] = info[:content]
+          sticky_options[role] = info[:content]
           next
         elsif %w(format).include? role.to_s
           format = info[:content]
@@ -375,14 +379,14 @@ module LLM
         end
 
         if role.to_s == 'option'
-          key, value = info[:content].split(" ")
+          key, _, value = info[:content].partition(" ")
           options[key] = value
           next
         end
 
         if role.to_s == 'sticky_option'
-          key, value = info[:content].split(" ")
-          stiky_options[key] = value
+          key, _, value = info[:content].partition(" ")
+          sticky_options[key] = value
           next
         end
 
@@ -393,14 +397,14 @@ module LLM
       new << info
     end
     chat.replace new
-    stiky_options.merge options
+    sticky_options.merge options
   end
 
   def self.tools(messages)
     tool_definitions = IndiferentHash.setup({})
     new = messages.collect do |message|
       if message[:role] == 'mcp'
-        url, *tools = Shellwords.split(message[:content].strip)
+        url, *tools = content_tokens(message)
 
         if url == 'stdio'
           command = tools.shift
@@ -418,7 +422,7 @@ module LLM
         end
         next
       elsif message[:role] == 'tool'
-        workflow_name, task_name, *inputs = message[:content].strip.split(/\s+/)
+        workflow_name, task_name, *inputs = content_tokens(message)
         inputs = nil if inputs.empty?
         inputs = [] if inputs == ['none'] || inputs == ['noinputs']
         if Open.remote? workflow_name
@@ -451,7 +455,7 @@ module LLM
     tool_definitions = {}
     new = messages.collect do |message|
       if message[:role] == 'association'
-        name, path, *options = message[:content].strip.split(/\s+/)
+        name, path, *options = content_tokens(message)
 
         kb ||= KnowledgeBase.new Scout.var.Agent.Chat.knowledge_base
         kb.register name, Path.setup(path), IndiferentHash.parse_options(message[:content])
