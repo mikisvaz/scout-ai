@@ -441,6 +441,14 @@ module LLM
           tool_definitions.merge!(LLM.workflow_tools(workflow))
         end
         next
+      elsif message[:role] == 'kb'
+        knowledge_base_name, *databases = content_tokens(message)
+        databases = nil if databases.empty?
+        knowledge_base = KnowledgeBase.load knowledge_base_name
+
+        knowledge_base_definition = LLM.knowledge_base_tool_definition(knowledge_base, databases)
+        tool_definitions.merge!(knowledge_base_definition)
+        next
       elsif message[:role] == 'clear_tools'
         tool_definitions = {}
       else
