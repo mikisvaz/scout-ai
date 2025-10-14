@@ -11,7 +11,7 @@ module LLM
     endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT'
     if endpoint && Scout.etc.AI[endpoint].exists?
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
-    else
+    elsif endpoint && endpoint != ""
       raise "Endpoint not found #{endpoint}"
     end
 
