@@ -360,7 +360,7 @@ module LLM
     chat.each do |info|
       if Hash === info
         role = info[:role].to_s
-        if %w(endpoint model backend persist).include? role.to_s
+        if %w(endpoint model backend persist agent).include? role.to_s
           options[role] = info[:content]
           next
         elsif %w(previous_response_id).include? role.to_s
