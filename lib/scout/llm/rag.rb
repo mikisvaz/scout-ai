@@ -12,5 +12,14 @@ module LLM
       end
       t
     end
+
+    def self.load(path, dim)
+      require 'hnswlib'
+
+      u = Hnswlib::HierarchicalNSW.new(space: 'l2', dim: dim)
+      u.load_index(path)
+
+      u
+    end
   end
 end
