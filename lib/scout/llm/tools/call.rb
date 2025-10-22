@@ -19,7 +19,12 @@ module LLM
     calls.collect do |tool_call|
       tool_call_id, function_name, function_arguments = call_id_name_and_arguments(tool_call)
 
+      function_arguments = IndiferentHash.setup function_arguments
+
       obj, definition = tools[function_name]
+
+      defaults = defaults = definition[:parameters][:defaults]
+      function_arguments = function_arguments.merge(defaults) if defaults
 
       function_response = case obj
                           when Proc
@@ -47,6 +52,8 @@ module LLM
                   function_response.to_json
                 end
       content = content.to_s if Numeric === content
+
+      Log.medium "Called #{function_name} (#{Log.fingerprint function_arguments}): " + Log.fingerprint(content)
 
       response_message = {
         id: tool_call_id,

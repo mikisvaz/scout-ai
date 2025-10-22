@@ -3,10 +3,23 @@ module LLM
   def self.task_tool_definition(workflow, task_name, inputs = nil)
     task_info = workflow.task_info(task_name)
 
-    inputs = inputs.collect{|i| i.to_sym } if inputs
+    if inputs
+      names = []
+      defaults = {}
+
+      inputs.each do |i|
+        if String === i && i.include?('=')
+          name,_ , value = i.partition("=")
+          defaults[name] = value
+        else
+          names << i.to_sym
+        end
+      end
+
+    end
 
     properties = task_info[:inputs].inject({}) do |acc,input|
-      next acc if inputs and not inputs.include?(input)
+      next acc if names and not names.include?(input)
       type = task_info[:input_types][input]
       description = task_info[:input_descriptions][input]
 
@@ -31,7 +44,7 @@ module LLM
     end
 
     required_inputs = task_info[:inputs].select do |input|
-      next if inputs and not inputs.include?(input.to_sym)
+      next if names and not names.include?(input.to_sym)
       task_info[:input_options].include?(input) && task_info[:input_options][input][:required]
     end
 
@@ -41,7 +54,8 @@ module LLM
       parameters: {
         type: "object",
         properties: properties,
-        required: required_inputs
+        required: required_inputs,
+        defaults: defaults
       }
     }
 

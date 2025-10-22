@@ -6,6 +6,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai
  }
  chats=chats filter="*"{
+  ask_agent
+
+
   test_github
 
   test_stdio
@@ -103,8 +106,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
     backends=backends{
      openai.rb
-     anthropic.rb
      responses.rb
+     anthropic.rb
      ollama.rb
      bedrock.rb
      openwebui.rb

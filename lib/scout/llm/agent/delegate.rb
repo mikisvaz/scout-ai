@@ -7,6 +7,13 @@ module LLM
 
       block ||= Proc.new do |name, parameters|
         message = parameters[:message]
+        new_conversation = parameters[:new_conversation]
+        Log.medium "Delegated to #{agent}: " + Log.fingerprint(message)
+        if new_conversation
+          agent.start
+        else
+          agent.purge
+        end
         agent.user message
         agent.chat
       end
@@ -15,6 +22,11 @@ module LLM
         message: {
           "type": :string,
           "description": "Message to pass to the agent"
+        },
+        new_conversation: {
+          "type": :boolean,
+          "description": "Erase conversation history and start a new conversation with this message",
+          "default": false
         }
       }
 
