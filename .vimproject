@@ -8,6 +8,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  chats=chats filter="*"{
   ask_agent
 
+  test_ollama_tool
 
   test_github
 
