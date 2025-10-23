@@ -87,7 +87,7 @@ You have access to the following databases associating entities:
 
       workflow = Workflow.require_workflow workflow_path if workflow_path.exists?
       knowledge_base = KnowledgeBase.new knowledge_base_path if knowledge_base_path.exists?
-      chat = LLM.chat chat_path if chat_path.exists?
+      chat = LLM.chat chat_path.find if chat_path.exists?
 
       LLM::Agent.new workflow: workflow, knowledge_base: knowledge_base, start_chat: chat
     end

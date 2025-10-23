@@ -41,12 +41,11 @@ agent_name, *question_parts = ARGV
 
 question = question_parts * " "
 
-file, chat, inline, template, dry_run, imports = IndiferentHash.process_options options, :file, :chat, :inline, :template, :dry_run, :imports
+file, chat, inline, template, dry_run, imports, endpoint, model = IndiferentHash.process_options options, :file, :chat, :inline, :template, :dry_run, :imports, :endpoint, :model
 
 file = Path.setup(file) if file
 
 imports = imports.split(/,\s*/) if imports
-
 
 agent_name ||= 'default'
 
@@ -70,6 +69,9 @@ if agent_file.exists?
 else
   #raise ParameterException agent_file
 end
+
+agent.other_options[:endpoint] = endpoint if endpoint
+agent.other_options[:model] = model if model
 
 if template
   if Open.exists?(template)
@@ -98,24 +100,32 @@ elsif file
 end
 
 if chat
-  conversation = Open.exist?(chat)? LLM.chat(chat) : [] 
-  convo_options = LLM.options conversation
-  conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
+  #conversation = Open.exist?(chat)? LLM.chat(chat) : []
+  #convo_options = LLM.options conversation
+  #conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
 
-  if dry_run
-    ppp LLM.print conversation
-    exit 0
-  end
-  new = agent.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
-  conversation = Open.read(chat) + LLM.print(new)
-  Open.write(chat, conversation)
+  #if dry_run
+  #  ppp LLM.print conversation
+  #  exit 0
+  #end
+
+  #new = agent.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
+  #conversation = Open.read(chat) + LLM.print(new)
+  #Open.write(chat, conversation)
+
+  conversation = Open.exist?(chat)? LLM.chat(chat) : []
+  agent.start(Chat.setup(conversation)) if conversation.any?
+  agent.current_chat.concat LLM.chat(question)
+  imports.each{|import| agent.import import } if imports
+  puts agent.chat
+  Open.write(chat, LLM.print(agent.current_chat))
 elsif inline
 
   file = Open.read inline
 
   new_file = ""
   while true
-    pre, question, post = 
+    pre, question, post =
       file.partition(/^\s*#\s*ask:(?:.*?)(?=^\s*[^\s#])/smu)
 
       break if post.empty?
@@ -124,7 +134,7 @@ elsif inline
     new_file << question
     clean_question = question.gsub('#', '').gsub(/\s+/,' ').sub(/.*ask:\s*/,'').strip
     chat = [
-      {role: :system, content: "Write a succint reply with no commentary and no formatting."}, 
+      {role: :system, content: "Write a succint reply with no commentary and no formatting."},
       {role: :user, content: "Find the following question as a comment in the file give a response to be placed inline: #{question}"},
       LLM.tag('file', file, inline)
     ]
@@ -139,7 +149,10 @@ elsif inline
   new_file << file
   Open.write(inline, new_file)
 else
-  conversation = Chat.setup(LLM.chat question)
-  imports.each{|import| conversation.import import } if imports
-  puts agent.ask(conversation, nil, options)
+  #conversation = Chat.setup(LLM.chat question)
+  #imports.each{|import| conversation.import import } if imports
+  #puts agent.ask(conversation, nil, options)
+  agent.current_chat.concat LLM.chat(question)
+  imports.each{|import| agent.import import } if imports
+  puts agent.chat
 end

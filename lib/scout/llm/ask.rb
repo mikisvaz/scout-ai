@@ -41,7 +41,8 @@ module LLM
       raise "Endpoint not found #{endpoint}"
     end
 
-    Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist) do
+    Log.high Log.color :green, "Asking #{endpoint || 'client'}:\n" + LLM.print(messages) 
+    res = Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist) do
       backend = IndiferentHash.process_options options, :backend
       backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :openai
 
@@ -71,6 +72,10 @@ module LLM
         raise "Unknown backend: #{backend}"
       end
     end
+
+    Log.high Log.color :blue, "Response:\n" + LLM.print(res) 
+
+    res
   end
 
   def self.workflow_ask(workflow, question, options = {})

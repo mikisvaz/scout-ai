@@ -23,9 +23,12 @@ module LLM
 
       obj, definition = tools[function_name]
 
-      defaults = defaults = definition[:parameters][:defaults]
+      definition = obj if Hash === obj
+
+      defaults = definition[:parameters][:defaults] if definition[:parameters]
       function_arguments = function_arguments.merge(defaults) if defaults
 
+      Log.high "Calling #{function_name} (#{Log.fingerprint function_arguments}): "
       function_response = case obj
                           when Proc
                             obj.call function_name, function_arguments
@@ -53,7 +56,7 @@ module LLM
                 end
       content = content.to_s if Numeric === content
 
-      Log.medium "Called #{function_name} (#{Log.fingerprint function_arguments}): " + Log.fingerprint(content)
+      Log.high "Called #{function_name}: " + Log.fingerprint(content)
 
       response_message = {
         id: tool_call_id,

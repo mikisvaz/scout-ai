@@ -27,11 +27,16 @@ module LLM
       type = :string if type == :select
       type = :string if type == :path
       type = :number if type == :float
+      type = :array if type.to_s.end_with?('_array')
 
       acc[input] = {
         "type": type,
         "description": description
       }
+
+      if type == :array
+        acc[input]['items'] = {type: :string}
+      end
 
       if input_options = task_info[:input_options][input]
         if select_options = input_options[:select_options]
@@ -55,11 +60,13 @@ module LLM
         type: "object",
         properties: properties,
         required: required_inputs,
-        defaults: defaults
       }
     }
 
-    IndiferentHash.setup function.merge(type: 'function', function: function)
+    function[:parameters][:defaults] = defaults if defaults
+
+    #IndiferentHash.setup function.merge(type: 'function', function: function)
+    IndiferentHash.setup function
   end
 
   def self.workflow_tools(workflow, tasks = nil)
@@ -74,10 +81,16 @@ module LLM
 
   def self.call_workflow(workflow, task_name, parameters={})
     jobname = parameters.delete :jobname
-    if workflow.exec_exports.include? task_name.to_sym
-      workflow.job(task_name, jobname, parameters).exec
-    else
-      workflow.job(task_name, jobname, parameters).run
+    begin
+      job = workflow.job(task_name, jobname, parameters)
+      if workflow.exec_exports.include? task_name.to_sym
+        job.exec
+      else
+        raise ScoutException, 'Potential recurisve call' if job.running? and job.info[:pid] == Process.pid
+        job.run
+      end
+    rescue ScoutException
+      return $!
     end
   end
 end

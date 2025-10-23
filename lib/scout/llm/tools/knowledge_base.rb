@@ -68,9 +68,9 @@ Returns a list in the format source~target.
           description: "Associations in the form of source~target or target~source"
         },
         fields: {
-          type: "string",
-          enum: select_options,
-          description: "Limit the response to these detail fields fields"
+          type: "array",
+          items: { type: :string },
+          description: "Limit the response to these fields"
         },
       }
     else
@@ -93,22 +93,22 @@ Multiple values may be present and use the charater ';' to separate them.
     else
       properties.delete(:fields)
       description = <<-EOF
-Return the #{field} of association.
+Return the #{fields.first} of association.
 Multiple values may be present and use the charater ';' to separate them.
       EOF
     end
 
     function = {
-        name: database + '_association_details',
-        description: description,
-        parameters: {
-          type: "object",
-          properties: properties,
-          required: ['associations']
-        }
+      name: database.to_s + '_association_details',
+      description: description,
+      parameters: {
+        type: "object",
+        properties: properties,
+        required: ['associations']
+      }
     }
 
-    IndiferentHash.setup function.merge(type: 'function', function: function)
+    IndiferentHash.setup function
   end
 
 
@@ -122,7 +122,7 @@ Multiple values may be present and use the charater ';' to separate them.
       tool_definitions.merge(database => [knowledge_base, definition])
       if (fields = knowledge_base.get_database(database).fields).any?
         details_definition = self.database_details_tool_definition(database, undirected, fields)
-        tool_definitions.merge(database + '_association_details' => [knowledge_base, details_definition])
+        tool_definitions.merge(database.to_s + '_association_details' => [knowledge_base, details_definition])
       end
     }
   end

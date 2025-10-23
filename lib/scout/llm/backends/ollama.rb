@@ -81,10 +81,12 @@ module LLM
       tools.merge!(LLM.associations messages)
 
       if tools.any?
-        parameters[:tools] = tools.values.collect{|obj,definition| Hash === obj ? obj : definition}
+        parameters[:tools] = LLM.tool_definitions_to_ollama tools
       end
 
-      Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
+      Log.low "Calling ollama with parameters #{Log.fingerprint parameters}"
+      Log.medium "Ask ollama\n" + LLM.print(messages)
+
 
       parameters[:messages] = LLM.tools_to_ollama messages
 

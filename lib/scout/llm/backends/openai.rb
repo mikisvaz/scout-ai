@@ -84,7 +84,7 @@ module LLM
       tools.merge!(LLM.associations messages)
 
       if tools.any?
-        parameters[:tools] = tools.values.collect{|obj,definition| Hash === obj ? obj : definition}
+        parameters[:tools] = LLM.tool_definitions_to_openai tools
       end
 
       messages = self.process_input messages

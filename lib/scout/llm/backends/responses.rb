@@ -232,11 +232,12 @@ module LLM
       tools.merge!(LLM.associations messages)
 
       if tools.any?
-        parameters[:tools] = tools.values.collect{|obj,definition| Hash === obj ? obj : definition}
+        parameters[:tools] = LLM.tool_definitions_to_reponses tools
       end
 
       parameters['previous_response_id'] = previous_response_id if String === previous_response_id
-      Log.low "Calling client with parameters #{Log.fingerprint parameters}\n#{LLM.print messages}"
+      Log.low "Calling responses with parameters #{Log.fingerprint parameters}"
+      Log.medium LLM.print messages
 
       messages = self.process_input messages
       input = []

@@ -270,18 +270,21 @@ module LLM
           path = path.find if Path === path
           {role: 'file', content: step.path}
         else
+
+#{"function":{"name":"list_directory","arguments":{"directory":"/home/miki/.rbbt/workflows/ScoutCoder/lib/ScoutCoder","recursive":true,"stats":true}}}
+
+#{"id":null,"role":"tool","content":"{\"files\":[\"/home/miki/.rbbt/workflows/ScoutCoder/lib/ScoutCoder/tasks\"],\"directories\":[\"/home/miki/.rbbt/workflows/ScoutCoder/lib/ScoutCoder/tasks/documentation.rb\"],\"stats\":{\"/home/miki/.rbbt/workflows/ScoutCoder/lib/ScoutCoder/tasks\":{\"size\":4096,\"mtime\":null}}}"}
+          function_name = step.full_task_name.sub('#', '-')
           tool_call = {
-            type: "function",
             function: {
-              name: step.full_task_name.sub('#', '-'),
-              arguments: step.provided_inputs.to_json
+              name: function_name,
+              arguments: step.provided_inputs
             },
             id: id,
           }
 
           tool_output = {
             id: id,
-            role: "tool",
             content: Open.read(step.path)
           }
 

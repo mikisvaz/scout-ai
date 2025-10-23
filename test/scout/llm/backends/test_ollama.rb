@@ -82,7 +82,7 @@ What is the weather in London. Should I take an umbrella?
     ]
 
     sss 0
-    respose = LLM::OLlama.ask prompt, model: 'mistral', tool_choice: 'required', tools: tools do |name,arguments|
+    respose = LLM::OLlama.ask prompt, model: 'gpt-oss', url: 'http://localhost:3330', tool_choice: 'required', tools: tools do |name,arguments|
       "It's raining cats and dogs"
     end
 

@@ -9,6 +9,8 @@ module LLM
         (@current_chat || start_chat).annotate chat unless Chat === chat
         @current_chat = chat
       else
+        start_chat = self.start_chat
+        Chat.setup(start_chat) unless Chat === start_chat
         @current_chat = start_chat.branch
       end
     end
