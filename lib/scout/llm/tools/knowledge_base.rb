@@ -119,11 +119,12 @@ Multiple values may be present and use the charater ';' to separate them.
       database_description = knowledge_base.description(database)
       undirected = knowledge_base.undirected(database)
       definition = self.database_tool_definition(database, undirected, database_description)
-      tool_definitions.merge(database => [knowledge_base, definition])
+      tool_definitions.merge!(database => [knowledge_base, definition])
       if (fields = knowledge_base.get_database(database).fields).any?
         details_definition = self.database_details_tool_definition(database, undirected, fields)
-        tool_definitions.merge(database.to_s + '_association_details' => [knowledge_base, details_definition])
+        tool_definitions.merge!(database.to_s + '_association_details' => [knowledge_base, details_definition])
       end
+      tool_definitions
     }
   end
 
