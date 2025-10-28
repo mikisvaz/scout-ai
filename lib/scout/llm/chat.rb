@@ -360,7 +360,7 @@ module LLM
     messages = self.jobs messages
     messages = self.files messages, original, caller_lib_dir
 
-    messages
+    Chat.setup messages
   end
 
   def self.options(chat)
