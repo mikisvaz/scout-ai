@@ -28,8 +28,8 @@ module LLM
     end
 
 
-    def chat(model = nil, options = {})
-      response = ask(current_chat, model, options.merge(return_messages: true))
+    def chat(options = {})
+      response = ask(current_chat, options.merge(return_messages: true))
       if Array === response
         current_chat.concat(response)
         current_chat.answer
