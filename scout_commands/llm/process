@@ -35,10 +35,10 @@ while true
   files = directory.glob('*.json')
 
   files.each do |file|
+    id = File.basename(file, '.json')
     target = directory.reply[id + '.json']
 
     if ! File.exist?(target)
-      id = File.basename(file, '.json')
       options = IndiferentHash.setup(JSON.parse(Open.read(file)))
       question = options.delete(:question)
       reply = LLM.ask(question, options)
