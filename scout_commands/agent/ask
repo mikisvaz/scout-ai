@@ -114,11 +114,22 @@ if chat
   #Open.write(chat, conversation)
 
   conversation = Open.exist?(chat)? LLM.chat(chat) : []
+  convo_options = LLM.options conversation
   agent.start(Chat.setup(conversation)) if conversation.any?
-  agent.current_chat.concat LLM.chat(question)
+  agent.current_chat.concat LLM.chat(question) if question && ! question.empty?
   imports.each{|import| agent.import import } if imports
-  puts agent.chat
-  Open.write(chat, LLM.print(agent.current_chat))
+
+  if dry_run
+    ppp LLM.print conversation
+    exit 0
+  end
+
+  new = agent.ask(agent.current_chat, convo_options.merge(options.merge(return_messages: true)))
+  conversation += LLM.chat(question) if question
+  conversation += new
+
+  Open.open(chat, mode: 'a'){|f| f.puts LLM.print(new) }
+  puts LLM.purge(new).last[:content]
 elsif inline
 
   file = Open.read inline
