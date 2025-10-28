@@ -49,7 +49,7 @@ You have access to the following databases associating entities:
     end
 
     # function: takes an array of messages and calls LLM.ask with them
-    def ask(messages, model = nil, options = {})
+    def ask(messages, options = {})
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
 

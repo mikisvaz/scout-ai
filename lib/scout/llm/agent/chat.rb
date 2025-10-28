@@ -27,11 +27,6 @@ module LLM
       self.ask(current_chat, ...)
     end
 
-    def chat(model = nil, options = {})
-      new = self.ask(current_chat, model, options.merge(return_messages: true))
-      current_chat.concat(new)
-      new.last['content']
-    end
 
     def chat(model = nil, options = {})
       response = ask(current_chat, model, options.merge(return_messages: true))
