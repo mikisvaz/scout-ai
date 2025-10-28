@@ -1,4 +1,7 @@
 module LLM
+  @max_content_length = Scout::Config.get(:max_content_length, :llm_tools, :tools, :llm, :ask, default: 5_000)
+  self.singleton_class.attr_accessor :max_content_length
+
   def self.call_id_name_and_arguments(tool_call)
     tool_call_id = tool_call.dig("call_id") || tool_call.dig("id")
     if tool_call['function']
@@ -15,6 +18,7 @@ module LLM
   end
 
   def self.process_calls(tools, calls, &block)
+    max_content_length = LLM.max_content_length
     IndiferentHash.setup tools
     calls.collect do |tool_call|
       tool_call_id, function_name, function_arguments = call_id_name_and_arguments(tool_call)
@@ -54,9 +58,16 @@ module LLM
                 else
                   function_response.to_json
                 end
+
       content = content.to_s if Numeric === content
 
       Log.high "Called #{function_name}: " + Log.fingerprint(content)
+
+      if content.length > max_content_length
+        exception_msg = "Function #{function_name} called with paramters #{Log.fingerprint function_arguments} return #{content.length} characters, which is more than the maximum set of #{max_content_length}."
+        Log.high exception_msg
+        content = {exception: exception_msg, stack: caller}.to_json
+      end
 
       response_message = {
         id: tool_call_id,
