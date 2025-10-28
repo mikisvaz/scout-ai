@@ -78,6 +78,7 @@ if chat
     ppp LLM.print conversation
     exit 0
   end
+
   new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
   conversation = Open.read(chat) + LLM.print(new)
   Open.write(chat, conversation)
