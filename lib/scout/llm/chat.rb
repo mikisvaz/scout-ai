@@ -219,7 +219,7 @@ module LLM
   def self.tasks(messages, original = nil)
     jobs =  []
     new = messages.collect do |message|
-      if message[:role] == 'task' || message[:role] == 'inline_task'
+      if message[:role] == 'task' || message[:role] == 'inline_task' || message[:role] == 'exec_task'
         info = message[:content].strip
 
         workflow, task  = info.split(" ").values_at 0, 1
@@ -237,9 +237,15 @@ module LLM
 
         job = workflow.job(task, jobname, options)
 
-        jobs << job
+        jobs << job unless message[:role] == 'exec_task'
 
-        if message[:role] == 'inline_task'
+        if message[:role] == 'exec_task'
+          begin
+            {role: 'user', content: job.exec}
+          rescue
+            {role: 'exec_job', content: $!}
+          end
+        elsif message[:role] == 'inline_task'
           {role: 'inline_job', content: job.path.find}
         else
           {role: 'job', content: job.path.find}
@@ -281,9 +287,15 @@ module LLM
             id: id,
           }
 
+          content = if step.done?
+                      Open.read(step.path)
+                    elsif step.error?
+                      step.exception
+                    end
+
           tool_output = {
             id: id,
-            content: Open.read(step.path)
+            content: content
           }
 
           [
