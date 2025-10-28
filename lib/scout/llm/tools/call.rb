@@ -25,7 +25,7 @@ module LLM
 
       definition = obj if Hash === obj
 
-      defaults = definition[:parameters][:defaults] if definition[:parameters]
+      defaults = definition[:parameters][:defaults] if definition && definition[:parameters]
       function_arguments = function_arguments.merge(defaults) if defaults
 
       Log.high "Calling #{function_name} (#{Log.fingerprint function_arguments}): "
@@ -40,7 +40,7 @@ module LLM
                             if block_given?
                               block.call function_name, function_arguments
                             else
-                              raise "Unkown executor #{Log.fingerprint obj} for function #{function_name}"
+                              ParameterException.new "Tool or function not found '#{function_name}'. Called with parameters #{Log.fingerprint function_arguments}" if obj.nil? && definition.nil?
                             end
                           end
 

@@ -2,6 +2,7 @@ require 'scout/workflow'
 module LLM
   def self.task_tool_definition(workflow, task_name, inputs = nil)
     task_info = workflow.task_info(task_name)
+    return nil if task_info.nil?
 
     if inputs
       names = []

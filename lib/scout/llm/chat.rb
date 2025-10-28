@@ -270,7 +270,6 @@ module LLM
         id = step.short_path[0..39]
         id = id.gsub('/','-')
 
-
         if message[:role] == 'inline_job'
           path = step.path
           path = path.find if Path === path
