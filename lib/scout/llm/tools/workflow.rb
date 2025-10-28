@@ -71,23 +71,32 @@ module LLM
   end
 
   def self.workflow_tools(workflow, tasks = nil)
-    tasks = workflow.all_exports if tasks.nil?
-    tasks = workflow.all_tasks if tasks.empty?
+    if Array === workflow
+      workflow.inject({}){|tool_definitions,wf| tool_definitions.merge(workflow_tools(wf, tasks)) }
 
-    tasks.inject({}){|tool_definitions,task_name|
-      definition = self.task_tool_definition(workflow, task_name)
-      tool_definitions.merge(task_name => [workflow, definition])
-    }
+    else
+      tasks = workflow.all_exports if tasks.nil?
+      tasks = workflow.all_tasks if tasks.empty?
+
+      tasks.inject({}){|tool_definitions,task_name|
+        definition = self.task_tool_definition(workflow, task_name)
+        next if definition.nil?
+        tool_definitions.merge(task_name => [workflow, definition])
+      }
+    end
   end
 
   def self.call_workflow(workflow, task_name, parameters={})
     jobname = parameters.delete :jobname
     begin
+      exec_type = parameters[:exec_type]
       job = workflow.job(task_name, jobname, parameters)
-      if workflow.exec_exports.include? task_name.to_sym
+      if workflow.exec_exports.include?(task_name.to_sym) || parameters[:exec_type].to_s == 'exec'
         job.exec
       else
-        raise ScoutException, 'Potential recurisve call' if job.running? and job.info[:pid] == Process.pid
+        raise ScoutException, 'Potential recursive call' if parameters[:allow_recursive] != 'true' &&
+          (job.running? and job.info[:pid] == Process.pid)
+
         job.run
       end
     rescue ScoutException
