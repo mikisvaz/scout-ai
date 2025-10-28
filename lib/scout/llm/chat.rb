@@ -503,7 +503,7 @@ module LLM
       when nil, ''
         message[:role].to_s + ":"
       else
-        if %w(option previous_response_id).include? message[:role].to_s
+        if %w(option previous_response_id function_call function_call_output).include? message[:role].to_s
           message[:role].to_s + ": " + message[:content].to_s
         else
           message[:role].to_s + ":\n\n" + message[:content].to_s
