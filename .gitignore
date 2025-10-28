@@ -5,3 +5,4 @@ pkg
 .aider*
 chats
 __pycache__
+tmp
