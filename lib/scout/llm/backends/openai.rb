@@ -89,7 +89,8 @@ module LLM
 
       messages = self.process_input messages
 
-      Log.low "Calling openai #{url}: #{Log.fingerprint parameters}}"
+      Log.debug "Calling openai #{url}: #{Log.fingerprint(parameters.except(:tools))}}"
+      Log.high "Tools: #{Log.fingerprint tools.keys}}" if tools
 
       parameters[:messages] = LLM.tools_to_openai messages
 

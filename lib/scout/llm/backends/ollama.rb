@@ -84,9 +84,8 @@ module LLM
         parameters[:tools] = LLM.tool_definitions_to_ollama tools
       end
 
-      Log.low "Calling ollama with parameters #{Log.fingerprint parameters}"
-      Log.medium "Ask ollama\n" + LLM.print(messages)
-
+      Log.low "Calling ollama #{url}: #{Log.fingerprint(parameters.except(:tools))}}"
+      Log.medium "Tools: #{Log.fingerprint tools.keys}}" if tools
 
       parameters[:messages] = LLM.tools_to_ollama messages
 

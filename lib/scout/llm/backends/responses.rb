@@ -239,8 +239,9 @@ module LLM
       end
 
       parameters['previous_response_id'] = previous_response_id if String === previous_response_id
-      Log.low "Calling responses with parameters #{Log.fingerprint parameters}"
-      Log.medium LLM.print messages
+
+      Log.low "Calling responses #{url}: #{Log.fingerprint(parameters.except(:tools))}}"
+      Log.medium "Tools: #{Log.fingerprint tools.keys}}" if tools
 
       messages = self.process_input messages
       input = []
