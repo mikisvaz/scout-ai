@@ -271,10 +271,8 @@ module LLM
           {role: 'file', content: step.path}
         else
 
-#{"function":{"name":"list_directory","arguments":{"directory":"/home/miki/.rbbt/workflows/ScoutCoder/lib/ScoutCoder","recursive":true,"stats":true}}}
-
-#{"id":null,"role":"tool","content":"{\"files\":[\"/home/miki/.rbbt/workflows/ScoutCoder/lib/ScoutCoder/tasks\"],\"directories\":[\"/home/miki/.rbbt/workflows/ScoutCoder/lib/ScoutCoder/tasks/documentation.rb\"],\"stats\":{\"/home/miki/.rbbt/workflows/ScoutCoder/lib/ScoutCoder/tasks\":{\"size\":4096,\"mtime\":null}}}"}
           function_name = step.full_task_name.sub('#', '-')
+          function_name = step.task_name
           tool_call = {
             function: {
               name: function_name,

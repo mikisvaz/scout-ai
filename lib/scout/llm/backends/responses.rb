@@ -45,13 +45,15 @@ module LLM
     #end
 
     def self.tools_to_responses(messages)
+      last_id = nil
       messages.collect do |message|
         if message[:role] == 'function_call'
           info = JSON.parse(message[:content])
           IndiferentHash.setup info
           name = info[:name] || IndiferentHash.dig(info,:function, :name)
           IndiferentHash.setup info
-          id = info[:id].sub(/^fc_/, '')
+          id = last_id = info[:id] || "fc_#{rand(1000).to_s}"
+          id = id.sub(/^fc_/, '')
           IndiferentHash.setup({
             "type" => "function_call",
             "status" => "completed",
@@ -62,7 +64,8 @@ module LLM
         elsif message[:role] == 'function_call_output'
           info = JSON.parse(message[:content])
           IndiferentHash.setup info
-          id = info[:id].sub(/^fc_/, '')
+          id = info[:id] || last_id
+          id = id.sub(/^fc_/, '')
           {                               # append result message
             "type" => "function_call_output",
             "output" => info[:content],
