@@ -21,7 +21,8 @@ characters '???', if they are present.
 -h--help Print this help
 -t--template* Use a template
 -c--chat* Follow a conversation
--i--inline* Ask inline questions about a file
+-i--imports* Chat files to import, separated by comma
+-in--inline* Ask inline questions about a file
 -f--file* Incorporate file at the start
 -m--model* Model to use
 -e--endpoint* Endpoint to use
@@ -39,7 +40,9 @@ end
 
 Log.severity = options.delete(:log).to_i if options.include? :log
 
-file, chat, inline, template, dry_run = IndiferentHash.process_options options, :file, :chat, :inline, :template, :dry_run
+file, chat, inline, imports, template, dry_run = IndiferentHash.process_options options, :file, :chat, :inline, :imports, :template, :dry_run
+
+imports = imports.split(/,\s*/) if imports
 
 question = ARGV * " "
 
@@ -70,7 +73,8 @@ elsif file
 end
 
 if chat
-  conversation = Open.exist?(chat)? LLM.chat(chat) : [] 
+  conversation = Open.exist?(chat)? LLM.chat(chat) : Chat.setup([])
+  imports.each{|import| conversation.import import } if imports
   convo_options = LLM.options conversation
   conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
 
@@ -80,15 +84,15 @@ if chat
   end
 
   new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
-  conversation = Open.read(chat) + LLM.print(new)
-  Open.write(chat, conversation)
+  Open.open(chat, mode: 'a'){|f| f.puts LLM.print(new) }
+  puts LLM.purge(new).last[:content]
 elsif inline
 
   file = Open.read inline
 
   new_file = ""
   while true
-    pre, question, post = 
+    pre, question, post =
       file.partition(/^\s*#\s*ask:(?:.*?)(?=^\s*[^\s#]|\z)/smu)
 
       break if question.empty?
@@ -97,10 +101,15 @@ elsif inline
     new_file << question
     clean_question = question.gsub('#', '').gsub(/\s+/,' ').sub(/.*ask:\s*/,'').strip
     chat = [
-      {role: :system, content: "Write a succint reply with no commentary and no formatting."}, 
+      {role: :system, content: "Write a succint reply with no commentary and no formatting."},
       {role: :user, content: "Find the following question as a comment in the file give a response to be placed inline: #{question}"},
       LLM.tag('file', file, inline)
     ]
+
+    chat = Chat.chat(chat)
+
+    imports.each{|import| chat.import import } if imports
+
     response = LLM.ask(LLM.chat(chat))
     new_file << <<-EOF
 # Response start
