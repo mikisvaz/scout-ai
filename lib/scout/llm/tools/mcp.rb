@@ -3,6 +3,10 @@ require 'mcp_client'
 
 module LLM
   def self.mcp_tools(url, options = {})
+    timeout = Scout::Config.get :timeout, :mcp, :tools
+
+    options = IndiferentHash.add_defaults options, read_timeout: timeout.to_i if timeout && timeout != ""
+
     if url == 'stdio'
       client = MCPClient.create_client(mcp_server_configs: [options.merge(type: 'stdio')])
     else
