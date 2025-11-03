@@ -1,4 +1,19 @@
 module Chat
+  def self.tag(tag, content, name = nil)
+    if name
+      <<-EOF.strip
+<#{tag} name="#{name}">
+#{content}
+</#{tag}>
+      EOF
+    else
+      <<-EOF.strip
+<#{tag}>
+#{content}
+</#{tag}>
+      EOF
+    end
+  end
   def self.find_file(file, original = nil, caller_lib_dir = Path.caller_lib_dir(nil, 'chats'))
     path = Scout.chats[file]
     original = original.find if Path === original
@@ -62,7 +77,7 @@ module Chat
               files([{role: 'file', content: file}])
             }
         else
-          new = LLM.tag :file, Open.read(target), file
+          new = Chat.tag :file, Open.read(target), file
           {role: 'user', content: new}
         end
       elsif message[:role] == 'pdf' || message[:role] == 'image'

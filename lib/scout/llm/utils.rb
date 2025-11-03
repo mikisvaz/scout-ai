@@ -22,4 +22,6 @@ module LLM
     end
     Scout::Config.get(key, *all_tokens, hash)
   end
+
+
 end

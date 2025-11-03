@@ -17,29 +17,11 @@ How are muffins made?
     TmpFile.with_file question do |file|
       messages = LLM.chat file
       assert_include messages.collect{|m| m[:role] }, 'function_call'
+      assert_include messages.find{|m| m[:role] == 'function_call_output' }[:content], 'Baking'
     end
   end
 
-  def _test_structure
-    require 'scout/llm/ask'
-    sss 0
-    question =<<-EOF
-system:
-
-Respond in json format with a hash of strings as keys and string arrays as values, at most three in length
-
-endpoint: sambanova
-
-What other movies have the protagonists of the original gost busters played on, just the top.
-
-    EOF
-
-    TmpFile.with_file question do |file|
-      ppp LLM.ask file
-    end
-  end
-
-  def _test_tool
+  def test_tool
     require 'scout/llm/ask'
 
     sss 0
@@ -57,7 +39,7 @@ tool: Baking
     end
   end
 
-  def _test_tools_with_task
+  def test_tools_with_task
     require 'scout/llm/ask'
 
     question =<<-EOF
@@ -74,7 +56,7 @@ tool: Baking bake_muffin_tray
     end
   end
 
-  def _test_knowledge_base
+  def test_knowledge_base
     require 'scout/llm/ask'
     sss 0
     question =<<-EOF
@@ -93,30 +75,6 @@ association: marriages #{datafile_test(:person).marriages} undirected=true sourc
     TmpFile.with_file question do |file|
       ppp LLM.ask file
     end
-  end
-
-  def _test_previous_response
-    require 'scout/llm/ask'
-    sss 0
-    question =<<-EOF
-user:
-
-Say hi
-
-assistant:
-
-Hi
-
-previous_response_id: asdfasdfasdfasdf
-
-Bye
-
-    EOF
-
-    messages = LLM.messages question
-
-    iii messages
-
   end
 end
 
