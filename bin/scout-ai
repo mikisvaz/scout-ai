@@ -2,6 +2,52 @@
 
 $LOAD_PATH.unshift File.join(__dir__, '../lib')
 
+if _i = ARGV.index("--log")
+  require 'scout/log'
+  log = ARGV[_i+1]
+  Log.severity = log.to_i
+  ARGV.delete "--log"
+  ARGV.delete log
+end
+
+dev_dir = nil
+if _i = ARGV.index("--dev")
+  dev_dir = ARGV[_i+1]
+  ARGV.delete "--dev"
+  ARGV.delete dev_dir
+end
+
+if dev_dir.nil? 
+  _s = nil
+  ARGV.each_with_index do |s,i|
+    if s.match(/^--dev(?:=(.*))?/)
+      dev_dir = $1
+      _s = s
+      next
+    end
+  end
+  ARGV.delete _s if _s
+end
+
+if dev_dir.nil? && ENV["SCOUT_DEV"]
+  dev_dir = ENV["SCOUT_DEV"]
+  ARGV.delete "--dev"
+  ARGV.delete dev_dir
+end
+
+if dev_dir
+  ['scout-*/lib'].each do |pattern|
+    Dir.glob(File.join(File.expand_path(dev_dir), pattern)).each do |f|
+      $LOAD_PATH.unshift f
+    end
+  end
+  ['rbbt-*/lib'].each do |pattern|
+    Dir.glob(File.join(File.expand_path(dev_dir), pattern)).each do |f|
+      $LOAD_PATH.unshift f
+    end
+  end
+end
+
 require 'scout-ai'
 
 load Scout.bin.scout.find
