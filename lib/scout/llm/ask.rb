@@ -41,7 +41,14 @@ module LLM
       raise "Endpoint not found #{endpoint}"
     end
 
-    Log.high Log.color :green, "Asking #{endpoint || 'client'}:\n" + LLM.print(messages) 
+    if options[:backend].to_s == 'responses'
+      messages = Chat.clear(messages, 'previous_response_id')
+    else
+      messages = Chat.clean(messages, 'previous_response_id')
+      options.delete :previous_response_id
+    end
+
+    Log.high Log.color :green, "Asking #{endpoint || 'client'}: #{options[:previous_response_id]}\n" + LLM.print(messages)
     tools = options[:tools]
     Log.high "Tools: #{Log.fingerprint tools.keys}}" if tools
 

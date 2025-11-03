@@ -108,7 +108,7 @@ module LLM
 
       res = []
       messages.each do |message|
-        IndiferentHash.setup(message)
+        message = IndiferentHash.setup(message)
 
         role = message[:role]
 
@@ -137,7 +137,7 @@ module LLM
         when 'websearch'
           res << {role: :tool, content: {type: "web_search_preview"} }
         when 'previous_response_id'
-          res = [message]
+          res = []
         else
           res << message
         end
@@ -199,6 +199,7 @@ module LLM
 
       messages = LLM.chat(question)
       options = options.merge LLM.options messages
+      
 
       client, url, key, model, log_errors, return_messages, format, websearch, previous_response_id, tools, = IndiferentHash.process_options options,
         :client, :url, :key, :model, :log_errors, :return_messages, :format, :websearch, :previous_response_id, :tools,
@@ -253,6 +254,7 @@ module LLM
       Log.medium "Tools: #{Log.fingerprint tools.keys}}" if tools
 
       messages = self.process_input messages
+
       input = []
       messages.each do |message|
         parameters[:tools] ||= []

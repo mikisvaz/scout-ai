@@ -16,7 +16,6 @@ module Chat
           next
         elsif %w(previous_response_id).include? role.to_s
           sticky_options[role] = info[:content]
-          next
         elsif %w(format).include? role.to_s
           format = info[:content]
           if Path.is_filename?(format)
@@ -50,5 +49,4 @@ module Chat
     chat.replace new
     sticky_options.merge options
   end
-
 end

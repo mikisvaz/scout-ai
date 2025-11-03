@@ -1,9 +1,9 @@
 module Chat
-  def self.clear(messages)
+  def self.clear(messages, role = 'clear')
     new = []
 
     messages.reverse.each do |message|
-      if message[:role].to_s == 'clear'
+      if message[:role].to_s == role
         break
       else
         new << message
@@ -13,10 +13,10 @@ module Chat
     new.reverse
   end
 
-  def self.clean(messages)
+  def self.clean(messages, role = 'skip')
     messages.reject do |message|
       ((String === message[:content]) && message[:content].empty?) ||
-        message[:role] == 'skip'
+        message[:role] == role
     end
   end
 
