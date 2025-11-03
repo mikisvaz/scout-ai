@@ -8,11 +8,16 @@ class TestMessages < Test::Unit::TestCase
     question =<<-EOF
 Hi
     EOF
+    messages = [
+      {role: 'user', content: 'Hi'}
+    ]
 
-    iii LLM.chat(question)
+
+    res = LLM.chat(question)
+    assert_equal messages, res
   end
 
-  def test_inline
+  def test_roles
     question =<<-EOF
 system:
 
@@ -22,13 +27,38 @@ assistant:
 
 Here is some stuff
 
-user: feedback
-
+user: 
+feedback
 that continues here
     EOF
+    messages = [
+      {role: 'system', content: 'you are a terse assistant that only write in short sentences'},
+      {role: 'assistant', content: 'Here is some stuff'},
+      {role: 'user', content: "feedback\nthat continues here"}
+    ]
 
-    iii LLM.chat(question)
+    res = LLM.chat(question)
+    assert_equal messages, res
   end
+
+  def test_file_block
+    question =<<-EOF
+user:
+
+consider this file
+<file name=foo_bar>
+foo: bar
+</file>
+    EOF
+
+    messages= [
+      {role: "user", content: "consider this file\n<file name=foo_bar>\nfoo: bar\n</file>"}
+    ]
+
+    res = LLM.chat(question)
+    assert_equal messages, res
+  end
+
 
   def test_messages
     question =<<-EOF
@@ -88,11 +118,17 @@ import: header
 user: say something
     EOF
 
+    messages = [
+      {role: "system", content: "You are an assistant"}, 
+      {role: "user", content: "say something"}
+    ]
+
     TmpFile.with_path do |tmpdir|
       tmpdir.header.write file1
       tmpdir.chat.write file2
 
-      chat = LLM.chat tmpdir.chat
+      res = LLM.chat tmpdir.chat
+      assert_equal messages, res
     end
   end
 
@@ -110,12 +146,12 @@ What is the capital of France
     EOF
 
     TmpFile.with_file question do |file|
-      messages = LLM.chat file
-      refute messages.collect{|m| m[:role] }.include?('system')
+      res = LLM.chat file
+      refute res.collect{|m| m[:role] }.include?('system')
     end
   end
 
-  def __test_job
+  def test_job
     question =<<-EOF
 system:
 

@@ -1,7 +1,7 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
-require 'rbbt-util'
+require 'scout/knowledge_base'
 class TestLLMAgent < Test::Unit::TestCase
   def test_system
     TmpFile.with_dir do |dir|

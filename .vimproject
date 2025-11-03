@@ -98,7 +98,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout=scout{
    llm=llm{
     utils.rb
-    parse.rb
     tools.rb
     tools=tools{
      mcp.rb
@@ -107,6 +106,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      call.rb
     }
     chat.rb
+    chat=chat{
+     annotation.rb
+     utils.rb
+    }
 
     backends=backends{
      openai.rb

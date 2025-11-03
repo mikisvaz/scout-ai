@@ -1,21 +1,4 @@
 module LLM
-
-  def self.tag(tag, content, name = nil)
-    if name
-      <<-EOF.strip
-<#{tag} name="#{name}">
-#{content}
-</#{tag}>
-      EOF
-    else
-      <<-EOF.strip
-<#{tag}>
-#{content}
-</#{tag}>
-      EOF
-    end
-  end
-
   def self.get_url_server_tokens(url, prefix=nil)
     return get_url_server_tokens(url).collect{|e| prefix.to_s + "." + e } if prefix
 
