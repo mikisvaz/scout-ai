@@ -106,35 +106,44 @@ module LLM
     def self.process_input(messages)
       messages = self.tools_to_responses messages
 
-      messages.collect do |message|
+      res = []
+      messages.each do |message|
         IndiferentHash.setup(message)
-        if message[:role] == 'image'
+
+        role = message[:role]
+
+        case role.to_s
+        when 'image'
           path = message[:content]
           path = LLM.find_file path
           if Open.remote?(path) 
-            {role: :user, content: {type: :input_image, image_url: path }}
+            res << {role: :user, content: {type: :input_image, image_url: path }}
           elsif Open.exists?(path)
             path = self.encode_image(path)
-            {role: :user, content: [{type: :input_image, image_url: path }]}
+            res << {role: :user, content: [{type: :input_image, image_url: path }]}
           else
-            raise
+            raise "Image does not exist in #{path}"
           end
-        elsif message[:role] == 'pdf'
+        when 'pdf'
           path = original_path = message[:content]
           if Open.remote?(path) 
-            {role: :user, content: {type: :input_file, file_url: path }}
+            res << {role: :user, content: {type: :input_file, file_url: path }}
           elsif Open.exists?(path)
             data = self.encode_pdf(path)
-            {role: :user, content: [{type: :input_file, file_data: data, filename: File.basename(path) }]}
+            res << {role: :user, content: [{type: :input_file, file_data: data, filename: File.basename(path) }]}
           else
-            raise
+            raise "PDF does not exist in #{path}"
           end
-        elsif message[:role] == 'websearch'
-          {role: :tool, content: {type: "web_search_preview"} }
+        when 'websearch'
+          res << {role: :tool, content: {type: "web_search_preview"} }
+        when 'previous_response_id'
+          res = [message]
         else
-          message
+          res << message
         end
-      end.flatten
+      end
+
+      res
     end
 
     def self.process_format(format)

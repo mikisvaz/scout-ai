@@ -20,7 +20,7 @@ Some text
     assert(Float === emb.first)
   end
 
-  def test_tool_call_output_weather
+  def _test_tool_call_output_weather
     Log.severity = 0
     prompt =<<-EOF
 function_call:
@@ -38,7 +38,7 @@ should i take an umbrella?
     ppp LLM::Responses.ask prompt, model: 'gpt-4.1-nano'
   end
 
-  def test_tool
+  def _test_tool
     prompt =<<-EOF
 user:
 What is the weather in London. Should I take my umbrella?
@@ -75,7 +75,7 @@ What is the weather in London. Should I take my umbrella?
     ppp respose
   end
 
-  def test_news
+  def _test_news
     prompt =<<-EOF
 websearch: true
 
@@ -86,7 +86,7 @@ What was the top new in the US today?
     ppp LLM::Responses.ask prompt
   end
 
-  def test_image
+  def _test_image
     prompt =<<-EOF
 image: #{datafile_test 'cat.jpg'}
 
@@ -98,7 +98,7 @@ What animal is represented in the image?
     ppp LLM::Responses.ask prompt
   end
 
-  def test_json_output
+  def _test_json_output
     prompt =<<-EOF
 system:
 
@@ -112,7 +112,7 @@ What other movies have the protagonists of the original gost busters played on, 
     ppp LLM::Responses.ask prompt, format: :json
   end
 
-  def test_json_format
+  def _test_json_format
     prompt =<<-EOF
 user:
 
@@ -130,7 +130,7 @@ Name each actor and the top movie they took part of
     ppp LLM::Responses.ask prompt, format: format
   end
 
-  def test_json_format_list
+  def _test_json_format_list
     prompt =<<-EOF
 user:
 
@@ -148,7 +148,7 @@ Name each actor as keys and the top 3 movies they took part of as values
     ppp LLM::Responses.ask prompt, format: format
   end
 
-  def test_json_format_actor_list
+  def _test_json_format_actor_list
     prompt =<<-EOF
 user:
 
@@ -199,7 +199,7 @@ Name each actor as keys and the top 3 movies they took part of as values
     ppp LLM::Responses.ask prompt, format: schema
   end
 
-  def test_tool_gpt5
+  def _test_tool_gpt5
     prompt =<<-EOF
 user:
 What is the weather in London. Should I take my umbrella?

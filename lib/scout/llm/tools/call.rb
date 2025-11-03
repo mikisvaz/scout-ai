@@ -64,7 +64,7 @@ module LLM
       Log.high "Called #{function_name}: " + Log.fingerprint(content)
 
       if content.length > max_content_length
-        exception_msg = "Function #{function_name} called with paramters #{Log.fingerprint function_arguments} return #{content.length} characters, which is more than the maximum set of #{max_content_length}."
+        exception_msg = "Function #{function_name} called with parameters #{Log.fingerprint function_arguments} returned #{content.length} characters, which is more than the maximum set of #{max_content_length}."
         Log.high exception_msg
         content = {exception: exception_msg, stack: caller}.to_json
       end

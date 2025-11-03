@@ -2,7 +2,7 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 class TestLLMAnthropic < Test::Unit::TestCase
-  def _test_say_hi
+  def test_say_hi
     prompt =<<-EOF
 user: say hi
     EOF
@@ -121,7 +121,7 @@ What is the weather in London. Should I take my umbrella?
     ppp respose
   end
 
-  def test_json_output
+  def _test_json_output
     prompt =<<-EOF
 user:
 

@@ -6,7 +6,7 @@ module Workflow
     tasks = self.tasks.keys if tasks.empty?
 
     tools = tasks.collect do |task,inputs=nil|
-      tool_definition = LLM.task_tool_definition(self, task, inputs)[:function]
+      tool_definition = LLM.task_tool_definition(self, task, inputs)
       description = tool_definition[:description]
       input_schema = tool_definition[:parameters].slice(:properties, :required)
       annotations = tool_definition.slice(:title)

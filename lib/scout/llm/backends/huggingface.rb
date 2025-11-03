@@ -1,5 +1,3 @@
-require_relative '../parse'
-require_relative '../tools'
 require_relative '../chat'
 
 module LLM

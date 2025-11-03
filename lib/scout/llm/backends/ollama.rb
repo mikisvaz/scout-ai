@@ -1,7 +1,4 @@
 require 'ollama-ai'
-require_relative '../parse'
-require_relative '../tools'
-require_relative '../utils'
 require_relative '../chat'
 
 module LLM

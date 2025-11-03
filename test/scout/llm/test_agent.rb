@@ -15,7 +15,6 @@ class TestLLMAgent < Test::Unit::TestCase
 
       sss 0
       ppp agent.ask "Who is Miguel's brother-in-law. Brother in law is your spouses sibling or your sibling's spouse"
-      #ppp agent.ask "Who is Guille's brother-in-law. Brother in law is your spouses sibling or your sibling's spouse"
     end
   end
 end

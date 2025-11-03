@@ -6,6 +6,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai
  }
  chats=chats filter="*"{
+  parse
 
   test_tool
 
@@ -108,7 +109,14 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     chat.rb
     chat=chat{
      annotation.rb
-     utils.rb
+     parse.rb
+     process.rb
+     process=process{
+      tools.rb
+      files.rb
+      clear.rb
+      options.rb
+     }
     }
 
     backends=backends{

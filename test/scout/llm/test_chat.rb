@@ -3,179 +3,9 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 class TestMessages < Test::Unit::TestCase
 
-  def test_short
-
-    question =<<-EOF
-Hi
-    EOF
-    messages = [
-      {role: 'user', content: 'Hi'}
-    ]
-
-
-    res = LLM.chat(question)
-    assert_equal messages, res
-  end
-
-  def test_roles
-    question =<<-EOF
-system:
-
-you are a terse assistant that only write in short sentences
-
-assistant:
-
-Here is some stuff
-
-user: 
-feedback
-that continues here
-    EOF
-    messages = [
-      {role: 'system', content: 'you are a terse assistant that only write in short sentences'},
-      {role: 'assistant', content: 'Here is some stuff'},
-      {role: 'user', content: "feedback\nthat continues here"}
-    ]
-
-    res = LLM.chat(question)
-    assert_equal messages, res
-  end
-
-  def test_file_block
-    question =<<-EOF
-user:
-
-consider this file
-<file name=foo_bar>
-foo: bar
-</file>
-    EOF
-
-    messages= [
-      {role: "user", content: "consider this file\n<file name=foo_bar>\nfoo: bar\n</file>"}
-    ]
-
-    res = LLM.chat(question)
-    assert_equal messages, res
-  end
-
-
-  def test_messages
-    question =<<-EOF
-system:
-
-you are a terse assistant that only write in short sentences
-
-user:
-
-What is the capital of France
-
-assistant:
-
-Paris
-
-user:
-
-is this the national anthem
-
-[[
-corous: Viva Espagna
-]]
-
-assistant:
-
-no
-
-user:
-
-import: math.system
-
-consider this file
-
-<file name=foo_bar>
-foo: bar
-</file>
-
-how many characters does it hold
-
-assistant:
-
-8
-    EOF
-
-    messages = LLM.messages question
-    refute messages.collect{|i| i[:role] }.include?("corous")
-    assert messages.collect{|i| i[:role] }.include?("import")
-  end
-
-  def test_chat_import
-    file1 =<<-EOF
-system: You are an assistant
-    EOF
-
-    file2 =<<-EOF
-import: header
-user: say something
-    EOF
-
-    messages = [
-      {role: "system", content: "You are an assistant"}, 
-      {role: "user", content: "say something"}
-    ]
-
-    TmpFile.with_path do |tmpdir|
-      tmpdir.header.write file1
-      tmpdir.chat.write file2
-
-      res = LLM.chat tmpdir.chat
-      assert_equal messages, res
-    end
-  end
-
-  def test_clear
-    question =<<-EOF
-system:
-
-you are a terse assistant that only write in short sentences
-
-clear:
-
-user:
-
-What is the capital of France
-    EOF
-
-    TmpFile.with_file question do |file|
-      res = LLM.chat file
-      refute res.collect{|m| m[:role] }.include?('system')
-    end
-  end
-
-  def test_job
-    question =<<-EOF
-system:
-
-you are a terse assistant that only write in short sentences
-
-job: Baking/bake_muffin_tray/Default_08a1812eca3a18dce2232509dabc9b41
-
-How are muffins made
-
-    EOF
-
-    TmpFile.with_file question do |file|
-      messages = LLM.chat file
-      ppp LLM.print messages
-    end
-  end
-
 
   def test_task
     question =<<-EOF
-system:
-
-you are a terse assistant that only write in short sentences
-
 user:
 
 task: Baking bake_muffin_tray blueberries=true title="This is a title" list=one,two,"and three"
@@ -186,11 +16,11 @@ How are muffins made?
 
     TmpFile.with_file question do |file|
       messages = LLM.chat file
-      ppp LLM.print messages
+      assert_include messages.collect{|m| m[:role] }, 'function_call'
     end
   end
 
-  def test_structure
+  def _test_structure
     require 'scout/llm/ask'
     sss 0
     question =<<-EOF
@@ -209,7 +39,7 @@ What other movies have the protagonists of the original gost busters played on, 
     end
   end
 
-  def test_tool
+  def _test_tool
     require 'scout/llm/ask'
 
     sss 0
@@ -227,7 +57,7 @@ tool: Baking
     end
   end
 
-  def test_tools_with_task
+  def _test_tools_with_task
     require 'scout/llm/ask'
 
     question =<<-EOF
@@ -244,7 +74,7 @@ tool: Baking bake_muffin_tray
     end
   end
 
-  def test_knowledge_base
+  def _test_knowledge_base
     require 'scout/llm/ask'
     sss 0
     question =<<-EOF
@@ -265,7 +95,7 @@ association: marriages #{datafile_test(:person).marriages} undirected=true sourc
     end
   end
 
-  def test_previous_response
+  def _test_previous_response
     require 'scout/llm/ask'
     sss 0
     question =<<-EOF

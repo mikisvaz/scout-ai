@@ -1,9 +1,6 @@
-require 'scout'
 require 'openai'
 require 'rest-client'
-require_relative '../parse'
-require_relative '../tools'
-require_relative '../utils'
+require_relative '../chat'
 
 module LLM
   module OpenWebUI
