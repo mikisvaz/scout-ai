@@ -58,8 +58,10 @@ module LLM
         model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-4.1")
       end
 
-      case format.to_sym
-      when :json, :json_object
+      case format
+      when Hash
+        options[:response_format] = format
+      when 'json', 'json_object', :json, :json_object
         options[:response_format] = {type: 'json_object'}
       else
         options[:response_format] = {type: format}
