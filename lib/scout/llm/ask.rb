@@ -51,6 +51,7 @@ module LLM
     Log.high Log.color :green, "Asking #{endpoint || 'client'}: #{options[:previous_response_id]}\n" + LLM.print(messages)
     tools = options[:tools]
     Log.high "Tools: #{Log.fingerprint tools.keys}}" if tools
+    Log.debug "#{Log.fingerprint tools}}" if tools
 
     res = Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist) do
       backend = IndiferentHash.process_options options, :backend
