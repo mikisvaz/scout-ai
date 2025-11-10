@@ -18,6 +18,7 @@ Juwelier::Tasks.new do |gem|
   # dependencies defined in Gemfile
   gem.add_runtime_dependency 'scout-rig', '>= 0'
   gem.add_runtime_dependency 'ruby-openai', '>= 0'
+  gem.add_runtime_dependency 'ollama-ai', '>= 0'
   gem.add_runtime_dependency 'ruby-mcp-client', '>= 0'
 end
 Juwelier::RubygemsDotOrgTasks.new
