@@ -139,7 +139,7 @@ Gem::Specification.new do |s|
   ]
   s.homepage = "http://github.com/mikisvaz/scout-ai".freeze
   s.licenses = ["MIT".freeze]
-  s.rubygems_version = "3.7.2".freeze
+  s.rubygems_version = "3.7.0.dev".freeze
   s.summary = "AI gear for scouts".freeze
 
   s.specification_version = 4
@@ -148,5 +148,6 @@ Gem::Specification.new do |s|
   s.add_runtime_dependency(%q<ruby-openai>.freeze, [">= 0".freeze])
   s.add_runtime_dependency(%q<ollama-ai>.freeze, [">= 0".freeze])
   s.add_runtime_dependency(%q<ruby-mcp-client>.freeze, [">= 0".freeze])
+  s.add_runtime_dependency(%q<hnswlib>.freeze, [">= 0".freeze])
 end
 
