@@ -20,6 +20,7 @@ Juwelier::Tasks.new do |gem|
   gem.add_runtime_dependency 'ruby-openai', '>= 0'
   gem.add_runtime_dependency 'ollama-ai', '>= 0'
   gem.add_runtime_dependency 'ruby-mcp-client', '>= 0'
+  gem.add_runtime_dependency 'hnswlib', '>= 0'
 end
 Juwelier::RubygemsDotOrgTasks.new
 require 'rake/testtask'
