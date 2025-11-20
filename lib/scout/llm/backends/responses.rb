@@ -115,7 +115,7 @@ module LLM
         case role.to_s
         when 'image'
           path = message[:content]
-          path = LLM.find_file path
+          path = Chat.find_file path
           if Open.remote?(path) 
             res << {role: :user, content: {type: :input_image, image_url: path }}
           elsif Open.exists?(path)

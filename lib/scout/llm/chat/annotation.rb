@@ -30,6 +30,11 @@ module Chat
     message(:file, file)
   end
 
+  def pdf(file)
+    message(:pdf, file)
+  end
+
+
   def directory(directory)
     message(:directory, directory)
   end

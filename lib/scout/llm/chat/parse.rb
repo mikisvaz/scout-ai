@@ -77,7 +77,7 @@ module Chat
       end
 
       # XML-style tag handling (protected content)
-      if stripped =~ /^<(\w+)(\s+[^>]*)?>/
+      if stripped =~ /^<(\w+)(\s+[^>]*)?>/ && text =~ %r{</#{$1}>}
         tag = $1
         protected_stack.push(tag)
         in_protected_block = true
