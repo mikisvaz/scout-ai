@@ -84,17 +84,17 @@ module Chat
   end
 
 
-  def ask(...)
-    LLM.ask(LLM.chat(self), ...)
+  def ask(options = {})
+    LLM.ask(LLM.chat(self), options)
   end
 
-  def chat(...)
-    response = ask(...)
+  def chat(options = {})
+    response = ask(options.merge(return_messages: true))
     if Array === response
-      current_chat.concat(response)
-      final(response)
+      self.concat(response)
+      final
     else
-      current_chat.push({role: :assistant, content: response})
+      self.push({role: :assistant, content: response})
       response
     end
   end
