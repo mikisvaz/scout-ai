@@ -158,8 +158,24 @@ module LLM
     end
   end
 
-  class << self
-    alias tool_definitions_to_openai tool_definitions_to_reponses
+  def self.tool_definitions_to_openai(tools)
+    tools.values.collect do |obj,definition|
+      definition = obj if Hash === obj
+      definition
+
+      definition = case definition[:function]
+                   when Hash
+                     definition
+                   else
+                     {type: :function, function: definition}
+                   end
+
+      definition = IndiferentHash.add_defaults definition, type: :function
+
+      definition[:parameters].delete :defaults if definition[:parameters]
+
+      definition
+    end
   end
 
   def self.tool_definitions_to_ollama(tools)
