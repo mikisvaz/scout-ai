@@ -84,7 +84,10 @@ if chat
   end
 
   new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
-  Open.open(chat, mode: 'a'){|f| f.puts LLM.print(new) }
+  Open.open(chat, mode: 'a') do |f|
+    f.puts LLM.print([{role: :user, content: question}]) unless question.empty?
+    f.puts LLM.print(new)
+  end
   puts LLM.purge(new).last[:content]
 elsif inline
 
