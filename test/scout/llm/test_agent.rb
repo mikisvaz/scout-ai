@@ -13,9 +13,25 @@ class TestLLMAgent < Test::Unit::TestCase
 
       agent = LLM::Agent.new knowledge_base: kb
 
-      sss 0
       ppp agent.ask "Who is Miguel's brother-in-law. Brother in law is your spouses sibling or your sibling's spouse"
     end
+  end
+
+  def test_workflow_eval
+    agent = LLM::Agent.new
+    agent.workflow do
+      input :c_degrees, :float, "Degrees Celsius"
+
+      task :c_to_f => :float do |c_degrees|
+        (c_degrees * 9.0 / 5.0) + 32.0
+      end
+
+      export :c_to_f
+    end
+
+    agent.user "Convert 30 celsius into faranheit"
+    res = agent.json_format({conversion: {type: :number}})
+    assert_equal 86.0, res['conversion']
   end
 end
 

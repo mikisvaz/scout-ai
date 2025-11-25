@@ -15,6 +15,21 @@ module LLM
       @start_chat = start_chat
     end
 
+    def workflow(&block)
+      if block_given?
+        workflow = self.workflow
+
+        workflow.instance_eval &block
+      else
+        @workflow ||= begin
+                        m = Module.new
+                        m = "ScoutAgent"
+                        m.extend Workflow
+                        m
+                      end
+      end
+    end
+
     def format_message(message, prefix = "user")
       message.split(/\n\n+/).reject{|line| line.empty? }.collect do |line|
         prefix + "\t" + line.gsub("\n", ' ')

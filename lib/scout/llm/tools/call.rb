@@ -1,5 +1,5 @@
 module LLM
-  @max_content_length = Scout::Config.get(:max_content_length, :llm_tools, :tools, :llm, :ask, default: 5_000)
+  @max_content_length = Scout::Config.get(:max_content_length, :llm_tools, :tools, :llm, :ask, default: 30_000)
   self.singleton_class.attr_accessor :max_content_length
 
   def self.call_id_name_and_arguments(tool_call)
@@ -64,7 +64,7 @@ module LLM
       Log.high "Called #{function_name}: " + Log.fingerprint(content)
 
       if content.length > max_content_length
-        exception_msg = "Function #{function_name} called with parameters #{Log.fingerprint function_arguments} returned #{content.length} characters, which is more than the maximum set of #{max_content_length}."
+        exception_msg = "Function #{function_name} called with parameters #{Log.fingerprint function_arguments} returned #{content.length} characters, which is more than the maximum of #{max_content_length}."
         Log.high exception_msg
         content = {exception: exception_msg, stack: caller}.to_json
       end
