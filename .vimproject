@@ -6,6 +6,17 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai
  }
  chats=chats filter="*"{
+  intro
+
+  dev
+
+  inline_task
+
+  inline_task.rb
+
+  course
+
+
   parse
 
   test_tool
