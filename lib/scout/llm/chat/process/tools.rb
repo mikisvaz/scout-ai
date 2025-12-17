@@ -38,7 +38,7 @@ module Chat
       end
     end.flatten
 
-    Workflow.produce(jobs)
+    Workflow.produce(jobs) if jobs.any?
 
     new
   end
