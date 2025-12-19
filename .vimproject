@@ -112,6 +112,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai.rb
   scout=scout{
    network=network{
+    entity.rb
+    knowledge_base.rb
     paths.rb
    }
    llm=llm{

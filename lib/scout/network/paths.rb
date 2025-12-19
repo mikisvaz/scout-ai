@@ -61,7 +61,6 @@ module Paths
     distances = Hash.new { 1.0 / 0.0 } 
     parents = Hash.new                 
 
-    #active[start_node] << 0
     active.push(start_node, 0)
     best = 1.0 / 0.0
     found = false
@@ -135,93 +134,42 @@ module Paths
       parents
     end
   end
-end
 
-module Entity
-  module Adjacent
-    def path_to(adjacency, entities, threshold = nil, max_steps = nil)
-      if Array === self
-        self.collect{|entity| entity.path_to(adjacency, entities, threshold, max_steps)}
-      else
-        if adjacency.type == :flat
-          max_steps ||= threshold
-          Paths.dijkstra(adjacency, self, entities, max_steps)
-        else
-          Paths.weighted_dijkstra(adjacency, self, entities, threshold, max_steps)
-        end
-      end
+  # New: breadth‑first exploration from one or many start nodes (unweighted)
+  # adjacency: Hash[String => Array[String]]
+  # sources: String or Array[String]
+  # max_steps: Integer or nil (no limit)
+  # Returns Hash[node => distance_from_any_source]
+  def self.breadth_first(adjacency, sources, max_steps = nil)
+    sources = [sources] unless Array === sources
+    distances = {}
+    queue = []
+
+    sources.each do |s|
+      next unless adjacency.include?(s)
+      distances[s] = 0
+      queue << s
     end
 
-    def random_paths_to(adjacency, l, times, entities)
-      if Array === self
-        self.inject([]){|acc,entity| acc += entity.random_paths_to(adjacency, l, times, entities)}
-      else
-        paths = []
-        times.times do 
-          paths << Paths.random_weighted_dijkstra(adjacency, l, self, entities)
-        end
-        paths
-      end
-    end
-  end
-end
-
-module AssociationItem
-
-  def self.dijkstra(associations, start_node, end_node = nil, threshold = nil, max_steps = nil, &block)
-    adjacency = {}
-
-    associations.each do |m|
-      s, t, undirected = m.split "~"
-      next m if s.nil? or t.nil? or s.strip.empty? or t.strip.empty?
-      adjacency[s] ||= Set.new
-      adjacency[s] << t 
-      next unless m.undirected
-      adjacency[t] ||= Set.new
-      adjacency[t] << s  
-    end
-
-    return nil unless adjacency.include? start_node
-
-    active = PriorityQueue.new         
-    distances = Hash.new { 1.0 / 0.0 } 
-    parents = Hash.new                 
-
-    active[start_node] << 0
-    best = 1.0 / 0.0
-    found = false
-    node_dist_cache = {}
-
-    until active.empty?
-      u = active.priorities.first
-      distance = active.shift
-      distances[u] = distance
-      path = Paths.extract_path(parents, start_node, u)
-      next if path.length > max_steps if max_steps 
-      next if not adjacency.include?(u) or (adjacency[u].nil? or adjacency[u].empty? )
+    until queue.empty?
+      u = queue.shift
+      d = distances[u]
+      next if max_steps && d >= max_steps
+      next unless adjacency.include?(u)
       adjacency[u].each do |v|
-        node_dist = node_dist_cache[[u,v]] ||= (block_given? ? block.call(u,v) : 1)
-        next if node_dist.nil? or (threshold and node_dist > threshold)
-        d = distance + node_dist
-        next unless d < distances[v] and d < best # we can't relax this one
-        active[v] << d
-        distances[v] = d
-        parents[v] = u
-        if (String === end_node ? end_node == v : end_node.include?(v))
-          best = d 
-          found = true
-        end
-      end    
+        next if distances.key?(v)
+        distances[v] = d + 1
+        queue << v
+      end
     end
 
-    return nil unless found
+    distances
+  end
 
-    if end_node
-      end_node = (end_node & parents.keys).first unless String === end_node
-      return nil if not parents.include? end_node
-      Paths.extract_path(parents, start_node, end_node)
-    else
-      parents
-    end
+  # New: enumerate nodes within k steps of a set of sources (unweighted)
+  # Convenience wrapper over breadth_first
+  def self.neighborhood(adjacency, sources, k)
+    distances = breadth_first(adjacency, sources, k)
+    distances.keys
   end
 end

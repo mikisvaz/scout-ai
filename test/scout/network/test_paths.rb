@@ -1,81 +1,56 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
-require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
+require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\\1')
 
-class TestNetwork < Test::Unit::TestCase
-  def test_dijsktra
-    network_txt=<<-EOF
-#: :sep=/\s/#:type=:flat
-#Start End
-N1 N2
-N2 N3 N4
-N4 N5
-    EOF
-    network = TSV.open(StringIO.new(network_txt))
+require 'scout/network/paths'
 
-    start_node = "N1"
-    end_node = "N5"
+class TestNetworkPaths < Test::Unit::TestCase
+  def test_breadth_first_distances
+    adjacency = {
+      'A' => %w[B C],
+      'B' => %w[D],
+      'C' => %w[D E],
+      'D' => %w[F],
+      'E' => [],
+      'F' => []
+    }
 
-    path = Paths.dijkstra(network, start_node, [end_node])
-    assert_equal %w(N1 N2 N4 N5), path.reverse
+    distances = Paths.breadth_first(adjacency, 'A', 2)
 
-    path = Paths.dijkstra(network, start_node, end_node)
-    assert_equal %w(N1 N2 N4 N5), path.reverse
+    assert_equal 0, distances['A']
+    assert_equal 1, distances['B']
+    assert_equal 1, distances['C']
+    assert_equal 2, distances['D']
+    assert_equal 2, distances['E']
+    # F should not be reached within 2 steps
+    assert_nil distances['F']
   end
 
-  def test_dijsktra_missing
-    network_txt=<<-EOF
-#: :sep=/\s/#:type=:flat
-#Start End
-N1 N2
-N2 N3 N4
-N4 N5
-    EOF
-    network = TSV.open(StringIO.new(network_txt))
+  def test_neighborhood_from_single_source
+    adjacency = {
+      'A' => %w[B C],
+      'B' => %w[D],
+      'C' => %w[D E],
+      'D' => %w[F],
+      'E' => [],
+      'F' => []
+    }
 
-    start_node = "N1"
-    end_node = "M5"
+    neigh = Paths.neighborhood(adjacency, 'A', 2)
 
-    path = Paths.dijkstra(network, start_node, [end_node])
-    assert_nil path
+    # Order is not guaranteed; compare as sets
+    assert_equal %w[A B C D E].sort, neigh.sort
   end
 
-  def test_weighted_dijsktra
-    network_txt=<<-EOF
-#: :sep=/\s/#:type=:double
-#Start End Score
-N1 N2|N5 1|10
-N2 N3|N4 1|1
-N4 N5 1
-    EOF
-    network = TSV.open(StringIO.new(network_txt))
+  def test_neighborhood_from_multiple_sources
+    adjacency = {
+      'A' => %w[B],
+      'B' => %w[C],
+      'X' => %w[Y],
+      'Y' => %w[Z]
+    }
 
-    start_node = "N1"
-    end_node = "N5"
+    neigh = Paths.neighborhood(adjacency, %w[A X], 1)
 
-    path = Paths.weighted_dijkstra(network, start_node, [end_node])
-    assert_equal %w(N1 N2 N4 N5), path.reverse
-
+    assert_equal %w[A B X Y].sort, neigh.sort
   end
-
-
-  def __test_random_weighted_dijsktra
-    string = STRING.protein_protein.tsv 
-
-    string.process "Score" do |scores|
-      scores.collect{|score| 1000 - score.to_i}
-    end
-    string.unnamed = true
-
-    start_node = "ENSP00000256078"
-    end_node = "ENSP00000306245"
-
-    path = Paths.random_weighted_dijkstra(string, 0.8, start_node, end_node)
-
-    assert path != nil
-    assert path.include? start_node
-    assert path.include? end_node
-  end
-
 end
-
-
