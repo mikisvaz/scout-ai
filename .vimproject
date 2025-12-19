@@ -6,6 +6,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai
  }
  chats=chats filter="*"{
+
+  network
+
+
   intro
 
   dev
@@ -15,7 +19,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   inline_task.rb
 
   course
-
 
   parse
 
@@ -108,6 +111,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  lib=lib {
   scout-ai.rb
   scout=scout{
+   network=network{
+    paths.rb
+   }
    llm=llm{
     utils.rb
     tools.rb
