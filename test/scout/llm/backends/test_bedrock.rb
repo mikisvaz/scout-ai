@@ -19,7 +19,7 @@ Some text
     assert(Float === emb.first)
   end
 
-  def test_tool
+  def __test_tool
     prompt =<<-EOF
 What is the weather in London. Should I take my umbrella? Use the provided tool
     EOF

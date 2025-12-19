@@ -76,8 +76,10 @@ module LLM
       }
 
       function_call = tool_call.dup
+      function_call = {'name' => tool_call['name']}.merge tool_call.except('name')
 
       function_call['id'] = function_call.delete('call_id') if function_call.dig('call_id')
+
       [
         {role: "function_call", content: function_call.to_json},
         {role: "function_call_output", content: response_message.to_json},
