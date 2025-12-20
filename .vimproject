@@ -6,9 +6,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai
  }
  chats=chats filter="*"{
-
   network
-
 
   intro
 
@@ -19,36 +17,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   inline_task.rb
 
   course
-
-  parse
-
-  test_tool
-
-  ask_agent
-
-  test_ollama_tool
-
-  test_github
-
-  test_stdio
-
-  test_claude
-
-  mcp_server
-
-  chat
-  text_options
-
-  multi_agent.rb
-
-  pdf
-  agent
-  AGS
-  documenter.rb
-  genome_editing
-  hello
-  high_level
-  test_chat
   system=system{
    scout-ai
   }

@@ -76,22 +76,21 @@ module AssociationItem
       distance = active.shift
       distances[u] = distance
       path = Paths.extract_path(parents, start_node, u) if parents.key?(u)
-      next if max_steps && path && path.length > max_steps
+      next if max_steps && path && path.length > max_steps 
       next unless adjacency.include?(u) && adjacency[u] && !adjacency[u].empty?
-
       adjacency[u].each do |v|
-        node_dist = node_dist_cache[[u,v]] ||= (block_given? ? block.call(u, v) : 1)
+        node_dist = node_dist_cache[[u,v]] ||= (block_given? ? block.call(u,v) : 1)
         next if node_dist.nil? || (threshold && node_dist > threshold)
         d = distance + node_dist
-        next unless d < distances[v] && d < best
+        next unless d < distances[v] && d < best # we can't relax this one
         active[v] << d
         distances[v] = d
-        parents[v]   = u
+        parents[v] = u
         if String === end_node ? (end_node == v) : (end_node && end_node.include?(v))
-          best  = d
+          best = d 
           found = true
         end
-      end
+      end    
     end
 
     return nil unless found
@@ -108,16 +107,20 @@ module AssociationItem
   # Connected components from a list of AssociationItems.
   # Returns an Array of Arrays of node identifiers.
   def self.components(associations, undirected: true)
+    inc = associations.respond_to?(:incidence) ? associations.incidence : AssociationItem.incidence(associations)
+
     adjacency = Hash.new { |h,k| h[k] = [] }
     nodes     = Set.new
 
-    associations.each do |m|
-      s, t, _sep = m.split "~"
-      next if s.nil? || t.nil? || s.strip.empty? || t.strip.empty?
-      adjacency[s] << t
-      nodes << s << t
-      if undirected
-        adjacency[t] << s
+    inc.each do |src, row|
+      # row is a NamedArray; row.keys are targets
+      targets = row.keys
+      targets.each do |t|
+        adjacency[src] << t
+        nodes << src << t
+        if undirected
+          adjacency[t] << src
+        end
       end
     end
 
@@ -147,22 +150,24 @@ module AssociationItem
   # Degree per node from an AssociationItem list.
   # direction: :out, :in, :both
   def self.degrees(associations, direction: :both)
+    inc = associations.respond_to?(:incidence) ? associations.incidence : AssociationItem.incidence(associations)
     deg = Hash.new(0)
-    associations.each do |m|
-      s, t, _sep = m.split "~"
-      next if s.nil? || t.nil? || s.strip.empty? || t.strip.empty?
+
+    inc.each do |src, row|
+      targets = row.keys
       case direction
       when :out
-        deg[s] += 1
+        deg[src] += targets.size
       when :in
-        deg[t] += 1
+        targets.each { |t| deg[t] += 1 }
       when :both
-        deg[s] += 1
-        deg[t] += 1
+        deg[src] += targets.size
+        targets.each { |t| deg[t] += 1 }
       else
         raise ArgumentError, "Unknown direction: #{direction.inspect}"
       end
     end
+
     deg
   end
 
@@ -170,7 +175,9 @@ module AssociationItem
   def self.subset_by_nodes(associations, nodes)
     node_set = nodes.to_set
     associations.select do |m|
-      s, t, _sep = m.split "~"
+      # Use AssociationItem interface rather than parsing
+      s = m.source rescue nil
+      t = m.target rescue nil
       next false if s.nil? || t.nil?
       node_set.include?(s) && node_set.include?(t)
     end
@@ -179,13 +186,17 @@ module AssociationItem
   # Neighborhood within k steps inside a fixed subgraph, using unweighted BFS
   # over adjacency built from associations.
   def self.neighborhood(associations, seeds, k)
+    inc = associations.respond_to?(:incidence) ? associations.incidence : AssociationItem.incidence(associations)
     adjacency = Hash.new { |h,k| h[k] = [] }
-    associations.each do |m|
-      s, t, _sep = m.split "~"
-      next if s.nil? || t.nil? || s.strip.empty? || t.strip.empty?
-      adjacency[s] << t
-      adjacency[t] << s
+
+    inc.each do |src, row|
+      targets = row.keys
+      targets.each do |t|
+        adjacency[src] << t
+        adjacency[t] << src
+      end
     end
+
     Paths.neighborhood(adjacency, seeds, k)
   end
 end

@@ -2,6 +2,14 @@ require 'fc'
 
 module Paths
 
+  def self.extract_path(parents, start_node, end_node)
+    path = [end_node]
+    while not path.last === start_node
+      path << parents[path.last]
+    end
+    path
+  end
+
   def self.dijkstra(adjacency, start_node, end_node = nil, max_steps = nil)
 
     return nil unless adjacency.include? start_node
@@ -33,6 +41,8 @@ module Paths
         best = d if (String === end_node ? end_node == v : end_node.include?(v))
         active.push(v,d) if adjacency.include? v
         distances[v] = d
+
+
         parents[v] = u
       end    
     end
@@ -44,14 +54,6 @@ module Paths
     else
       parents
     end
-  end
-
-  def self.extract_path(parents, start_node, end_node)
-    path = [end_node]
-    while not path.last === start_node
-      path << parents[path.last]
-    end
-    path
   end
 
   def self.weighted_dijkstra(adjacency, start_node, end_node = nil, threshold = nil, max_steps = nil)
