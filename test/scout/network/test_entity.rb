@@ -14,12 +14,12 @@ class TestNetworkEntityAssociationItem < Test::Unit::TestCase
   def test_components
     pairs = build_pairs
     comps = AssociationItem.components(pairs)
-    # All nodes from brothers should appear in a single component for this tiny graph
+    # All nodes from brothers should appear in the (single) component
     flat = comps.flatten
     %w[Miki Isa Clei Guille].each do |name|
       assert_include flat, name
     end
-    assert_equal 2, comps.length
+    assert_equal 1, comps.length
   end
 
   def test_degrees

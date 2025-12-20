@@ -54,17 +54,17 @@ module AssociationItem
       s, t, _sep = m.split "~"
       next if s.nil? || t.nil? || s.strip.empty? || t.strip.empty?
       adjacency[s] ||= Set.new
-      adjacency[s] << t
+      adjacency[s] << t 
       next unless m.undirected
       adjacency[t] ||= Set.new
-      adjacency[t] << s
+      adjacency[t] << s  
     end
 
     return nil unless adjacency.include? start_node
 
-    active   = PriorityQueue.new
-    distances = Hash.new { 1.0 / 0.0 }
-    parents   = Hash.new
+    active   = PriorityQueue.new         
+    distances = Hash.new { 1.0 / 0.0 } 
+    parents   = Hash.new                 
 
     active[start_node] << 0
     best   = 1.0 / 0.0
@@ -111,16 +111,15 @@ module AssociationItem
 
     adjacency = Hash.new { |h,k| h[k] = [] }
     nodes     = Set.new
+    targets   = inc.fields
 
     inc.each do |src, row|
-      # row is a NamedArray; row.keys are targets
-      targets = row.keys
-      targets.each do |t|
+      Array(row).each_with_index do |val, i|
+        next if val.nil?
+        t = targets[i]
         adjacency[src] << t
         nodes << src << t
-        if undirected
-          adjacency[t] << src
-        end
+        adjacency[t] << src if undirected
       end
     end
 
@@ -152,19 +151,23 @@ module AssociationItem
   def self.degrees(associations, direction: :both)
     inc = associations.respond_to?(:incidence) ? associations.incidence : AssociationItem.incidence(associations)
     deg = Hash.new(0)
+    targets = inc.fields
 
     inc.each do |src, row|
-      targets = row.keys
-      case direction
-      when :out
-        deg[src] += targets.size
-      when :in
-        targets.each { |t| deg[t] += 1 }
-      when :both
-        deg[src] += targets.size
-        targets.each { |t| deg[t] += 1 }
-      else
-        raise ArgumentError, "Unknown direction: #{direction.inspect}"
+      Array(row).each_with_index do |val, i|
+        next if val.nil?
+        t = targets[i]
+        case direction
+        when :out
+          deg[src] += 1
+        when :in
+          deg[t] += 1
+        when :both
+          deg[src] += 1
+          deg[t]   += 1
+        else
+          raise ArgumentError, "Unknown direction: #{direction.inspect}"
+        end
       end
     end
 
@@ -175,7 +178,6 @@ module AssociationItem
   def self.subset_by_nodes(associations, nodes)
     node_set = nodes.to_set
     associations.select do |m|
-      # Use AssociationItem interface rather than parsing
       s = m.source rescue nil
       t = m.target rescue nil
       next false if s.nil? || t.nil?
@@ -188,10 +190,12 @@ module AssociationItem
   def self.neighborhood(associations, seeds, k)
     inc = associations.respond_to?(:incidence) ? associations.incidence : AssociationItem.incidence(associations)
     adjacency = Hash.new { |h,k| h[k] = [] }
+    targets   = inc.fields
 
     inc.each do |src, row|
-      targets = row.keys
-      targets.each do |t|
+      Array(row).each_with_index do |val, i|
+        next if val.nil?
+        t = targets[i]
         adjacency[src] << t
         adjacency[t] << src
       end
