@@ -6,6 +6,11 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai
  }
  chats=chats filter="*"{
+  agent_doc
+
+
+  multi_agent.rb
+
   network
 
   intro
