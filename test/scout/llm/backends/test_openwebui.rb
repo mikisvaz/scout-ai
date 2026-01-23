@@ -13,7 +13,8 @@ user: write a script that sorts files in a directory
 user: write a script that sorts files in a directory 
     EOF
 
-    ppp LLM::OpenWebUI.ask prompt, model: 'mistral:latest', url: "http://gepeto.bsc.es/api"
+    #ppp LLM::OpenWebUI.ask prompt, model: 'ALIA-40b-instruct-2512-Q8_0:latest', url: "https://gepeto.bsc.es/api"
+    ppp LLM::OpenWebUI.ask prompt, model: 'qwen3-vl:30b', url: "https://gepeto.bsc.es/api"
   end
 
   def _test_tool

@@ -8,6 +8,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  chats=chats filter="*"{
   agent_doc
 
+  tool_oeu
 
   multi_agent.rb
 
