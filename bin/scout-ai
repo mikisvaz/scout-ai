@@ -6,8 +6,8 @@ if _i = ARGV.index("--log")
   require 'scout/log'
   log = ARGV[_i+1]
   Log.severity = log.to_i
-  ARGV.delete "--log"
-  ARGV.delete log
+  ARGV.delete_at _i + 1
+  ARGV.delete_at _i
 end
 
 dev_dir = nil
