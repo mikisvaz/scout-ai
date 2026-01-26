@@ -100,9 +100,46 @@ You have access to the following databases associating entities:
       knowledge_base_path = path['knowledge_base']
       chat_path = path['start_chat']
 
-      workflow = Workflow.require_workflow workflow_path if workflow_path.exists?
-      knowledge_base = KnowledgeBase.new knowledge_base_path if knowledge_base_path.exists?
-      chat = Chat.setup LLM.chat(chat_path.find) if chat_path.exists?
+      workflow ||= Workflow.require_workflow workflow_path if workflow_path.exists?
+      knowledge_base ||= KnowledgeBase.new knowledge_base_path if knowledge_base_path.exists?
+      chat ||= Chat.setup LLM.chat(chat_path.find) if chat_path.exists?
+
+      LLM::Agent.new workflow: workflow, knowledge_base: knowledge_base, start_chat: chat
+    end
+
+    def self.load_agent(agent_name = nil)
+      if agent_name && Path.is_filename?(agent_name)
+        if File.directory?(agent_name)
+          dir = Path.setup(agent_name) unless Path === agent_name
+          return load dir.agent.find_with_extension("rb")
+        else
+          return load agent_name
+        end
+      end
+
+      agent_name ||= 'default'
+
+      workflow_path = Scout.workflows[agent_name]
+      agent_path = Scout.var.Agent[agent_name]
+      agent_path = Scout.chats[agent_name] unless agent_path.exists?
+
+      workflow = if workflow_path.exists?
+                   Workflow.require_workflow agent_name
+                 elsif agent_path.workflow.find_with_extension("rb").exists?
+                   Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
+                 end
+
+      knowledge_base = if agent_path.knowledge_base.exists?
+                         KnowledgeBase.load agent_path.knowledge_base.find
+                       elsif workflow_path.knowledge_base.exists?
+                         KnowledgeBase.load workflow_path.knowledge_base.find
+                       end
+
+      chat = if agent_path.start_chat.exists?
+               Chat.setup LLM.chat(agent_path.start_chat.find)
+             elsif workflow_path.start_chat.exists?
+               Chat.setup LLM.chat(workflow_path.start_chat.find)
+             end
 
       LLM::Agent.new workflow: workflow, knowledge_base: knowledge_base, start_chat: chat
     end
