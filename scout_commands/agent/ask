@@ -23,6 +23,7 @@ Use STDIN to add context to the question
 -m--model* Model to use
 -e--endpoint* Endpoint to use
 -f--file* Incorporate file
+-w--workflow* Add an additional workflow as a tool
 -wt--workflow_tasks* Export these tasks to the agent
 -i--imports* Chat files to import, separated by comma
 EOF
@@ -41,36 +42,14 @@ agent_name, *question_parts = ARGV
 
 question = question_parts * " "
 
-file, chat, inline, template, dry_run, imports, endpoint, model = IndiferentHash.process_options options, :file, :chat, :inline, :template, :dry_run, :imports, :endpoint, :model
+file, chat, inline, template, dry_run, imports, endpoint, model, workflow = IndiferentHash.process_options options, 
+  :file, :chat, :inline, :template, :dry_run, :imports, :endpoint, :model, :workflow
 
 file = Path.setup(file) if file
 
 imports = imports.split(/,\s*/) if imports
 
 agent = LLM::Agent.load_agent agent_name
-
-#agent_name ||= 'default'
-#
-#agent_file = Scout.workflows[agent_name]
-#
-#agent_file = Scout.chats[agent_name] unless agent_file.exists?
-#
-#agent_file = agent_file.find_with_extension('rb') unless agent_file.exists?
-#
-#
-#if agent_file.exists?
-#  if agent_file.directory?
-#    if agent_file.agent.find_with_extension('rb').exists?
-#      agent = load agent_file.agent.find_with_extension('rb')
-#    else
-#      agent = LLM::Agent.load_from_path agent_file
-#    end
-#  else
-#    agent = load agent_file
-#  end
-#else
-#  #raise ParameterException agent_file
-#end
 
 agent.other_options[:endpoint] = endpoint if endpoint
 agent.other_options[:model] = model if model
@@ -115,7 +94,9 @@ if chat
   #conversation = Open.read(chat) + LLM.print(new)
   #Open.write(chat, conversation)
 
-  conversation = Open.exist?(chat)? LLM.chat(chat) : []
+  conversation = Open.exist?(chat)? LLM.chat(chat) : Chat.setup([])
+  conversation.message :tool, workflow if workflow
+
   convo_options = LLM.options conversation
   agent.start(Chat.setup(conversation)) if conversation.any?
   agent.current_chat.concat LLM.chat(question) if question && ! question.empty?
@@ -168,7 +149,11 @@ else
   #conversation = Chat.setup(LLM.chat question)
   #imports.each{|import| conversation.import import } if imports
   #puts agent.ask(conversation, nil, options)
-  agent.current_chat.concat LLM.chat(question)
+
+  conversation = LLM.chat question
+  conversation.message :tool, workflow if workflow
+  
+  agent.current_chat.concat conversation
   imports.each{|import| agent.import import } if imports
   puts agent.chat
 end

@@ -24,6 +24,7 @@ characters '???', if they are present.
 -i--imports* Chat files to import, separated by comma
 -in--inline* Ask inline questions about a file
 -f--file* Incorporate file at the start
+-w--workflow* Add a workflow as a tool
 -m--model* Model to use
 -e--endpoint* Endpoint to use
 -b--backend* Backend to use
@@ -40,7 +41,8 @@ end
 
 Log.severity = options.delete(:log).to_i if options.include? :log
 
-file, chat, inline, imports, template, dry_run = IndiferentHash.process_options options, :file, :chat, :inline, :imports, :template, :dry_run
+file, chat, inline, imports, template, workflow, dry_run = IndiferentHash.process_options options, 
+  :file, :chat, :inline, :imports, :template, :workflow, :dry_run
 
 imports = imports.split(/,\s*/) if imports
 
@@ -77,6 +79,9 @@ if chat
   imports.each{|import| conversation.import import } if imports
   convo_options = LLM.options conversation
   conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
+
+  conversation = Chat.setup conversation
+  conversation.message :tool, workflow if workflow
 
   if dry_run
     ppp LLM.print conversation
@@ -124,5 +129,7 @@ elsif inline
   new_file << file
   Open.write(inline, new_file)
 else
-  puts LLM.ask(question, options)
+  conversation = LLM.chat question
+  conversation.message :tool, workflow if workflow
+  puts LLM.ask(conversation, options)
 end
