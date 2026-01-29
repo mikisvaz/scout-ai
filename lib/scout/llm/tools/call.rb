@@ -39,7 +39,7 @@ module LLM
                           when Workflow
                             call_workflow(obj, function_name, function_arguments)
                           when KnowledgeBase
-                            call_knowledge_base(obj, function_name, function_arguments)
+                            call_knowledge_base(obj, function_name, function_arguments.dup)
                           else
                             if block_given?
                               block.call function_name, function_arguments

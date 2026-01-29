@@ -6,29 +6,11 @@ module LLM
     messages = LLM.chat(question)
     options = IndiferentHash.add_defaults LLM.options(messages), options
 
-    agent = IndiferentHash.process_options options, :agent
+    agent_name = IndiferentHash.process_options options, :agent
 
-    if agent
-      agent_file = Scout.workflows[agent]
+    if agent_name
+      agent = LLM::Agent.load_agent agent_name
 
-      agent_file = Scout.chats[agent] unless agent_file.exists?
-
-      agent_file = agent_file.find_with_extension('rb') unless agent_file.exists?
-
-
-      if agent_file.exists?
-        if agent_file.directory?
-          if agent_file.agent.find_with_extension('rb').exists?
-            agent = load agent_file.agent.find_with_extension('rb')
-          else
-            agent = LLM::Agent.load_from_path agent_file
-          end
-        else
-          agent = load agent_file
-        end
-      else
-        raise "Agent not found: #{agent}"
-      end
       return agent.ask(question, options)
     end
 
