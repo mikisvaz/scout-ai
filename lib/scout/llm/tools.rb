@@ -72,12 +72,12 @@ module LLM
   def self.tools_to_openai(messages)
     messages.collect do |message|
       if message[:role] == 'function_call'
-        tool_call = JSON.parse(message[:content])
+        tool_call = IndiferentHash.setup(JSON.parse(message[:content]))
         arguments = tool_call.delete('arguments') || {}
         name = tool_call[:name]
         tool_call['type'] = 'function'
         tool_call['function'] ||= {}
-        tool_call['function']['name'] ||= name
+        tool_call['function']['name'] ||= name || 'function'
         tool_call['function']['arguments'] = arguments.to_json
         {role: 'assistant', tool_calls: [tool_call]}
       elsif message[:role] == 'function_call_output'
@@ -95,16 +95,20 @@ module LLM
   def self.tools_to_anthropic(messages)
     messages.collect do |message|
       if message[:role] == 'function_call'
-        tool_call = JSON.parse(message[:content])
-        arguments = tool_call.delete('arguments') || {}
+        tool_call = IndiferentHash.setup(JSON.parse(message[:content]))
+        arguments = tool_call.delete('arguments') || tool_call[:function].delete('arguments') || "{}"
+        arguments = JSON.parse arguments if String === arguments
         name = tool_call[:name]
+        id = tool_call.delete('call_id') || tool_call.delete('id') || tool_call.delete('tool_use_id')
+        tool_call['id'] = id
         tool_call['type'] = 'tool_use'
         tool_call['name'] ||= name
         tool_call['input'] = arguments
+        tool_call.delete :function
         {role: 'assistant', content: [tool_call]}
       elsif message[:role] == 'function_call_output'
         info = JSON.parse(message[:content])
-        id = info.delete('call_id') || info.delete('id')
+        id = info.delete('call_id') || info.delete('id') || info.delete('tool_use_id') || info[:function].delete('id')
         info.delete "role"
         info['tool_use_id'] = id
         info['type'] = 'tool_result'

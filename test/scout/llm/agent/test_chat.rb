@@ -4,7 +4,7 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 require 'scout/llm/agent'
 class TestAgent < Test::Unit::TestCase
-  def test_true
+  def test_print
     a = LLM::Agent.new
     a.start_chat.system 'you are a robot'
     a.user "hi"

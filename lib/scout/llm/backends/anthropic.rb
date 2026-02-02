@@ -8,7 +8,8 @@ module LLM
     def self.client(url = nil, key = nil, log_errors = false, request_timeout: 1200)
       url ||= Scout::Config.get(:url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_URL')
       key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_KEY')
-      Object::Anthropic::Client.new(access_token:key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout)
+      #Object::Anthropic::Client.new(access_token:key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout)
+      Object::Anthropic::Client.new(api_key: key)
     end
 
     def self.process_input(messages)
@@ -25,14 +26,19 @@ module LLM
     def self.process_response(response, tools, &block)
       Log.debug "Respose: #{Log.fingerprint response}"
 
-      response['content'].collect do |output|
-        case output['type']
+      response[:content].collect do |output|
+        case output[:type].to_s
         when 'text'
-          IndiferentHash.setup({role: :assistant, content: output['text']})
+          IndiferentHash.setup({role: :assistant, content: output[:text]})
         when 'reasoning'
           next
         when 'tool_use'
-          LLM.process_calls(tools, [output], &block)
+          tool_call  = {
+            call_id: output[:id],
+            arguments: output[:input],
+            name: output[:name]
+          }
+          LLM.process_calls(tools, [tool_call], &block)
         when 'web_search_call'
           next
         else
@@ -64,7 +70,7 @@ module LLM
 
       if model.nil?
         url ||= Scout::Config.get(:url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_URL')
-        model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_MODEL', default: "claude-sonnet-4-20250514")
+        model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_MODEL', default: "claude-sonnet-4-5")
       end
 
       case format.to_sym
@@ -100,16 +106,18 @@ module LLM
         IndiferentHash.setup(info)
         info[:type] = 'custom' if info[:type] == 'function'
         info[:input_schema] = info.delete('parameters') if info["parameters"]
+        info[:description] ||= ""
         info
       end if parameters[:tools]
-
+      
       messages = self.process_input messages
 
       Log.low "Calling anthropic #{url}: #{Log.fingerprint parameters}}"
 
       parameters[:messages] = LLM.tools_to_anthropic messages
+      parameters[:model] = model
 
-      response = self.process_response client.messages(parameters: parameters), tools, &block
+      response = self.process_response client.messages.create(parameters), tools, &block
 
       res = if response.last[:role] == 'function_call_output' 
               #response + self.ask(messages + response, original_options.merge(tool_choice: tool_choice_next, return_messages: true, tools: tools ), &block)

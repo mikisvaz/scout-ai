@@ -21,7 +21,7 @@ module LLM
 
     Chat.parse question
   end
-  def self.chat(file, original = nil)
+  def self.chat(file = [], original = nil)
     original ||= (String === file and Open.exists?(file)) ? file : Path.setup($0.dup)
     caller_lib_dir = Path.caller_lib_dir(nil, 'chats')
 

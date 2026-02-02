@@ -3,7 +3,7 @@ module LLM
   self.singleton_class.attr_accessor :max_content_length
 
   def self.call_id_name_and_arguments(tool_call)
-    tool_call_id = tool_call.dig("call_id") || tool_call.dig("id")
+    tool_call_id = tool_call.dig("call_id") || tool_call.dig("id") || tool_call.dig('tool_call_id')
     if tool_call['function']
       function_name = tool_call.dig("function", "name")
       function_arguments = tool_call.dig("function", "arguments")
@@ -21,6 +21,7 @@ module LLM
     max_content_length = LLM.max_content_length
     IndiferentHash.setup tools
     calls.collect do |tool_call|
+      tool_call = IndiferentHash.setup tool_call
       tool_call_id, function_name, function_arguments = call_id_name_and_arguments(tool_call)
 
       function_arguments = IndiferentHash.setup function_arguments

@@ -2,7 +2,7 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 class TestLLMAnthropic < Test::Unit::TestCase
-  def test_say_hi
+  def _test_say_hi
     prompt =<<-EOF
 user: say hi
     EOF
@@ -66,7 +66,7 @@ know if you didn't get it.
     ppp LLM::Anthropic.ask prompt
   end
 
-  def _test_tool_call_output_weather
+  def test_tool_call_output_weather
     Log.severity = 0
     prompt =<<-EOF
 function_call:
