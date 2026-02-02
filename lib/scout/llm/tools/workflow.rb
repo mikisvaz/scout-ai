@@ -76,7 +76,7 @@ module LLM
 
     else
       tasks = workflow.all_exports if tasks.nil?
-      tasks = workflow.all_tasks if tasks.empty? || workflow.tasks
+      tasks = workflow.all_tasks if tasks.empty? && workflow.all_tasks
       tasks = [] if tasks.nil?
 
       tasks.inject({}){|tool_definitions,task_name|

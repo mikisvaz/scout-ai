@@ -132,6 +132,28 @@ module Chat
           tool_definitions.merge!(LLM.workflow_tools(workflow))
         end
         next
+      elsif message[:role] == 'workflow_doc'
+        workflow_name = message[:content]
+        if Open.remote? workflow_name
+          require 'rbbt'
+          require 'scout/offsite/ssh'
+          require 'rbbt/workflow/remote_workflow'
+          workflow = RemoteWorkflow.new workflow_name
+        else
+          workflow = Workflow.require_workflow workflow_name
+        end
+
+        raise "Workflow not found #{workflow_name}" if workflow.nil?
+
+        {role: :user, content: <<-EOF}
+
+You have access to tools from workflow '#{workflow.name}'. 
+Below is the documentation of the workflow:
+
+# #{workflow.documentation[:title]}
+
+#{workflow.documentation[:description]}
+        EOF
       elsif message[:role] == 'kb'
         knowledge_base_name, *databases = content_tokens(message)
         databases = nil if databases.empty?
