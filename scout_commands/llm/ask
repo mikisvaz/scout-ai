@@ -71,7 +71,7 @@ if question.include?('...')
   context = file ? Open.read(file) : STDIN.read
   question = question.sub('...', context)
 elsif file
-  question = "<file basename=#{File.basename file}>[[[\n" + Open.read(file) + "\n]]]</file>"
+  question = "<file basename=#{File.basename file}>[[[\n" + Open.read(file) + "\n]]]</file>\n\n#{question}"
 end
 
 if chat

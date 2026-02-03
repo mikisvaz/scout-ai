@@ -132,7 +132,7 @@ module Chat
           tool_definitions.merge!(LLM.workflow_tools(workflow))
         end
         next
-      elsif message[:role] == 'workflow_doc'
+      elsif message[:role] == 'introduce'
         workflow_name = message[:content]
         if Open.remote? workflow_name
           require 'rbbt'
