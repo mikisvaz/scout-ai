@@ -91,9 +91,16 @@ module LLM
       response = self.process_response client.chat(parameters), tools, &block
 
       res = if response.last[:role] == 'function_call_output' 
-              #response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: tools), &block)
               # This version seems to keep the original message from getting forgotten
-              response + self.ask(response + messages, original_options.except(:tool_choice).merge(return_messages: true, tools: tools), &block)
+              case :normal
+              when :inject
+                new_messages = response + messages
+                new_messages = messages[0..-2] + response + [messages.last]
+              when :normal
+                new_messages = messages + response
+              end
+
+              response + self.ask(new_messages, original_options.except(:tool_choice).merge(return_messages: true, tools: tools), &block)
             else
               response
             end

@@ -140,7 +140,7 @@ You have access to the following databases associating entities:
              elsif workflow_path.start_chat.exists?
                Chat.setup LLM.chat(workflow_path.start_chat.find)
              elsif workflow.documentation[:description]
-               chat = Chat.setup([ {role: :workflow_doc, content: workflow.name} ])
+               chat = Chat.setup([ {role: :introduce, content: workflow.name} ])
              end
 
       LLM::Agent.new workflow: workflow, knowledge_base: knowledge_base, start_chat: chat
