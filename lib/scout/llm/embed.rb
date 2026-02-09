@@ -15,6 +15,9 @@ module LLM
     when :openai, "openai"
       require_relative 'backends/openai'
       LLM::OpenAI.embed(text, options)
+    when :responses, "responses"
+      require_relative 'backends/responses'
+      LLM::OpenAI.embed(text, options)
     when :ollama, "ollama"
       require_relative 'backends/ollama'
       LLM::OLlama.embed(text, options)

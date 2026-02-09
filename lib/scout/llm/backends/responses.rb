@@ -54,11 +54,13 @@ module LLM
           IndiferentHash.setup info
           id = last_id = info[:id] || "fc_#{rand(1000).to_s}"
           id = id.sub(/^fc_/, '')
+          arguments_json = (info[:arguments] || {}.to_json)
+          arguments_json = arguments_json.to_json unless String === arguments_json
           IndiferentHash.setup({
             "type" => "function_call",
             "status" => "completed",
             "name" => name,
-            "arguments" => (info[:arguments] || {}).to_json,
+            "arguments" => arguments_json,
             "call_id"=>id,
           })
         elsif message[:role] == 'function_call_output'
@@ -75,6 +77,26 @@ module LLM
           message
         end
       end.flatten
+    end
+
+    def self.tool_definitions_to_reponses(tools)
+      tools.values.collect do |obj,definition|
+        definition = obj if Hash === obj
+        definition
+
+        definition = case definition[:function]
+                     when Hash
+                       definition.merge(definition.delete :function)
+                     else
+                       definition
+                     end
+
+        definition = IndiferentHash.add_defaults definition, type: :function
+
+        definition[:parameters].delete :defaults if definition[:parameters]
+
+        definition
+      end
     end
 
     def self.process_response(response, tools, &block)
@@ -199,7 +221,7 @@ module LLM
 
       messages = LLM.chat(question)
       options = options.merge LLM.options messages
-      
+
 
       client, url, key, model, log_errors, return_messages, format, websearch, previous_response_id, tools, = IndiferentHash.process_options options,
         :client, :url, :key, :model, :log_errors, :return_messages, :format, :websearch, :previous_response_id, :tools,
@@ -245,7 +267,7 @@ module LLM
       tools.merge!(LLM.associations messages)
 
       if tools.any?
-        parameters[:tools] = LLM.tool_definitions_to_reponses tools
+        parameters[:tools] = LLM::Responses.tool_definitions_to_reponses tools
       end
 
       parameters['previous_response_id'] = previous_response_id if String === previous_response_id
@@ -265,12 +287,12 @@ module LLM
         end
       end
 
-      parameters[:input] = LLM.tools_to_openai input
+      parameters[:input] = LLM::Responses.tools_to_responses input
 
       response = client.responses.create(parameters: parameters)
 
-      Thread.current["previous_response_id"] = previous_response_id = response['id']
-      previous_response_message = {role: :previous_response_id, content: previous_response_id}
+      Thread.current["previous_response_id"] = previous_response_id = response['id'] unless FalseClass === previous_response_id
+      previous_response_message = {role: :previous_response_id, content: previous_response_id} if previous_response_id
 
       response = self.process_response response, tools, &block
 
@@ -288,8 +310,10 @@ module LLM
       if return_messages
         if res.last[:role] == :previous_response_id
           res
-        else
+        elsif previous_response_message
           res + [previous_response_message]
+        else
+          res
         end
       else
         LLM.purge(res).last['content']

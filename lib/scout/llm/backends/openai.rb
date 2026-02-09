@@ -22,6 +22,49 @@ module LLM
       end.flatten.compact
     end
 
+    def self.tool_definitions_to_openai(tools)
+      tools.values.collect do |obj,definition|
+        definition = obj if Hash === obj
+        definition
+
+        definition = case definition[:function]
+                     when Hash
+                       definition
+                     else
+                       {type: :function, function: definition}
+                     end
+
+        definition = IndiferentHash.add_defaults definition, type: :function
+
+        definition[:parameters].delete :defaults if definition[:parameters]
+
+        definition
+      end
+    end
+
+    def self.tools_to_openai(messages)
+      messages.collect do |message|
+        if message[:role] == 'function_call'
+          tool_call = IndiferentHash.setup(JSON.parse(message[:content]))
+          arguments = tool_call.delete('arguments') || {}
+          name = tool_call[:name]
+          tool_call['type'] = 'function'
+          tool_call['function'] ||= {}
+          tool_call['function']['name'] ||= name || 'function'
+          tool_call['function']['arguments'] = arguments.to_json
+          {role: 'assistant', tool_calls: [tool_call]}
+        elsif message[:role] == 'function_call_output'
+          info = JSON.parse(message[:content])
+          id = info.delete('call_id') || info.dig('id')
+          info['role'] = 'tool'
+          info['tool_call_id'] = id
+          info
+        else
+          message
+        end
+      end.flatten
+    end
+
     def self.process_response(response, tools, &block)
       Log.debug "Respose: #{Log.fingerprint response}"
       raise Exception, response["error"] if response["error"]
@@ -86,7 +129,7 @@ module LLM
       tools.merge!(LLM.associations messages)
 
       if tools.any?
-        parameters[:tools] = LLM.tool_definitions_to_openai tools
+        parameters[:tools] = LLM::OpenAI.tool_definitions_to_openai tools
       end
 
       messages = self.process_input messages
@@ -94,7 +137,7 @@ module LLM
       Log.debug "Calling openai #{url}: #{Log.fingerprint(parameters.except(:tools))}}"
       Log.high "Tools: #{Log.fingerprint tools.keys}}" if tools
 
-      parameters[:messages] = LLM.tools_to_openai messages
+      parameters[:messages] = LLM::OpenAI.tools_to_openai messages
 
       response = self.process_response client.chat(parameters: parameters), tools, &block
 
@@ -127,6 +170,7 @@ module LLM
       end
 
       response = client.embeddings(parameters: {input: text, model: model})
+      raise response['error']['message'] if response.include? 'error'
       response.dig('data', 0, 'embedding')
     end
   end

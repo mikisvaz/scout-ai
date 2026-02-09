@@ -108,10 +108,12 @@ You have access to the following databases associating entities:
     end
 
     def self.load_agent(agent_name = nil)
-      if agent_name && Path.is_filename?(agent_name)
+      if agent_name && Path.is_filename?(agent_name) 
         if File.directory?(agent_name)
           dir = Path.setup(agent_name) unless Path === agent_name
-          return load dir.agent.find_with_extension("rb")
+          if dir.agent.find_with_extension("rb").exists?
+            return load dir.agent.find_with_extension("rb")
+          end
         else
           return load agent_name
         end

@@ -132,6 +132,9 @@ Multiple values may be present and use the charater ';' to separate them.
     if database.end_with?('_association_details')
       database = database.sub('_association_details', '')
       associations, fields = IndiferentHash.process_options parameters, :associations, :fields
+
+      # Dumb
+      associations = JSON.parse associations rescue associations if String === associations
       index = knowledge_base.get_index(database)
       if fields
         field_pos = fields.collect{|f| index.identify_field f }
@@ -144,11 +147,14 @@ Multiple values may be present and use the charater ';' to separate them.
         associations.each_with_object({}) do |a,hash|
           values = index[a]
           next if values.nil?
-          hash[a] = values
+          hash[a] = values.to_hash
         end
       end
     else
       entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
+
+      # Dumb
+      entities = JSON.parse entities rescue entities if String === entities
       if reverse
         knowledge_base.parents(database, entities)
       else

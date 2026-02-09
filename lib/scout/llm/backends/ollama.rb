@@ -30,6 +30,46 @@ module LLM
       end.flatten
     end
 
+    def self.tool_definitions_to_ollama(tools)
+      tools.values.collect do |obj,definition|
+        definition = obj if Hash === obj
+        definition = IndiferentHash.setup definition
+
+        definition = case definition[:function]
+                     when Hash
+                       definition
+                     else
+                       {type: :function, function: definition}
+                     end
+
+        definition = IndiferentHash.add_defaults definition, type: :function
+
+        definition
+      end
+    end
+
+    def self.tools_to_ollama(messages)
+      messages.collect do |message|
+        if message[:role] == 'function_call'
+          tool_call = JSON.parse(message[:content])
+          arguments = tool_call.delete('arguments') || {}
+          id = tool_call.delete('id')
+          name = tool_call.delete('name')
+          tool_call['type'] = 'function'
+          tool_call['function'] ||= {}
+          tool_call['function']['name'] ||= name
+          tool_call['function']['arguments'] ||= arguments
+          {role: 'assistant', tool_calls: [tool_call]}
+        elsif message[:role] == 'function_call_output'
+          info = JSON.parse(message[:content])
+          id = info.delete('id') || ''
+          info['role'] = 'tool'
+          info
+        else
+          message
+        end
+      end.flatten
+    end
     def self.ask(question, options = {}, &block)
       original_options = options.dup
 
