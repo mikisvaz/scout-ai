@@ -106,7 +106,7 @@ module LLM
     tools.merge!(LLM.associations messages)
 
     if tools.any?
-      parameters[:tools] = LLM.tool_definitions_to_openai tools
+      parameters[:tools] = LLM::OpenAI.tool_definitions_to_openai tools
     end
 
     messages = LLM::OpenAI.process_input messages
@@ -114,7 +114,7 @@ module LLM
     Log.debug "Calling openai #{url}: #{Log.fingerprint(parameters.except(:tools))}}"
     Log.high "Tools: #{Log.fingerprint tools.keys}}" if tools
 
-    parameters[:messages] = LLM.tools_to_openai messages
+    parameters[:messages] = LLM::OpenAI.tools_to_openai messages
 
     response = LLM::OpenAI.process_response self.rest(:post, url, key, "chat/completions" , parameters), tools, &block
 

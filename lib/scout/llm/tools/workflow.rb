@@ -32,7 +32,7 @@ module LLM
 
       acc[input] = {
         "type": type,
-        "description": description
+        "description": description || ''
       }
 
       if type == :array
@@ -56,7 +56,7 @@ module LLM
 
     function = {
       name: task_name,
-      description: task_info[:description],
+      description: task_info[:description] || '',
       parameters: {
         type: "object",
         properties: properties,
