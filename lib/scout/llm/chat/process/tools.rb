@@ -126,6 +126,7 @@ module Chat
         end
 
         if task_name
+          iii message
           definition = LLM.task_tool_definition workflow, task_name, inputs
           tool_definitions[task_name] = [workflow, definition]
         else

@@ -8,7 +8,6 @@ module LLM
     def self.client(url = nil, key = nil, log_errors = false, request_timeout: 1200)
       url ||= Scout::Config.get(:url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_URL')
       key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_KEY')
-      #Object::Anthropic::Client.new(access_token:key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout)
       Object::Anthropic::Client.new(api_key: key)
     end
 
@@ -48,7 +47,6 @@ module LLM
         end
       end.compact.flatten
     end
-
 
     def self.ask(question, options = {}, &block)
       original_options = options.dup

@@ -16,11 +16,11 @@ module LLM
         entities: {
           type: "array",
           items: { type: :string },
-          description: "Source entities in the association, or target entities if 'reverse' is 'true'"
+          description: 'Source entities in the association, or target entities if "reverse" is "true"'
         },
         reverse: {
           type: "boolean",
-          description: "Look for targets instead of sources, defaults to 'false'"
+          description: 'Look for targets instead of sources, defaults to "false"'
         }
       }
     end
@@ -88,13 +88,13 @@ Returns a list in the format source~target.
 Return details of association as a dictionary object.
 Each key is an association and the value is an array with the values of the different fields you asked for, or for all fields otherwise.
 The fields are: #{fields * ', '}.
-Multiple values may be present and use the charater ';' to separate them.
+Multiple values may be present and use the charater ";" to separate them.
       EOF
     else
       properties.delete(:fields)
       description = <<-EOF
 Return the #{fields.first} of association.
-Multiple values may be present and use the charater ';' to separate them.
+Multiple values may be present and use the charater ";" to separate them.
       EOF
     end
 
@@ -134,7 +134,7 @@ Multiple values may be present and use the charater ';' to separate them.
       associations, fields = IndiferentHash.process_options parameters, :associations, :fields
 
       # Dumb
-      associations = JSON.parse associations rescue associations if String === associations
+      associations = JSON.parse associations if String === associations
       index = knowledge_base.get_index(database)
       if fields
         field_pos = fields.collect{|f| index.identify_field f }
@@ -154,7 +154,7 @@ Multiple values may be present and use the charater ';' to separate them.
       entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
 
       # Dumb
-      entities = JSON.parse entities rescue entities if String === entities
+      entities = JSON.parse entities if String === entities
       if reverse
         knowledge_base.parents(database, entities)
       else
