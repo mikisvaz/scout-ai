@@ -289,34 +289,44 @@ module LLM
 
       parameters[:input] = LLM::Responses.tools_to_responses input
 
-      response = client.responses.create(parameters: parameters)
+      response = begin
+                   client.responses.create(parameters: parameters)
+                 rescue
+                   Log.debug 'Input parameters: ' + "\n" + JSON.pretty_generate(parameters)
+                   raise $!
+                 end
 
-      Thread.current["previous_response_id"] = previous_response_id = response['id'] unless FalseClass === previous_response_id
-      previous_response_message = {role: :previous_response_id, content: previous_response_id} if previous_response_id
+      begin
+        Thread.current["previous_response_id"] = previous_response_id = response['id'] unless FalseClass === previous_response_id
+        previous_response_message = {role: :previous_response_id, content: previous_response_id} if previous_response_id
 
-      response = self.process_response response, tools, &block
+        response = self.process_response response, tools, &block
 
-      res = if response.last[:role] == 'function_call_output'
-              case previous_response_id
-              when String
-                response + self.ask(response, original_options.except(:tool_choice).merge(return_messages: true, tools: tools, previous_response_id: previous_response_id), &block)
+        res = if response.last[:role] == 'function_call_output'
+                case previous_response_id
+                when String
+                  response + self.ask(response, original_options.except(:tool_choice).merge(return_messages: true, tools: tools, previous_response_id: previous_response_id), &block)
+                else
+                  response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: tools), &block)
+                end
               else
-                response + self.ask(messages + response, original_options.except(:tool_choice).merge(return_messages: true, tools: tools), &block)
+                response
               end
-            else
-              response
-            end
 
-      if return_messages
-        if res.last[:role] == :previous_response_id
-          res
-        elsif previous_response_message
-          res + [previous_response_message]
+        if return_messages
+          if res.last[:role] == :previous_response_id
+            res
+          elsif previous_response_message
+            res + [previous_response_message]
+          else
+            res
+          end
         else
-          res
+          LLM.purge(res).last['content']
         end
-      else
-        LLM.purge(res).last['content']
+      rescue
+        Log.debug 'Response: ' + "\n" + JSON.pretty_generate(response)
+        raise $!
       end
     end
 

@@ -139,7 +139,12 @@ module LLM
 
       parameters[:messages] = LLM::OpenAI.tools_to_openai messages
 
-      response = self.process_response client.chat(parameters: parameters), tools, &block
+      response = begin
+                   self.process_response client.chat(parameters: parameters), tools, &block
+                 rescue
+                   Log.debug 'Input parameters: ' + "\n" + JSON.pretty_generate(parameters)
+                   raise $!
+                 end
 
       res = if response.last[:role] == 'function_call_output' 
               response + self.ask(messages + response, original_options.merge(tool_choice: tool_choice_next, return_messages: true, tools: tools ), &block)
