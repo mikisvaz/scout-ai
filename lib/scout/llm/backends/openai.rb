@@ -70,6 +70,7 @@ module LLM
         response.dig("choices", 0, "message", "tool_calls")
 
       if tool_calls && tool_calls.any?
+        tool_calls = tool_calls.collect{|tool_call| self.parse_tool_call(tool_call) }
         LLM.process_calls(tools, tool_calls, &block)
       else
        [message]

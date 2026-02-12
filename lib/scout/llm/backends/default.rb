@@ -42,14 +42,18 @@ module LLM
     def prepare_client(options, messages = nil)
       client_options = client_options(options)
 
-      Log.debug "Client options: #{client_options.inspect}"
+      client = IndiferentHash.process_options options, :client
 
-      client, format = IndiferentHash.process_options options,
-        :client, :format
+      if client.nil?
+        Log.debug "Client options: #{client_options.inspect}"
 
-      client = self.client(options.merge(client_options)) if client.nil?
 
-      options[:model] = client_options[:model]
+        client = self.client(options.merge(client_options))
+      else
+        Log.debug "Reusing client: #{Log.fingerprint client}"
+      end
+
+      options[:model] ||= client_options[:model]
 
       extra_options(options, messages)
 
@@ -219,8 +223,8 @@ module LLM
 
     def format_tool_output(message)
       info = JSON.parse(message[:content])
-      IndiferentHash.setup info
-      id = info[:id] || last_id
+      info = IndiferentHash.setup info
+      id = info[:id] || 'none'
       id = id.sub(/^fc_/, '')
       {                               # append result message
         "type" => "function_call_output",
@@ -230,7 +234,6 @@ module LLM
     end
 
     def format_messages(messages)
-      last_id = nil
       messages = IndiferentHash.setup(messages)
 
       messages = messages.collect do |message|
@@ -259,11 +262,16 @@ module LLM
       tools = options.delete :tools
       tools = [] if tools.nil?
 
-      tools = tools.inject({}) do |acc,definition|
-        IndiferentHash.setup definition
-        name = definition.dig('name') || definition.dig('function', 'name')
-        acc.merge(name => definition)
-      end if Array === tools
+      case tools
+      when Array
+        tools = tools.inject({}) do |acc,definition|
+          IndiferentHash.setup definition
+          name = definition.dig('name') || definition.dig('function', 'name')
+          acc.merge(name => definition)
+        end if Array === tools
+      when nil
+        tools = {}
+      end
 
       tools.merge!(LLM.tools messages)
       tools.merge!(LLM.associations messages)
@@ -332,7 +340,7 @@ module LLM
           end
         when 'reasoning'
           next
-        when 'function_call'
+        when 'function_call', 'mcp_call'
           tool_call = self.parse_tool_call(output)
           LLM.process_calls(tools, [tool_call], &block)
         when 'web_search_call'
@@ -370,7 +378,7 @@ module LLM
       begin
         output = process_response messages, response, tools, options, &block
 
-        output = chain_tools messages, output, tools, options.merge(client: client)
+        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools)
 
         if return_messages
           output

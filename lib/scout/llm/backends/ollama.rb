@@ -8,7 +8,7 @@ module LLM
     TAG='ollama'
     DEFAULT_MODEL='llama3.1'
 
-    def extra_options(options, messages = nil)
+    def self.extra_options(options, messages = nil)
       format = IndiferentHash.process_options options, :format
 
       case format.to_sym
@@ -59,7 +59,7 @@ module LLM
 
     def self.parse_tool_call(info)
       arguments, name = IndiferentHash.process_options info['function'], :arguments, :name
-      id = name + "_" + Misc.digest(arguments)
+      id = info[:id] || name + "_" + Misc.digest(arguments)
       {arguments: arguments, id: id, name: name}
     end
 

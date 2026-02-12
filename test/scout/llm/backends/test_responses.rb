@@ -10,7 +10,7 @@ user: write a script that sorts files in a directory
     ppp LLM::Responses.ask prompt, model: 'gpt-4.1-nano'
   end
 
-  def test_embeddings
+  def _test_embeddings
     Log.severity = 0
     text =<<-EOF
 Some text
@@ -37,7 +37,7 @@ should i take an umbrella?
     ppp LLM::Responses.ask prompt, model: 'gpt-4.1-nano'
   end
 
-  def _test_tool
+  def test_tool
     prompt =<<-EOF
 user:
 What is the weather in London. Should I take my umbrella?
