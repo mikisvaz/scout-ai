@@ -1,42 +1,90 @@
 require 'scout'
 require 'anthropic'
-require_relative '../chat'
+require_relative 'default'
 
 module LLM
   module Anthropic
+    extend Backend
 
-    def self.client(url = nil, key = nil, log_errors = false, request_timeout: 1200)
-      url ||= Scout::Config.get(:url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_URL')
-      key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_KEY')
-      Object::Anthropic::Client.new(api_key: key)
+    TAG='anthropic'
+    DEFAULT_MODEL='claude-sonnet-4-5'
+
+    def self.extra_options(options, messages = nil)
+      format, max_tokens = IndiferentHash.process_options options, :format, :max_tokens, max_tokens: 1000
+
+      options[:max_tokens] = max_tokens
+
+      case format.to_sym
+      when :json, :json_object
+        options[:response_format] = {type: 'json_object'}
+      else
+        options[:response_format] = {type: format}
+      end if format
     end
 
-    def self.process_input(messages)
-      messages.collect do |message|
-        if message[:role] == 'image'
-          Log.warn "Endpoint 'anthropic' does not support images, try 'responses': #{message[:content]}"
-          next
-        else
-          message
-        end
-      end.flatten.compact
+    def self.client(options, messages = nil)
+      url, key = IndiferentHash.process_options options,
+        :url, :key
+
+      Object::Anthropic::Client.new(access_token: key)
     end
 
-    def self.process_response(response, tools, &block)
+    def self.query(client, messages, tools = [], parameters = {})
+      parameters[:messages] = messages
+      parameters[:tools] = self.format_tool_definitions tools if tools && tools.any?
+      client.messages(parameters: parameters)
+    end
+
+    def self.format_tool_definitions(tools)
+      tools.values.collect do |obj,info|
+        info = obj if Hash === obj
+        IndiferentHash.setup(info)
+        info[:type] = 'custom' if info[:type] == 'function'
+        info[:input_schema] = info.delete('parameters') if info["parameters"]
+        info[:description] ||= ""
+        info
+      end
+    end
+
+    def self.format_tool_call(message)
+      tool_call = IndiferentHash.setup(JSON.parse(message[:content]))
+      arguments = tool_call.delete('arguments') || tool_call[:function].delete('arguments') || "{}"
+      arguments = JSON.parse arguments if String === arguments
+      name = tool_call[:name]
+      id = tool_call.delete('call_id') || tool_call.delete('id') || tool_call.delete('tool_use_id')
+      tool_call['id'] = id
+      tool_call['type'] = 'tool_use'
+      tool_call['name'] ||= name
+      tool_call['input'] = arguments
+      tool_call.delete :function
+      {role: 'assistant', content: [tool_call]}
+    end
+
+    def self.format_tool_output(message)
+      info = JSON.parse(message[:content])
+      id = info.delete('call_id') || info.delete('id') || info.delete('tool_use_id') || info[:function].delete('id')
+      tool_output = {type: 'tool_result', tool_use_id: id, content: info[:content]}
+      {role: 'user', content: [tool_output]}
+    end
+
+    def self.parse_tool_call(info)
+      arguments, id, name = IndiferentHash.process_options info, :input, :id, :name
+      {arguments: arguments, id: id, name: name}
+    end
+
+    def self.process_response(messages, response, tools, options, &block)
       Log.debug "Respose: #{Log.fingerprint response}"
+      IndiferentHash.setup response
 
       response[:content].collect do |output|
+        IndiferentHash.setup output
         case output[:type].to_s
         when 'text'
           IndiferentHash.setup({role: :assistant, content: output[:text]})
         when 'reasoning'
           next
         when 'tool_use'
-          tool_call  = {
-            call_id: output[:id],
-            arguments: output[:input],
-            name: output[:name]
-          }
+          tool_call = parse_tool_call(output)
           LLM.process_calls(tools, [tool_call], &block)
         when 'web_search_call'
           next
@@ -48,106 +96,8 @@ module LLM
       end.compact.flatten
     end
 
-    def self.ask(question, options = {}, &block)
-      original_options = options.dup
-
-      messages = LLM.chat(question)
-      options = options.merge LLM.options messages
-
-      options = IndiferentHash.add_defaults options, max_tokens: 1000
-
-      client, url, key, model, log_errors, return_messages, format, tool_choice_next, previous_response_id, tools = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :log_errors, :return_messages, :format, :tool_choice_next, :previous_response_id, :tools,
-        log_errors: true, tool_choice_next: :none
-
-      if client.nil?
-        url ||= Scout::Config.get(:url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_URL')
-        key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_KEY')
-        client = self.client url, key, log_errors
-      end
-
-      if model.nil?
-        url ||= Scout::Config.get(:url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_URL')
-        model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :anthropic, env: 'ANTHROPIC_MODEL', default: "claude-sonnet-4-5")
-      end
-
-      case format.to_sym
-      when :json, :json_object
-        options[:response_format] = {type: 'json_object'}
-      else
-        options[:response_format] = {type: format}
-      end if format
-
-      parameters = options.merge(model: model)
-
-      # Process tools
-
-      case tools
-      when Array
-        tools = tools.inject({}) do |acc,definition|
-          IndiferentHash.setup definition
-          name = definition.dig('name') || definition.dig('function', 'name')
-          acc.merge(name => definition)
-        end
-      when nil
-        tools = {}
-      end
-
-      tools.merge!(LLM.tools messages)
-      tools.merge!(LLM.associations messages)
-
-      if tools.any?
-        parameters[:tools] = tools.values.collect{|obj,definition| Hash === obj ? obj : definition}
-      end
-      
-      parameters[:tools] = parameters[:tools].collect do |info|
-        IndiferentHash.setup(info)
-        info[:type] = 'custom' if info[:type] == 'function'
-        info[:input_schema] = info.delete('parameters') if info["parameters"]
-        info[:description] ||= ""
-        info
-      end if parameters[:tools]
-      
-      messages = self.process_input messages
-
-      Log.low "Calling anthropic #{url}: #{Log.fingerprint parameters}}"
-
-      parameters[:messages] = LLM.tools_to_anthropic messages
-      parameters[:model] = model
-
-      response = self.process_response client.messages.create(parameters), tools, &block
-
-      res = if response.last[:role] == 'function_call_output' 
-              #response + self.ask(messages + response, original_options.merge(tool_choice: tool_choice_next, return_messages: true, tools: tools ), &block)
-              response + self.ask(messages + response, original_options.merge(return_messages: true, tools: tools ), &block)
-            else
-              response
-            end
-
-      if return_messages
-        res
-      else
-        res.last['content']
-      end
-    end
-
-    def self.embed(text, options = {})
-
-      client, url, key, model, log_errors = IndiferentHash.process_options options, :client, :url, :key, :model, :log_errors
-
-      if client.nil?
-        url ||= Scout::Config.get(:url, :openai_embed, :embed, :anthropic, env: 'ANTHROPIC_URL')
-        key ||= LLM.get_url_config(:key, url, :openai_embed, :embed, :anthropic, env: 'ANTHROPIC_KEY')
-        client = self.client url, key, log_errors
-      end
-
-      if model.nil?
-        url ||= Scout::Config.get(:url, :openai_embed, :embed, :anthropic, env: 'ANTHROPIC_URL')
-        model ||= LLM.get_url_config(:model, url, :openai_embed, :embed, :anthropic, env: 'ANTHROPIC_MODEL', default: "gpt-3.5-turbo")
-      end
-
-      response = client.embeddings(parameters: {input: text, model: model})
-      response.dig('data', 0, 'embedding')
+    def self.embed_query(client, text, options = {})
+      raise "Anthropic does not offer embeddings"
     end
   end
 end

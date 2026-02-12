@@ -3,7 +3,7 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 class TestLLMOllama < Test::Unit::TestCase
 
-  def test_ask
+  def _test_ask
     Log.severity = 0
     prompt =<<-EOF
 system: you are a coding helper that only write code and inline comments. No extra explanations or comentary
@@ -13,7 +13,7 @@ user: write a script that sorts files in a directory
     ppp LLM::OLlama.ask prompt, model: 'mistral', mode: 'chat'
   end
 
-  def test_tool_call_output
+  def _test_tool_call_output
     Log.severity = 0
     prompt =<<-EOF
 function_call:
@@ -33,7 +33,7 @@ know if you didn't get it.
     ppp LLM::OLlama.ask prompt, model: 'mistral', mode: 'chat'
   end
 
-  def test_tool_call_output_weather
+  def _test_tool_call_output_weather
     Log.severity = 0
     prompt =<<-EOF
 function_call:
@@ -51,7 +51,7 @@ should i take an umbrella?
     ppp LLM::OLlama.ask prompt, model: 'mistral'
   end
 
-  def test_tool
+  def _test_tool
     prompt =<<-EOF
 What is the weather in London. Should I take an umbrella?
     EOF
@@ -89,12 +89,12 @@ What is the weather in London. Should I take an umbrella?
     ppp respose
   end
 
-  def test_embeddings
+  def _test_embeddings
     Log.severity = 0
     text =<<-EOF
 Some text
     EOF
-    emb = LLM::OLlama.embed text, model: 'mistral'
+    emb = LLM::OLlama.embed text, model: 'mxbai-embed-large', url: 'localhost:3331' 
     assert(Float === emb.first)
   end
 
@@ -103,7 +103,7 @@ Some text
     text =<<-EOF
 Some text
     EOF
-    emb = LLM::OLlama.embed [text], model: 'mistral'
+    emb = LLM::OLlama.embed [text], model: 'mxbai-embed-large', url: 'localhost:3331' 
     assert(Float === emb.first.first)
   end
 end

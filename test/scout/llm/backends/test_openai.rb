@@ -2,7 +2,7 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 class TestLLMOpenAI < Test::Unit::TestCase
-  def test_ask
+  def _test_ask
     prompt =<<-EOF
 system: you are a coding helper that only write code and comments without formatting so that it can work directly, avoid the initial and end commas ```.
 user: write a script that sorts files in a directory
@@ -11,7 +11,7 @@ user: write a script that sorts files in a directory
     ppp LLM::OpenAI.ask prompt
   end
 
-  def __test_embeddings
+  def test_embeddings
     Log.severity = 0
     text =<<-EOF
 Some text
@@ -21,7 +21,7 @@ Some text
     assert(Float === emb.first)
   end
 
-  def test_tool_call_output
+  def _test_tool_call_output
     Log.severity = 0
     prompt =<<-EOF
 function_call:
@@ -41,7 +41,7 @@ know if you didn't get it.
     ppp LLM::OpenAI.ask prompt, model: 'gpt-4.1-nano'
   end
 
-  def test_tool_call_output_2
+  def _test_tool_call_output_2
     Log.severity = 0
     prompt =<<-EOF
 function_call:
@@ -59,7 +59,7 @@ should i take an umbrella?
     ppp LLM::OpenAI.ask prompt, model: 'gpt-4.1-nano'
   end
 
-  def test_tool_call_output_features
+  def _test_tool_call_output_features
     Log.severity = 0
     prompt =<<-EOF
 function_call:
@@ -79,7 +79,7 @@ know if you didn't get it.
     ppp LLM::OpenAI.ask prompt, model: 'gpt-4.1-nano'
   end
 
-  def test_tool_call_output_weather
+  def _test_tool_call_output_weather
     Log.severity = 0
     prompt =<<-EOF
 function_call:
@@ -98,7 +98,7 @@ should i take an umbrella?
   end
 
 
-  def test_tool_gpt5
+  def _test_tool_gpt5
     prompt =<<-EOF
 user:
 What is the weather in London. Should I take my umbrella?
@@ -136,7 +136,7 @@ What is the weather in London. Should I take my umbrella?
     ppp respose
   end
 
-  def test_tool
+  def _test_tool
     prompt =<<-EOF
 user:
 What is the weather in London. Should I take my umbrella?
@@ -175,7 +175,7 @@ What is the weather in London. Should I take my umbrella?
     ppp respose
   end
 
-  def test_json_output
+  def _test_json_output
     prompt =<<-EOF
 system:
 

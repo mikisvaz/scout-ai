@@ -4,6 +4,7 @@ require 'openai'
 module LLM
   module Responses
     extend Backend
-    TAG='responses'
+    TAG='openai'
+    DEFAULT_MODEL='gpt-5-nano'
   end
 end

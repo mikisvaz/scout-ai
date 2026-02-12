@@ -71,9 +71,9 @@ module LLM
       end
 
       response_message = {
-        id: tool_call_id,
-        role: "tool",
-        content: content
+        name: function_name,
+        content: content,
+        id: tool_call_id
       }
 
       function_call = tool_call.dup

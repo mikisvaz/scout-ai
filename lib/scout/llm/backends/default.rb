@@ -5,35 +5,53 @@ module LLM
   module Backend
     #{{{ CLIENT
 
-    self.singleton_class.attr_accessor :tag
-
-    self.tag = 'generic'
-
-    def client(options, messages = nil)
-      client, url, key, model, log_errors, format, request_timeout = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :log_errors, :format, :request_timeout,
+    def client(options)
+      url, key, model, log_errors, request_timeout = IndiferentHash.process_options options,
+        :url, :key, :model, :log_errors, :request_timeout,
         log_errors: true, request_timeout: 1200
 
-      if client.nil?
-        url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
-        key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :openai, env: 'OPENAI_KEY')
-        client = Object::OpenAI::Client.new(access_token:key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout)
-      end
+      Object::OpenAI::Client.new(access_token:key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout)
+    end
 
-      if model.nil?
-        url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
-        model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-4.1")
-      end
+    def client_options(options)
+      url, key, model, tag, default_model, log_errors, request_timeout = IndiferentHash.process_options options,
+        :url, :key, :model, :tag, :default_model, :log_errors, :request_timeout,
+        tag: self::TAG, default_model: self::DEFAULT_MODEL, log_errors: true, request_timeout: 1200
 
-      options[:model] = model unless options.include?(:model)
+      url ||= Scout::Config.get(:url, "#{tag}_ask", :ask, tag, env: "#{tag.upcase}_URL")
+      key ||= LLM.get_url_config(:key, url, "#{tag}_ask", :ask, tag, env: "#{tag.upcase}_KEY")
+      model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: "#{tag.upcase}_MODEL", default: default_model)
+
+      {url: url, key: key, model: model}
+    end
+
+    def extra_options(options, messages = nil)
+      format = IndiferentHash.process_options options, :format
 
       reasoning_options = IndiferentHash.pull_keys options, :reasoning
+      reasoning_options = reasoning_options[:reasoning] if reasoning_options.include?(:reasoning)
       options[:reasoning] = reasoning_options if reasoning_options.any?
 
       text_options = IndiferentHash.pull_keys options, :text
+      text_options = reasoning_options[:text] if reasoning_options.include?(:text)
       options[:text] = text_options if text_options.any?
 
       options[:text] = process_format format if format
+    end
+
+    def prepare_client(options, messages = nil)
+      client_options = client_options(options)
+
+      Log.debug "Client options: #{client_options.inspect}"
+
+      client, format = IndiferentHash.process_options options,
+        :client, :format
+
+      client = self.client(options.merge(client_options)) if client.nil?
+
+      options[:model] = client_options[:model]
+
+      extra_options(options, messages)
 
       client
     end
@@ -46,6 +64,7 @@ module LLM
       parameters = parameters.except(:previous_response_id) if FalseClass === parameters[:previous_response_id]
       client.responses.create(parameters: parameters)
     end
+
     #{{{ FORMAT
 
     def process_format(format)
@@ -188,6 +207,7 @@ module LLM
       id = id.sub(/^fc_/, '')
       arguments_json = (info[:arguments] || {}.to_json)
       arguments_json = arguments_json.to_json unless String === arguments_json
+
       IndiferentHash.setup({
         "type" => "function_call",
         "status" => "completed",
@@ -292,6 +312,12 @@ module LLM
                end
     end
 
+    def parse_tool_call(info)
+      arguments, id, name = IndiferentHash.process_options info, :arguments, :call_id, :name
+      arguments = JSON.parse arguments if String === arguments
+      {arguments: arguments, id: id, name: name}
+    end
+
     def process_response(messages, response, tools, options, &block)
       Log.debug "Response: #{Log.fingerprint response}"
 
@@ -307,7 +333,8 @@ module LLM
         when 'reasoning'
           next
         when 'function_call'
-          LLM.process_calls(tools, [output], &block)
+          tool_call = self.parse_tool_call(output)
+          LLM.process_calls(tools, [tool_call], &block)
         when 'web_search_call'
           next
         else
@@ -329,14 +356,13 @@ module LLM
 
       messages = messages question, options
 
-      client = client options, messages
+      client = prepare_client options, messages
       tools = tools(messages, options)
 
       response = begin
                    Log.low "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
                    query(client, format_messages(messages), tools, options)
                  rescue
-                   Log.debug 'Messages: ' + "\n" + JSON.pretty_generate(messages) 
                    Log.debug 'Options: ' + "\n" + JSON.pretty_generate(options) 
                    raise $!
                  end
@@ -391,11 +417,16 @@ module LLM
       response
     end
 
-    def embed(text, options = {})
-      client = client options
-      response = client.embeddings(options)
+    def embed_query(client, text, parameters = {})
+      parameters[:text] = text
+      response = client.embeddings(parameters)
       raise response['error']['message'] if response.include? 'error'
       response.dig('data', 0, 'embedding')
+    end
+
+    def embed(text, options = {})
+      client = prepare_client options
+      embed_query client, text, options
     end
   end
 

@@ -4,6 +4,8 @@ require 'openai'
 module LLM
   module OpenAI
     extend Backend
+    TAG='openai'
+    DEFAULT_MODEL='gpt-5-nano'
 
     def self.query(client, messages, tools = [], parameters = {})
       parameters[:messages] = messages

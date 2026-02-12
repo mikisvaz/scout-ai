@@ -6,24 +6,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai
  }
  chats=chats filter="*"{
-  test_agent
-  agent_doc
-
-  tool_oeu
-
-  multi_agent.rb
-
-  network
-
-  intro
-
-  dev
-
-  inline_task
-
-  inline_task.rb
-
-  course
   system=system{
    scout-ai
   }
@@ -76,6 +58,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    cmd
    web
   }
+
+  test_agent
+  test_antropic
+  test_ollama
  }
  doc=doc filter="*"{
   Agent.md
@@ -114,10 +100,13 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     }
 
     backends=backends{
-     openai.rb
+     default.rb
+
      responses.rb
-     anthropic.rb
+     openai.rb
      ollama.rb
+     anthropic.rb
+
      bedrock.rb
      openwebui.rb
      huggingface.rb

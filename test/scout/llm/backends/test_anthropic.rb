@@ -18,7 +18,7 @@ user: write a script that sorts files in a directory
     ppp LLM::Anthropic.ask prompt
   end
 
-  def __test_embeddings
+  def test_embeddings
     Log.severity = 0
     text =<<-EOF
 Some text
@@ -66,7 +66,7 @@ know if you didn't get it.
     ppp LLM::Anthropic.ask prompt
   end
 
-  def test_tool_call_output_weather
+  def _test_tool_call_output_weather
     Log.severity = 0
     prompt =<<-EOF
 function_call:

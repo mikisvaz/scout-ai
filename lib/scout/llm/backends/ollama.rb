@@ -4,30 +4,12 @@ require 'ollama-ai'
 module LLM
   module OLlama
     extend Backend
+
     TAG='ollama'
+    DEFAULT_MODEL='llama3.1'
 
-    def self.client(options, messages = nil)
-      client, url, key, model, log_errors, format, previous_response_id, request_timeout = IndiferentHash.process_options options,
-        :client, :url, :key, :model, :log_errors, :format, :previous_response_id, :request_timeout,
-        log_errors: true, request_timeout: 1200
-
-      if client.nil?
-        url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
-        key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :openai, env: 'OPENAI_KEY')
-        client = Ollama.new(
-          credentials: {
-            address: url,
-            bearer_token: key
-          }
-        )
-      end
-
-      if model.nil?
-        url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
-        model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: "gpt-4.1")
-      end
-
-      options[:model] = model unless options.include?(:model)
+    def extra_options(options, messages = nil)
+      format = IndiferentHash.process_options options, :format
 
       case format.to_sym
       when :json, :json_object
@@ -35,10 +17,19 @@ module LLM
       else
         options[:response_format] = {type: format}
       end if format
-
-      client
     end
 
+    def self.client(options, messages = nil)
+      url, key = IndiferentHash.process_options options,
+        :url, :key
+
+      Ollama.new(
+        credentials: {
+          address: url,
+          bearer_token: key
+        }
+      )
+    end
 
     def self.query(client, messages, tools = [], parameters = {})
       parameters[:stream] = false
@@ -53,6 +44,25 @@ module LLM
       end
     end
 
+    def self.embed_query(client, text, parameters = {})
+      parameters[:input] = text
+
+      begin
+        embeddings = client.request('api/embed', parameters)
+      rescue
+        Log.debug 'Input parameters: ' + "\n" + JSON.pretty_generate(parameters)
+        raise $!
+      end
+
+      Array === text ? embeddings.first['embeddings'] : embeddings.first['embeddings'].first
+    end
+
+    def self.parse_tool_call(info)
+      arguments, name = IndiferentHash.process_options info['function'], :arguments, :name
+      id = name + "_" + Misc.digest(arguments)
+      {arguments: arguments, id: id, name: name}
+    end
+
     def self.process_response(messages, responses, tools, options, &block)
       Log.debug "Respose: #{Log.fingerprint responses}"
       output = responses.collect do |response|
@@ -64,6 +74,7 @@ module LLM
         next if message[:role] == 'assistant' && message[:content].empty? && tool_calls.nil?
 
         if tool_calls && tool_calls.any?
+          tool_calls = tool_calls.collect{|tool_call| self.parse_tool_call tool_call }
           LLM.process_calls tools, tool_calls, &block
         else
           [message]
@@ -108,52 +119,6 @@ module LLM
       id = info.delete('id') || ''
       info['role'] = 'tool'
       info
-    end
-
-    def self.chain_tools(messages, output, tools, options = {}, &block)
-      previous_response_id = options[:previous_response_id]
-
-      output = if output.last[:role] == 'function_call_output'
-                 case previous_response_id
-                 when String
-                   output + ask(output, options.except(:tool_choice).merge(return_messages: true, previous_response_id: previous_response_id), &block)
-                 else
-                   output + ask(messages + output, options.except(:tool_choice).merge(return_messages: true), &block)
-                 end
-               else
-                 output
-               end
-
-      output = if output.last[:role] == :previous_response_id
-                 output
-               elsif previous_response_id
-                 previous_response_message = {role: :previous_response_id, content: previous_response_id} if previous_response_id
-                 output + [previous_response_message]
-               else
-                 output
-               end
-    end
-
-    def self.embed(text, options = {})
-
-      client, url, key, model = IndiferentHash.process_options options, :client, :url, :key, :model
-
-      if client.nil?
-        url ||= Scout::Config.get(:url, :ollama_embed, :embed, :ollama, env: 'OLLAMA_URL', default: "http://localhost:11434")
-        key ||= LLM.get_url_config(:key, url, :ollama_embed, :embed, :ollama, env: 'OLLAMA_KEY')
-        client = self.client url, key
-      end
-
-      if model.nil?
-        url ||= Scout::Config.get(:url, :ollama_embed, :embed, :ollama, env: 'OLLAMA_URL', default: "http://localhost:11434")
-        model ||= LLM.get_url_config(:model, url, :ollama_embed, :embed, :ollama, env: 'OLLAMA_MODEL', default: "mistral")
-      end
-
-      parameters = { input: text, model: model }
-      Log.debug "Calling client with parameters: #{Log.fingerprint parameters}"
-      embeddings = client.request('api/embed', parameters)
-
-      Array === text ? embeddings.first['embeddings'] : embeddings.first['embeddings'].first
     end
   end
 end
