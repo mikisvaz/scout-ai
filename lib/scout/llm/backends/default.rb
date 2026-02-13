@@ -66,7 +66,8 @@ module LLM
       parameters[:tools] = self.format_tool_definitions tools if tools && tools.any?
 
       parameters = parameters.except(:previous_response_id) if FalseClass === parameters[:previous_response_id]
-      client.responses.create(parameters: parameters)
+      parameters = parameters.except(:previous_response_id) if parameters[:ignore_previous_response_id]
+      client.responses.create(parameters: parameters.except(:ignore_previous_response_id))
     end
 
     #{{{ FORMAT
