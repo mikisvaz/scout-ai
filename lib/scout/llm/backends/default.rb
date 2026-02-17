@@ -22,7 +22,7 @@ module LLM
       key ||= LLM.get_url_config(:key, url, "#{tag}_ask", :ask, tag, env: "#{tag.upcase}_KEY")
       model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: "#{tag.upcase}_MODEL", default: default_model)
 
-      {url: url, key: key, model: model}
+      {url: url, key: key, model: model}.reject{|k,v| v.nil? }
     end
 
     def extra_options(options, messages = nil)
@@ -61,13 +61,17 @@ module LLM
     end
 
     def query(client, messages, tools = [], parameters = {})
+      formatted_tools = self.format_tool_definitions tools
+
+      messages = extract_tools(messages, formatted_tools)
+
+      parameters[:tools] = formatted_tools if formatted_tools.any?
       parameters[:input] = messages
 
-      parameters[:tools] = self.format_tool_definitions tools if tools && tools.any?
 
       parameters = parameters.except(:previous_response_id) if FalseClass === parameters[:previous_response_id]
-      parameters = parameters.except(:previous_response_id) if parameters[:ignore_previous_response_id]
-      client.responses.create(parameters: parameters.except(:ignore_previous_response_id))
+      parameters = parameters.except(:previous_response_id) if parameters[:previous_response] == 'false'
+      client.responses.create(parameters: parameters.except(:previous_response))
     end
 
     #{{{ FORMAT
@@ -184,6 +188,7 @@ module LLM
     #{{{ TOOLS
 
     def format_tool_definitions(tools)
+      return [] if tools.nil?
       tools.values.collect do |obj,definition|
         definition = obj if Hash === obj
         definition
@@ -261,7 +266,6 @@ module LLM
 
     def tools(messages, options)
       tools = options.delete :tools
-      tools = [] if tools.nil?
 
       case tools
       when Array
@@ -277,7 +281,6 @@ module LLM
       tools.merge!(LLM.tools messages)
       tools.merge!(LLM.associations messages)
 
-      messages = extract_tools(messages, tools)
       Log.medium "Tools: #{Log.fingerprint tools.keys}}" if tools
 
       tools
@@ -353,7 +356,7 @@ module LLM
         end
       end.compact.flatten
 
-      options[:previous_response_id] = response['id'] unless FalseClass === options[:previous_response_id]
+      options[:previous_response_id] = response['id'] unless options[:previous_response].to_s == 'false' || FalseClass === options[:previous_response_id]
 
       output
     end
@@ -363,14 +366,15 @@ module LLM
 
       return_messages = IndiferentHash.process_options options, :return_messages, return_messages: false
 
-      messages = messages question, options
+      messages = self.messages question, options
 
       client = prepare_client options, messages
-      tools = tools(messages, options)
+      formatted_messages = format_messages(messages)
+      tools = tools(formatted_messages, options)
 
       response = begin
                    Log.low "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
-                   query(client, format_messages(messages), tools, options)
+                   query(client, formatted_messages, tools, options)
                  rescue
                    Log.debug 'Options: ' + "\n" + JSON.pretty_generate(options) 
                    raise $!
@@ -382,7 +386,7 @@ module LLM
         output = chain_tools messages, output, tools, options.merge(client: client, tools: tools)
 
         if return_messages
-          output
+          Chat.setup output
         else
           LLM.purge(output).last['content']
         end

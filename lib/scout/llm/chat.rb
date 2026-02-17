@@ -25,8 +25,8 @@ module LLM
     original ||= (String === file and Open.exists?(file)) ? file : Path.setup($0.dup)
     caller_lib_dir = Path.caller_lib_dir(nil, 'chats')
 
-    if String === file && Open.exists?(file)
-      messages = self.messages Open.read(file)
+    if Path.is_filename? file
+      messages = self.messages Open.read(file), file
     else
       messages = self.messages file
     end

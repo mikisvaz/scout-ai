@@ -23,7 +23,7 @@ module LLM
       raise "Endpoint not found #{endpoint}"
     end
 
-    if options[:backend].to_s == 'responses'
+    if options[:backend].to_s == 'responses' && options[:previous_response].to_s != 'false'
       messages = Chat.clear(messages, 'previous_response_id')
     else
       messages = Chat.clean(messages, 'previous_response_id')

@@ -25,6 +25,7 @@ module LLM
                         m = Module.new
                         m = "ScoutAgent"
                         m.extend Workflow
+                        m.tasks = {}
                         m
                       end
       end
@@ -72,13 +73,27 @@ You have access to the following databases associating entities:
       tools = tools.merge @other_options[:tools] if @other_options[:tools]
       options[:tools] = tools
       begin
+
         if workflow || knowledge_base
           tools.merge!(LLM.workflow_tools(workflow)) if workflow
           tools.merge!(LLM.knowledge_base_tool_definition(knowledge_base)) if knowledge_base and knowledge_base.all_databases.any?
           options[:tools] = tools
-          LLM.ask messages, @other_options.merge(log_errors: true).merge(options)
+        end
+
+        messages.delete_if{|info| info[:role] == 'agent' }
+
+        if workflow && workflow.tasks.include?(:ask)
+          job = workflow.job(:ask, chat: Chat.print(messages))
+          job.produce
+          
+          messages = LLM.chat job.path
+          if options[:return_messages]
+            messages
+          else
+            Chat.answer messages
+          end
         else
-          LLM.ask messages, @other_options.merge(log_errors: true).merge(options)
+          LLM.ask messages, @other_options.merge(log_errors: true).merge(options).merge(agent: false)
         end
       rescue
         exception = $!

@@ -38,7 +38,8 @@ module Chat
       end
     end.flatten
 
-    Workflow.produce(jobs) if jobs.any?
+    #Workflow.produce(jobs) if jobs.any?
+    jobs.each{|job| job.run }
 
     new
   end
@@ -72,7 +73,13 @@ module Chat
           content = if step.done?
                       Open.read(step.path)
                     elsif step.error?
-                      step.exception
+                      Log.warn "Error in job #{step.path}"
+                      e = step.exception
+                      if ENV['SCOUT_CHAT_JOB_EXCEPTION'] == 'true'
+                        {exception: e.message, stack: e.backtrace }.to_json
+                      else
+                        raise e
+                      end
                     end
 
           tool_output = {

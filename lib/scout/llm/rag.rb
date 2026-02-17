@@ -21,5 +21,14 @@ module LLM
 
       u
     end
+
+    def self.top(texts, prompt, num = 10)
+      data = texts.collect{|text| LLM.embed(text) }
+
+      i = LLM::RAG.index(data)
+      pos, scores = i.search_knn LLM.embed(prompt), num
+
+      texts.values_at *pos.reverse
+    end
   end
 end

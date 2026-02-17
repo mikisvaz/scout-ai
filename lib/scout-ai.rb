@@ -8,3 +8,5 @@ require 'scout/llm/ask'
 require 'scout/llm/chat'
 require 'scout/llm/embed'
 require 'scout/llm/agent'
+
+

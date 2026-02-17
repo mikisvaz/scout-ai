@@ -81,19 +81,6 @@ elsif file
 end
 
 if chat
-  #conversation = Open.exist?(chat)? LLM.chat(chat) : []
-  #convo_options = LLM.options conversation
-  #conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
-
-  #if dry_run
-  #  ppp LLM.print conversation
-  #  exit 0
-  #end
-
-  #new = agent.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
-  #conversation = Open.read(chat) + LLM.print(new)
-  #Open.write(chat, conversation)
-
   conversation = Open.exist?(chat)? LLM.chat(chat) : Chat.setup([])
   conversation.message :tool, workflow if workflow
 
@@ -107,7 +94,7 @@ if chat
     exit 0
   end
 
-  new = agent.ask(agent.current_chat, convo_options.merge(options.merge(return_messages: true)))
+  new = agent.ask(agent.current_chat, convo_options.merge(options.merge(return_messages: true, endpoint: endpoint, model: model)))
   conversation += LLM.chat(question) if question
   conversation += new
 
