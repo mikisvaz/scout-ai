@@ -35,7 +35,7 @@ module LLM
     Log.high "Tools: #{Log.fingerprint tools.keys}}" if tools
     Log.debug "#{Log.fingerprint tools}}" if tools
 
-    res = Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist) do
+    res = Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist, dir: Scout.var.cache.ask) do
       backend = IndiferentHash.process_options options, :backend
       backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :responses
 
@@ -52,6 +52,9 @@ module LLM
       when :ollama, "ollama"
         require_relative 'backends/ollama'
         LLM::OLlama.ask(messages, options, &block)
+      when :vllm, "vllm"
+        require_relative 'backends/vllm'
+        LLM::VLLM.ask(messages, options, &block)
       when :openwebui, "openwebui"
         require_relative 'backends/openwebui'
         LLM::OpenWebUI.ask(messages, options, &block)

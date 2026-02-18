@@ -88,6 +88,7 @@ module LLM
   end
 
   def self.call_workflow(workflow, task_name, parameters={})
+    parameters = {} if parameters.nil?
     jobname = parameters.delete :jobname
     begin
       exec_type = parameters[:exec_type]

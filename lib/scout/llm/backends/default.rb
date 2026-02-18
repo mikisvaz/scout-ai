@@ -32,11 +32,15 @@ module LLM
       reasoning_options = reasoning_options[:reasoning] if reasoning_options.include?(:reasoning)
       options[:reasoning] = reasoning_options if reasoning_options.any?
 
+      
       text_options = IndiferentHash.pull_keys options, :text
       text_options = reasoning_options[:text] if reasoning_options.include?(:text)
+      text_options = text_options[:text] if text_options && text_options.include?(:text)
       options[:text] = text_options if text_options.any?
 
       options[:text] = process_format format if format
+
+      options
     end
 
     def prepare_client(options, messages = nil)
@@ -227,10 +231,11 @@ module LLM
       })
     end
 
-    def format_tool_output(message)
+    def format_tool_output(message, last_id = nil)
       info = JSON.parse(message[:content])
       info = IndiferentHash.setup info
-      id = info[:id] || 'none'
+      id = info[:id] || last_id
+      raise "No id #{Log.fingerprint message}" if id.nil?
       id = id.sub(/^fc_/, '')
       {                               # append result message
         "type" => "function_call_output",
@@ -242,11 +247,14 @@ module LLM
     def format_messages(messages)
       messages = IndiferentHash.setup(messages)
 
+      last_id = nil
       messages = messages.collect do |message|
         if message[:role] == 'function_call'
           format_tool_call(message)
         elsif message[:role] == 'function_call_output'
-          format_tool_output(message)
+          m = format_tool_output(message, last_id)
+          last_id = m[:call_id]
+          m
         else
           format_other(message)
         end
@@ -303,12 +311,21 @@ module LLM
     def chain_tools(messages, output, tools, options = {}, &block)
       previous_response_id = options[:previous_response_id]
 
+      return output if output === []
+
+      raise "Output format unknown #{output}" unless (Hash === output.last) && output.last.include?(:role)
+
       output = if output.last[:role] == 'function_call_output'
-                 case previous_response_id
-                 when String
-                   output + ask(output, options.except(:tool_choice).merge(return_messages: true, previous_response_id: previous_response_id), &block)
-                 else
-                   output + ask(messages + output, options.except(:tool_choice).merge(return_messages: true), &block)
+                 begin
+                   case previous_response_id
+                   when String
+                     output + ask(output, options.except(:tool_choice).merge(return_messages: true, previous_response_id: previous_response_id), &block)
+                   else
+                     output + ask(messages + output, options.except(:tool_choice).merge(return_messages: true), &block)
+                   end
+                 rescue Exception
+                   #Log.debug 'Tool chaining error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
+                   raise $!
                  end
                else
                  output
@@ -325,9 +342,13 @@ module LLM
     end
 
     def parse_tool_call(info)
-      arguments, id, name = IndiferentHash.process_options info, :arguments, :call_id, :name
-      arguments = JSON.parse arguments if String === arguments
-      {arguments: arguments, id: id, name: name}
+      arguments, call_id, id, name = IndiferentHash.process_options info.dup, :arguments, :call_id, :id, :name
+      arguments = begin
+                    JSON.parse arguments 
+                  rescue
+                    Log.debug 'Parsing call error. Tool call:' + "\n" + JSON.pretty_generate(info) 
+                  end if String === arguments
+      {name: name, arguments: arguments, id: call_id || id}
     end
 
     def process_response(messages, response, tools, options, &block)
@@ -345,8 +366,13 @@ module LLM
         when 'reasoning'
           next
         when 'function_call', 'mcp_call'
-          tool_call = self.parse_tool_call(output)
-          LLM.process_calls(tools, [tool_call], &block)
+          tool_call = self.parse_tool_call(output.dup)
+          begin
+            LLM.process_calls(tools, [tool_call.dup], &block)
+          rescue Exception
+            Log.debug 'Processing response error. Response:' + "\n" + JSON.pretty_generate(output) 
+            raise $!
+          end
         when 'web_search_call'
           next
         else
@@ -375,8 +401,8 @@ module LLM
       response = begin
                    Log.low "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
                    query(client, formatted_messages, tools, options)
-                 rescue
-                   Log.debug 'Options: ' + "\n" + JSON.pretty_generate(options) 
+                 rescue Exception
+                   Log.debug 'Aking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools)) 
                    raise $!
                  end
 
@@ -388,10 +414,12 @@ module LLM
         if return_messages
           Chat.setup output
         else
+          output = LLM.purge(output)
+          return '' if output.empty?
           LLM.purge(output).last['content']
         end
       rescue
-        Log.debug 'Response: ' + "\n" + JSON.pretty_generate(response)
+        #Log.debug 'Response: ' + "\n" + JSON.pretty_generate(response)
         raise $!
       end
     end

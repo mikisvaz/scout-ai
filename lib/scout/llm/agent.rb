@@ -122,7 +122,7 @@ You have access to the following databases associating entities:
       LLM::Agent.new workflow: workflow, knowledge_base: knowledge_base, start_chat: chat
     end
 
-    def self.load_agent(agent_name = nil)
+    def self.load_agent(agent_name = nil, options = {})
       if agent_name && Path.is_filename?(agent_name) 
         if File.directory?(agent_name)
           dir = Path.setup(agent_name) unless Path === agent_name
@@ -160,7 +160,7 @@ You have access to the following databases associating entities:
                chat = Chat.setup([ {role: 'introduce', content: workflow.name} ])
              end
 
-      LLM::Agent.new workflow: workflow, knowledge_base: knowledge_base, start_chat: chat
+      LLM::Agent.new **options.merge(workflow: workflow, knowledge_base: knowledge_base, start_chat: chat)
     end
   end
 end

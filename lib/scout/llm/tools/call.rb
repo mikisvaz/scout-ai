@@ -24,6 +24,8 @@ module LLM
       tool_call = IndiferentHash.setup tool_call
       tool_call_id, function_name, function_arguments = call_id_name_and_arguments(tool_call)
 
+      raise "No tool_call_id in #{ tool_call}" if tool_call_id.nil?
+
       function_arguments = IndiferentHash.setup function_arguments
 
       obj, definition = tools[function_name]

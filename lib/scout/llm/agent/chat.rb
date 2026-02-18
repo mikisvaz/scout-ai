@@ -54,7 +54,12 @@ module LLM
     def json_format(format, ...)
       current_chat.format format
       output = ask(current_chat, ...)
-      obj = JSON.parse output
+      obj = begin
+              JSON.parse output
+            rescue JSON::ParserError
+              Log.warn "Not valid JSON:" + output
+              raise $!
+            end
       if (Hash === obj) and obj.keys == ['content']
         obj['content']
       else
