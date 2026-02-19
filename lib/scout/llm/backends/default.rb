@@ -402,7 +402,7 @@ module LLM
                    Log.low "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
                    query(client, formatted_messages, tools, options)
                  rescue Exception
-                   Log.debug 'Aking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools)) 
+                   Log.debug 'Asking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools)) 
                    raise $!
                  end
 
