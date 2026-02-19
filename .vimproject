@@ -63,6 +63,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   test_antropic
   test_ollama
   test_gepeto
+
+  chat_doc
  }
  doc=doc filter="*"{
   Agent.md

@@ -1,258 +1,458 @@
 # Chat
 
-Chat is a lightweight builder around an Array of messages that lets you construct, persist, and run LLM conversations declaratively. It integrates tightly with the LLM pipeline (LLM.chat/LLM.ask), Workflows (tool calls), and KnowledgeBase traversal.
+`Chat` is Scout-AI’s conversation format.
 
-A Chat is “just” an Array annotated with Chat behavior (via Annotation). Each element is a Hash like {role: 'user', content: '…'}.
+It serves two related purposes:
 
-Key capabilities:
-- Build conversations programmatically (user/system/assistant/…).
-- Declare tools and jobs inline (Workflow tasks, saved Step results).
-- Inline files and directories into messages (as tagged content).
-- Set per-turn options (format, endpoint, model), request JSON structures.
-- Run a conversation (ask), append responses (chat), and save/write to files.
+1) **An on-disk “chat file” format** (human editable) where each message is written as:
 
-Sections:
-- Data model and setup
-- Adding messages
-- Files, directories and tagging
-- Declaring tools, tasks and jobs
-- Options, endpoint and formats
-- Running a chat: ask/chat/json/json_format
-- Persistence helpers and branching
-- Interop with LLM.chat
-- CLI: using Chat with scout llm and scout agent
-- Examples
+```text
+role:
 
----
-
-## Data model and setup
-
-A Chat is an Array annotated with Chat, so every method mutates/appends to the underlying array.
-
-- Chat.setup([]) → an annotated empty conversation.
-- Each message appended is a Hash with keys:
-  - role: String or Symbol (e.g., 'user', 'system', 'assistant', …).
-  - content: String (or structured content passed through).
-
-Example
-```ruby
-chat = Chat.setup []
-chat.system "You are an assistant"
-chat.user   "Hi"
-puts chat.print
+...content...
 ```
 
-Chat uses Annotation. You can annotate/cloned arrays and preserve Chat behavior.
+2) **A Ruby builder** over an `Array` of `{role:, content:}` hashes.
+
+The important nuance: a chat is not just prompts. In addition to `user/system/assistant`, Scout-AI supports “control” roles that are interpreted by `LLM.chat` **before** the model is queried:
+
+- imports (`import`, `continue`, `last`)
+- files (`file`, `directory`, `image`, `pdf`)
+- workflow integration (`tool`, `task`, `inline_task`, `job`, `inline_job`)
+- knowledge base integration (`association`, `kb`)
+- MCP tool integration (`mcp`)
+- options (`endpoint`, `backend`, `model`, `format`, `persist`, `previous_response_id`, `option`, `sticky_option`)
+- conversation maintenance (`clear`, `skip`, `clear_tools`, `clear_associations`)
+
+This document is the reference for **all chat roles and options**, and how they behave.
+
+Related docs:
+
+- `doc/LLM.md` — how `LLM.ask` expands/executes chats and calls backends
+- `doc/Agent.md` — stateful agents and programmatic control loops
 
 ---
 
-## Adding messages
+## 1. Data model
 
-All helpers append a message:
+A chat is an array of messages.
 
-- message(role, content) — base append.
-- user(text), system(text), assistant(text).
-- import(file), continue(file) — declarative import markers for LLM.chat (see Interop).
-- file(path), directory(path) — inline content (see next section).
-- format(value) — set desired output format (e.g. :json, or JSON Schema Hash).
-- tool(workflow, task, inputs?) — register a Workflow task tool declaration (see Tools below).
-- task(workflow, task_name, inputs={}) — declare a Workflow task to run, converted to a job (Step) via LLM.chat.
-- inline_task(workflow, task_name, inputs={}) — like task but inlined result.
-- job(step), inline_job(step) — attach a precomputed Step’s result (file content or function call output).
-- association(name, path, options={}) — register a KnowledgeBase association (LLM will build a tool for it).
+Each message is a Hash:
 
-Utilities:
-- tag(content, name=nil, tag=:file, role=:user) — wrap content in a tagged block (e.g., <file name="…">…</file>) and append it as role (default :user).
-
----
-
-## Files, directories and tagging
-
-Use file/directory/tag to place content into the chat:
-
-- file(path) — appends the contents of path tagged as <file name="…">…</file>.
-- directory(path) — appends all files inside as a sequence of <file> tags.
-- tag(content, name=nil, tag=:file, role=:user) — manual variant to tag any text.
-
-Tagged content is respected by LLM.parse/LLM.chat and protected from unintended parsing/splitting.
-
----
-
-## Declaring tools, tasks and jobs
-
-Chat supports wiring external tools into conversations:
-
-- tool workflow task [input options] — declares a callable tool from a Workflow task. Example:
-  ```ruby
-  chat.tool "Baking", "bake_muffin_tray"
-  ```
-  LLM.ask will export this task as a function tool; when the model calls it, the function block (or the default runner) will run the job and feed the result back to the model.
-
-- task workflow task [input options] — enqueues a Workflow job to be produced before the conversation proceeds; replaces itself with a job marker.
-
-- inline_task workflow task [input options] — like task, but inlines the result (as a file-like message) for immediate context.
-
-- job(step) / inline_job(step) — attach an existing Step result. job inserts a function_call + tool output pair so models can reason over the output; inline_job inserts the raw result file.
-
-- association name path [options] — registers a KnowledgeBase association file as a tool (e.g., undirected=true, source/target formats). LLM will add a “children” style tool or per-association tool definition.
-
-These declarations are processed by LLM.chat (see Interop) to produce steps and tools before the model is queried.
-
----
-
-## Options, endpoint and formats
-
-Set transient options as messages; LLM.options will read them and merge into the ask options:
-
-- option(key, value) — arbitrary key/value (e.g., temperature).
-- endpoint(value) — named endpoint (merges with Scout.etc.AI[endpoint].yaml).
-- model(value) — backend model ID.
-- format(value) — request output format:
-  - :json or 'json_object' for JSON.
-  - JSON Schema Hash for structured object/array replies (Responses/OpenAI support).
-
-You can also insert a previous_response_id message to continue a Responses session.
-
-Note: Most options reset after an assistant turn, except previous_response_id which persists until overwritten.
-
----
-
-## Running a chat: ask/chat/json/json_format
-
-- ask(…): returns the assistant reply (String) by calling LLM.ask(LLM.chat(self), …).
-- respond(…): equivalent to ask(current_chat, …) when used through an Agent.
-- chat(…): calls ask with return_messages: true, appends the assistant reply to the conversation, and returns the reply content.
-- json(…): sets format :json, calls ask, parses JSON, and returns:
-  - obj['content'] if the parsed object is {"content": …}, else the object.
-- json_format(schema, …): sets format to the provided schema (Hash), calls ask, and parses the JSON accordingly. Returns obj or obj['content'] when applicable.
-
-These helpers adapt the conversation to common usage patterns: accumulate messages, call the model, and parse outputs when needed.
-
----
-
-## Persistence helpers and branching
-
-- print — pretty-prints the conversation (using LLM.print of the processed chat).
-- save(path, force=true) — writes print output. If path is a name (Symbol/String without path), it resolves via Scout.chats.
-- write(path, force=true) — alias writing with print content.
-- write_answer(path, force=true) — writes the last assistant answer only.
-- branch — returns a deep-annotated dup so you can explore branches without mutating the original.
-- shed — returns a Chat containing only the last message (useful for prompts that must include only the latest instruction).
-- answer — returns the content of the last message.
-
----
-
-## Interop with LLM.chat
-
-A Chat instance can be passed to LLM.ask by Chat#ask; internally it runs:
-
-1) LLM.chat(self) — expands the Array of messages into a pipeline:
-   - imports, clear, clean,
-   - tasks → produces dependencies (Workflow.produce),
-   - jobs → turns Steps into function calls or inline files,
-   - files/directories → expand into <file> tags.
-
-2) LLM.options to collect endpoint/model/format/etc.
-
-3) Backend ask with optional tool wiring (from tool/association declarations).
-
-Thus, your Chat can be both a declarative script (like a “chat file”) and a runnable conversation object.
-
----
-
-## CLI: using Chat with scout llm and scout agent
-
-The CLI uses the same message DSL and processing. Useful commands:
-
-- Ask an LLM:
-  - scout llm ask [options] [question]
-    - -t|--template <file_or_key> — load a prompt template; if it contains “???”, the trailing question replaces it; otherwise concatenates as a new user message.
-    - -c|--chat <chat_file> — open a conversation file; the response is appended to the file (using Chat.print).
-    - -i|--inline <file> — answer comments of the form “# ask: …” inside a source file; writes answers inline between “# Response start/end”.
-    - -f|--file <file> — prepend the file contents as a tagged <file> message; or embed STDIN/file where “...” appears in the question.
-    - -m|--model, -e|--endpoint, -b|--backend — select backend and model (merged with per-endpoint configs).
-    - -d|--dry_run — expand and print the conversation (LLM.print) without asking.
-
-- Ask via an Agent (workflow + knowledge base):
-  - scout agent ask [options] [agent_name] [question]
-    - Loads the agent from:
-      - Scout.workflows[agent_name] (workflow.rb) or
-      - Scout.chats[agent_name] or a directory with workflow.rb, knowledge_base/, start_chat.
-    - Same flags as llm ask; adds:
-      - -wt|--workflow_tasks list — export only these tasks to the agent as callable tools.
-
-- Auxiliary:
-  - scout llm template — list prompt templates (Scout.questions).
-  - scout llm server — minimal chat web UI over ./chats with a REST API (save/run lists).
-  - scout agent kb <agent_name> … — runs KnowledgeBase CLI pre-wired to the agent’s KB.
-
-This CLI uses the same LLM.chat pipeline and Chat.print/save semantics as the Ruby API.
-
----
-
-## Examples
-
-Create and print a minimal conversation
 ```ruby
-a = LLM::Agent.new
-a.start_chat.system 'you are a robot'
-a.user "hi"
-puts a.print
+{ role: "user", content: "Hello" }
 ```
 
-Compile messages with roles inline
+Roles are strings (symbols are accepted but are stringified).
+
+In Ruby, `Chat.setup(array)` annotates an array so it gains the builder methods (`user`, `system`, `file`, …).
+
 ```ruby
-text = <<~EOF
-system:
-
-you are a terse assistant that only write in short sentences
-
-assistant:
-
-Here is some stuff
-
-user: feedback
-
-that continues here
-EOF
-LLM.chat(text)  # → messages array ready to ask
-```
-
-Register and use a Workflow tool
-```ruby
-chat = Chat.setup []
-chat.user "Use the provided tool to learn the instructions of baking a tray of muffins. Don't give me your own recipe."
-chat.tool "Baking", "bake_muffin_tray"
-LLM.ask(chat)
-```
-
-Declare KnowledgeBase associations and ask
-```ruby
-chat = Chat.setup []
-chat.system "Query the knowledge base of familiar relationships to answer the question"
-chat.user "Who is Miki's brother in law?"
-chat.message(:association, "brothers #{datafile_test(:person).brothers} undirected=true")
-chat.message(:association, "marriages #{datafile_test(:person).marriages} undirected=true source=\"=>Alias\" target=\"=>Alias\"")
-LLM.ask(chat)
-```
-
-Request structured JSON
-```ruby
-chat = Chat.setup []
-chat.system "Respond in json format with a hash of strings as keys and string arrays as values, at most three in length"
-chat.user "What other movies have the protagonists of the original gost busters played on, just the top."
-chat.format :json
+chat = Chat.setup([])
+chat.system "You are a helpful assistant"
+chat.user "Say hi"
 puts chat.ask
 ```
 
-Iterate structured results with an Agent
+---
+
+## 2. Chat file syntax (parser rules)
+
+Chat files are parsed by `Chat.parse`.
+
+### 2.1 Role headers
+
+A **role header** is any line matching:
+
+```text
+^[a-z0-9_]+:.*$
+```
+
+Examples:
+
+```text
+user:
+assistant:
+endpoint: nano
+previous_response_id: resp_123
+```
+
+There are two forms:
+
+1) **Block form**:
+
+```text
+user:
+
+This is a multi-line user message.
+It continues until the next role header.
+```
+
+2) **Inline form** (single line):
+
+```text
+endpoint: nano
+model: gpt-5-nano
+```
+
+Inline headers become their own messages and do not “switch” the role for the following lines (except `previous_response_id`, see below).
+
+### 2.2 Special parser protections (to avoid accidental role-splitting)
+
+The parser tries hard to avoid splitting a message when content contains colons.
+
+Protected regions:
+
+- **Markdown code fences**: content between triple backticks is kept in the same message even if it contains `something:` lines.
+- **XML-style blocks**: if the text contains `<tag ...>` and later `</tag>`, the whole block is treated as protected.
+- **Square-bracket protection**: `[[ ... ]]` protects multi-line content that may include role-looking headers.
+  - The `[[` and `]]` markers are stripped.
+- **Command output shorthand**: lines like:
+  - `shell:-- ls {{{` become `<cmd_output cmd="ls">`
+  - `shell:-- ls }}}` become `</cmd_output>`
+
+### 2.3 `previous_response_id` nuance
+
+`previous_response_id: ...` is special: after an inline `previous_response_id`, the parser resets the next block back to `user`.
+
+This makes it convenient to append a new user question *after* a response id marker.
+
+---
+
+## 3. Expansion pipeline: what `LLM.chat` does to a chat
+
+When you call `LLM.ask(chat)` or `chat.ask`, Scout-AI first expands the chat via `LLM.chat`.
+
+Expansion order (important):
+
+1) **Imports** (`import`, `continue`, `last`)
+2) **Clear** (`clear`)
+3) **Clean** (drops empty messages and `skip`)
+4) **Tasks** (`task`, `inline_task`, `exec_task` → jobs)
+5) **Jobs** (`job`, `inline_job` → function_call/function_call_output or file)
+6) **Files** (`file`, `directory`, `image`, `pdf`)
+
+After this, backends may do another pass to extract tool definitions.
+
+---
+
+## 4. Role reference (chat file / Chat DSL)
+
+### 4.1 Standard conversational roles
+
+| Role | Meaning |
+|---|---|
+| `system` | System instructions / policy / persona |
+| `user` | User message |
+| `assistant` | Assistant message (usually produced by the model) |
+
+### 4.2 Imports and composition
+
+Imports are processed by `Chat.imports` during `LLM.chat`.
+
+| Role | Effect | Notes |
+|---|---|---|
+| `import` | Inline the referenced chat file(s) | Imports **all** messages from the imported file, except `previous_response_id` |
+| `continue` | Import **only the last non-empty message** from the referenced file | Useful to “continue from the last user/assistant turn” |
+| `last` | Import **only the last non-empty message**, after removing `previous_response_id` | Often used to grab the last assistant answer |
+
+Resolution rules for imported paths:
+
+- absolute paths work
+- relative paths are resolved relative to the current chat file
+- names may resolve via `Scout.chats[...]`
+
+Example:
+
+```text
+import: scout-ai/test_stdio
+continue: my_previous_chat
+last: summary_chat
+```
+
+### 4.3 Files and directories
+
+Files are processed by `Chat.files` during `LLM.chat`.
+
+| Role | Effect |
+|---|---|
+| `file` | Reads the file and inserts it as a tagged `<file name="...">...</file>` inside a `user` message |
+| `directory` | Expands to many `file` insertions for all files under the directory (recursive) |
+| `image` | Resolves to a path (not inlined). Responses backend will upload as base64 when possible |
+| `pdf` | Resolves to a path (not inlined). Responses backend will upload as base64 when possible |
+
+Example:
+
+```text
+user:
+
+Please review these files.
+
+directory: lib/scout/llm
+file: README.md
+image: test/data/cat.jpg
+```
+
+### 4.4 Workflow tools (function calling)
+
+There are two related mechanisms:
+
+1) **Expose tools** (so the model can call them)
+2) **Run tasks/jobs ahead of time** (so their outputs are available as context)
+
+#### `tool` — expose workflow tasks as callable tools
+
+`tool: <WorkflowName> [<task_name> [<input1> <input2> ...]]`
+
+- If you provide only the workflow name, all exported tasks are available as tools.
+- If you provide a task name, only that task is exposed.
+- If you provide input names, only those inputs are exposed in the JSON schema.
+- You can also provide defaults with `input=value`.
+
+Examples:
+
+```text
+tool: Baking
+tool: Baking bake_muffin_tray
+tool: Baking bake_muffin_tray blueberries=true
+tool: Baking bake_muffin_tray blueberries
+```
+
+#### `introduce` — inject workflow documentation into the chat
+
+`introduce: <WorkflowName>` expands into a `user` message containing the workflow documentation (`workflow.documentation`).
+
+This is useful when you want the LLM to “understand what the tools do”, not just have access to them.
+
+Example:
+
+```text
+introduce: Baking
+tool: Baking
+```
+
+#### `task`, `inline_task`, `exec_task` — run a workflow job during compilation
+
+`task:` lines are executed **before** the model call.
+
+Syntax:
+
+```text
+task: <WorkflowName> <task_name> key=value key2=value2
+inline_task: <WorkflowName> <task_name> key=value
+exec_task: <WorkflowName> <task_name> key=value
+```
+
+Behavior:
+
+- `task` → runs the workflow job and replaces itself with a `job:` marker.
+- `inline_task` → runs the workflow job and replaces itself with an `inline_job:` marker.
+- `exec_task` → executes the job immediately and inlines its output into a `user` message.
+
+#### `job` / `inline_job` — include a precomputed Step result
+
+If you already have a job path (a `Step`), you can embed it:
+
+- `inline_job` becomes `file:` (the result is inlined as `<file>`)
+- `job` becomes a pair of messages:
+  - `function_call` with `{name, arguments, id}`
+  - `function_call_output` with `{id, content}`
+
+This is how saved chats can preserve tool-call traces.
+
+### 4.5 Knowledge base tools
+
+Two ways:
+
+#### `association` — register a database from a file path
+
+`association: <name> <path> [options...]`
+
+Example:
+
+```text
+system:
+
+Query the knowledge base to answer.
+
+association: brothers test/data/person/brothers undirected=true
+association: marriages test/data/person/marriages undirected=true source="=>Alias" target="=>Alias"
+```
+
+This dynamically registers the database inside a temporary `KnowledgeBase` and exports tools for it.
+
+If a database has fields, an extra tool `<db>_association_details` is also exposed.
+
+#### `kb` — load an existing KnowledgeBase directory
+
+`kb: <knowledge_base_name_or_path> [db1 db2 ...]`
+
+This loads a KB via `KnowledgeBase.load` and exposes tools for all (or selected) databases.
+
+### 4.6 MCP tools
+
+`mcp: <url_or_stdio> [tool1 tool2 ...]`
+
+This loads tool definitions from an MCP server and makes them available as tools.
+
+Examples:
+
+```text
+mcp: http://localhost:8765
+mcp: stdio 'npx -y @modelcontextprotocol/server-filesystem ${pwd}'
+```
+
+If you list tool names after the URL, only those tools are exposed.
+
+### 4.7 Options and session control
+
+Options are extracted by `Chat.options` and merged into `LLM.ask` options.
+
+There are two categories:
+
+- **Sticky options**: persist across turns (until overridden)
+- **Transient options**: cleared after an `assistant` message
+
+#### Sticky options
+
+| Role | Meaning |
+|---|---|
+| `endpoint` | Named endpoint configuration (merged from `~/.scout/etc/AI/<endpoint>`) |
+| `backend` | Backend selector (`responses`, `openai`, `ollama`, `bedrock`, …) |
+| `model` | Model id for the backend |
+| `agent` | Agent name to load (see doc/Agent.md) |
+| `previous_response_id` | Continue a Responses API conversation session |
+
+#### Transient options
+
+| Role | Meaning |
+|---|---|
+| `format` | Output format: `:json`, `json_object`, or a JSON schema hash |
+| `persist` | Cache control for `LLM.ask` (see `doc/LLM.md`) |
+| `option` | Generic `key value` (cleared after assistant) |
+| `sticky_option` | Generic `key value` (persists across assistant turns) |
+
+Examples:
+
+```text
+endpoint: nano
+model: gpt-5-nano
+format: json
+
+option: websearch true
+sticky_option: endpoint anthropic
+previous_response_id: resp_034e...
+```
+
+#### `websearch` (Responses backend)
+
+If a message with role `websearch` is present, or if you pass option `websearch: true`, the Responses backend will include the `web_search_preview` tool.
+
+Example:
+
+```text
+endpoint: deep
+websearch: true
+
+user:
+
+Find current information about ...
+```
+
+### 4.8 Maintenance roles
+
+| Role | Meaning |
+|---|---|
+| `clear` | Drop all messages *before* the last `clear:` marker |
+| `skip` | Drop this message |
+| `clear_tools` | Remove all previously declared tools (in this compilation) |
+| `clear_associations` | Remove all previously declared associations (in this compilation) |
+
+---
+
+## 5. Running a chat (Ruby)
+
+### 5.1 `ask` vs `chat`
+
+- `chat.ask(...)` → returns assistant output (string)
+- `chat.chat(...)` → asks with `return_messages: true` and appends the resulting message trace to the chat
+
+### 5.2 JSON helpers
+
 ```ruby
-agent = LLM::Agent.new
-agent.iterate("List the 3 steps to bake bread") do |step|
-  puts "- #{step}"
-end
+chat.format :json
+obj = chat.json
+```
+
+Or with a schema:
+
+```ruby
+obj = chat.json_format({
+  name: 'answer',
+  type: 'object',
+  properties: {content: {type: 'array', items: {type: 'string'}}},
+  required: ['content'],
+  additionalProperties: false,
+})
 ```
 
 ---
 
-Chat provides an ergonomic, declarative way to build conversations in code and on disk. It composes seamlessly with LLM.chat/ask, Workflows (as tools), KnowledgeBases (as associations), and the Scout CLI, making it easy to author, run, and persist agentic interactions.
+## 6. Using chat files from the CLI
+
+Chat files are primarily used via:
+
+```bash
+scout-ai llm ask --chat my.chat "your question"
+```
+
+Behavior:
+
+- the file is parsed into messages
+- the model is called
+- the assistant reply (and tool call trace when present) is appended back to the file
+
+You can keep typing into the file in an editor and re-run the command.
+
+---
+
+## 7. Example chat file (with tools + previous_response_id)
+
+```text
+user:
+
+endpoint: nano
+agent: Baking
+
+bake some muffins using bake_muffin_tray, use blueberries
+
+function_call: {"name":"bake_muffin_tray","arguments":{"blueberries":true},"id":"call_123"}
+function_call_output: {"name":"bake_muffin_tray","content":"...","id":"call_123"}
+
+assistant:
+
+Blueberry muffins are in the oven.
+
+previous_response_id: resp_034e...
+
+Can you also bake one without blueberries?
+```
+
+Notes:
+
+- `endpoint:` and `agent:` are parsed as their own messages even when written inside a `user:` block.
+- `function_call` / `function_call_output` are how tool traces are persisted in chat logs.
+- `previous_response_id` enables session continuation for the Responses backend.
+
+---
+
+## 8. Summary
+
+Use `Chat` when you want:
+
+- a reproducible, append-only conversation artifact on disk
+- a safe way to inline files/directories
+- a declarative way to expose workflow/KB/MCP tools
+- a convenient place to store endpoint/model/options per conversation
+
+The key to using chat files effectively is understanding the “control roles” above and the compilation order.
