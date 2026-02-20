@@ -90,8 +90,12 @@ agent.image "figure.png"
 agent.pdf "supplement.pdf"
 ```
 
-All the special chat-file roles described in `doc/Chat.md` work the same way from an Agent: `import`, `continue`, `tool`, `task`, `mcp`, etc.
+All the special chat-file roles described in `doc/Chat.md` work the same way from an Agent: `import`, `continue`, `tool`, `task`, `mcp`, etc. These use the `message` builder, which is a more general way to add messages to the chat. These are equivalent:
 
+```ruby
+agent.pdf "supplement.pdf"
+agent.message :pdf, "supplement.pdf"
+```
 ---
 
 ## 4. Tool wiring (Workflow + KnowledgeBase)
@@ -314,8 +318,10 @@ If the Proc returns truthy, the call is retried.
 Agents are primarily used from:
 
 ```bash
-scout-ai agent ask <agent_name> "your question"
-scout-ai agent ask -c my.chat <agent_name> "continue this conversation"
+scout-ai agent ask <agent_name> your question
+scout-ai agent ask -c my.chat <agent_name> continue this conversation
 ```
+
+Note how the question does not need to be in quotes.
 
 See `doc/Chat.md` for chat file roles and `doc/LLM.md` for endpoint configuration.

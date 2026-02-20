@@ -262,6 +262,12 @@ The main “stateless” CLI.
 scout-ai llm ask -e nano "Say hi"
 ```
 
+For convenience prompt does not need quotes.
+
+```bash
+scout-ai llm ask -e nano Say hi
+```
+
 Useful flags:
 
 - `-e/--endpoint <name>`
@@ -273,12 +279,20 @@ Useful flags:
 - `-f/--file <path>` — inline a file into the prompt
 - `-d/--dry_run` — print the compiled conversation (no model call)
 
+The configuration files under etc/config can be used to setup default
+endpoints or models.
+
+```config
+# ~/.scout/etc/config
+endpoint nano ask
+```
+
 ### 7.2 `scout-ai agent ask`
 
 The “agent-aware” CLI.
 
 ```bash
-scout-ai agent ask Baking "Bake a tray of muffins"
+scout-ai agent ask Baking Bake a tray of muffins
 ```
 
 It loads the agent (workflow + knowledge base + start_chat) and runs a stateful conversation.
@@ -308,7 +322,7 @@ model: gpt-5-nano
 2) Ask from the CLI:
 
 ```bash
-scout-ai llm ask -e nano "Say hi"
+scout-ai llm ask -e nano Say hi
 ```
 
 3) Use a chat file with a workflow tool:
