@@ -51,9 +51,9 @@ module LLM
       {role: 'assistant', tool_calls: [tool_call]}
     end
 
-    def self.format_tool_output(message)
+    def self.format_tool_output(message, last_id = nil)
       info = JSON.parse(message[:content])
-      id = info.delete('call_id') || info.dig('id')
+      id = info.delete('call_id') || info.dig('id') || last_id
       info['role'] = 'tool'
       info['tool_call_id'] = id
       info
@@ -73,7 +73,7 @@ module LLM
         tool_calls = tool_calls.collect{|tool_call| self.parse_tool_call(tool_call) }
         LLM.process_calls(tools, tool_calls, &block)
       else
-       [message]
+        [IndiferentHash.setup(message)]
       end
     end
   end

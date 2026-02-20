@@ -380,7 +380,7 @@ module LLM
           eee output
           raise 
         end
-      end.compact.flatten
+      end.compact.flatten.collect{|o| IndiferentHash.setup o }
 
       options[:previous_response_id] = response['id'] unless options[:previous_response].to_s == 'false' || FalseClass === options[:previous_response_id]
 

@@ -30,6 +30,10 @@ module Chat
     message(:file, file)
   end
 
+  def introduce(workflow)
+    message(:introduce, workflow)
+  end
+
   def pdf(file)
     message(:pdf, file)
   end
