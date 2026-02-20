@@ -1,22 +1,27 @@
-require_relative 'default'
-require 'openai'
+require_relative 'openai'
 
 module LLM
-  module VLLM
-    extend Backend
-    TAG='vllm'
-    DEFAULT_MODEL='vllm'
+  # vLLM exposes an OpenAI-compatible Chat Completions API.
+  #
+  # We reuse the OpenAI backend behaviour and only tweak tool-call parsing.
+  module VLLMMethods
+    include OpenAIMethods
 
-    def self.parse_tool_call(info)
-      arguments, call_id, id, name = IndiferentHash.process_options info.dup, :arguments, :call_id, :id, :name
+    def parse_tool_call(info)
+      tool_call = super
+      name = tool_call[:name].to_s
       name.sub!(/[^a-zA-Z_]+channel[^a-zA-Z_]+[a-zA-Z_]+/, '')
-      arguments = begin
-                    JSON.parse arguments 
-                  rescue
-                    Log.debug 'Parsing call error. Tool call:' + "\n" + JSON.pretty_generate(info) 
-                  end if String === arguments
-      {name: name, arguments: arguments, id: call_id || id}
+      tool_call.merge(name: name)
     end
+  end
 
+  module VLLM
+    TAG = 'vllm'
+    DEFAULT_MODEL = 'vllm'
+
+    class << self
+      prepend VLLMMethods
+      include Backend::ClassMethods
+    end
   end
 end
