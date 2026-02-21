@@ -1,11 +1,11 @@
-require_relative 'openai'
+require_relative 'responses'
 
 module LLM
-  # vLLM exposes an OpenAI-compatible Chat Completions API.
+  # vLLM exposes an OpenAI-compatible Responses API.
   #
-  # We reuse the OpenAI backend behaviour and only tweak tool-call parsing.
+  # We reuse the Responses backend behaviour and only tweak tool-call parsing.
   module VLLMMethods
-    include OpenAIMethods
+    include ResponsesMethods
 
     def parse_tool_call(info)
       tool_call = super
