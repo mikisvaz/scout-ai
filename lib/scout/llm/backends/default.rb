@@ -41,7 +41,7 @@ module LLM
 
         url ||= Scout::Config.get(:url, "#{tag}_ask", :ask, tag, env: "#{tag.upcase}_URL")
         key ||= LLM.get_url_config(:key, url, "#{tag}_ask", :ask, tag, env: "#{tag.upcase}_KEY")
-        model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: "#{tag.upcase}_MODEL", default: default_model)
+        model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: "#{tag.upcase}_MODEL,MODEL", default: default_model)
 
         { url: url, key: key, model: model }.reject { |_k, v| v.nil? }
       end
@@ -477,7 +477,7 @@ module LLM
 
       def embed_query(client, text, parameters = {})
         parameters[:text] = text
-        response = client.embeddings(parameters)
+        response = client.embeddings(parameters: parameters)
         raise response['error']['message'] if response.include? 'error'
         response.dig('data', 0, 'embedding')
       end
