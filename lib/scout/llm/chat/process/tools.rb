@@ -152,8 +152,7 @@ module Chat
 
         raise "Workflow not found #{workflow_name}" if workflow.nil?
 
-        {role: :user, content: <<-EOF}
-
+        content = <<-EOF
 You have access to tools from workflow '#{workflow.name}'. 
 Below is the documentation of the workflow:
 
@@ -161,6 +160,8 @@ Below is the documentation of the workflow:
 
 #{workflow.documentation[:description]}
         EOF
+
+        {role: :user, content: content}
       elsif message[:role] == 'kb'
         knowledge_base_name, *databases = content_tokens(message)
         databases = nil if databases.empty?

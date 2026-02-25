@@ -92,7 +92,7 @@ module LLM
     jobname = parameters.delete :jobname
     begin
       exec_type = parameters[:exec_type]
-      job = workflow.job(task_name, jobname, parameters)
+      job = workflow.job(task_name.to_sym, jobname, parameters)
       if workflow.exec_exports.include?(task_name.to_sym) || parameters[:exec_type].to_s == 'exec'
         job.exec
       else

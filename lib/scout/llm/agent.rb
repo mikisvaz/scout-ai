@@ -139,11 +139,15 @@ You have access to the following databases associating entities:
       workflow_path = Scout.workflows[agent_name]
       agent_path = Scout.var.Agent[agent_name]
       agent_path = Scout.chats[agent_name] unless agent_path.exists?
+      agent_path = Scout.chats.Agent[agent_name] unless agent_path.exists?
 
       workflow = if workflow_path.exists?
                    Workflow.require_workflow agent_name
                  elsif agent_path.workflow.find_with_extension("rb").exists?
                    Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
+                 elsif agent_path.python.exists? && agent_path.python.glob('*.py').any?
+                   require 'scout/workflow/python'
+                   PythonWorkflow.load_directory agent_path.python, 'ScoutAgent'
                  end
 
       knowledge_base = if agent_path.knowledge_base.exists?
@@ -156,8 +160,10 @@ You have access to the following databases associating entities:
                Chat.setup LLM.chat(agent_path.start_chat.find)
              elsif workflow_path.start_chat.exists?
                Chat.setup LLM.chat(workflow_path.start_chat.find)
+             elsif agent_path.start_chat.exists?
+               Chat.setup LLM.chat(agent_path.start_chat.find)
              elsif workflow && workflow.documentation[:description]
-               chat = Chat.setup([ {role: 'introduce', content: workflow.name} ])
+               Chat.setup([ {role: 'introduce', content: workflow.name} ])
              end
 
       LLM::Agent.new **options.merge(workflow: workflow, knowledge_base: knowledge_base, start_chat: chat)

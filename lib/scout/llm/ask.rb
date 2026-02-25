@@ -11,7 +11,7 @@ module LLM
     if agent_name
       agent = LLM::Agent.load_agent agent_name
 
-      return agent.ask(question, options)
+      return agent.ask(agent.start_chat + question, options)
     end
 
     endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
