@@ -71,20 +71,18 @@ You have access to the following databases associating entities:
 
       tools = options[:tools] || {}
       tools = tools.merge @other_options[:tools] if @other_options[:tools]
-      options[:tools] = tools
       begin
 
         if workflow || knowledge_base
           tools.merge!(LLM.workflow_tools(workflow)) if workflow
           tools.merge!(LLM.knowledge_base_tool_definition(knowledge_base)) if knowledge_base and knowledge_base.all_databases.any?
-          options[:tools] = tools
         end
 
         messages.delete_if{|info| info[:role] == 'agent' }
 
         if workflow && workflow.tasks.include?(:ask)
           options.each do |key,value|
-            messages.unshift({role: :option, content: "#{key} #{value}"}) 
+            messages.push(IndiferentHash.setup({role: :option, content: "#{key} #{value}"})) 
           end
 
           job = workflow.job(:ask, chat: Chat.print(messages))
@@ -97,6 +95,7 @@ You have access to the following databases associating entities:
             Chat.answer messages
           end
         else
+          options[:tools] = tools
           LLM.ask messages, @other_options.merge(log_errors: true).merge(options).merge(agent: false)
         end
       rescue
