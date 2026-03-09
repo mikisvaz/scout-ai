@@ -1,5 +1,5 @@
 module LLM
-  @max_content_length = Scout::Config.get(:max_content_length, :llm_tools, :tools, :llm, :ask, default: 30_000)
+  @max_content_length = Scout::Config.get(:max_content_length, :llm_tools, :tools, :llm, :ask, default: 100_000)
   self.singleton_class.attr_accessor :max_content_length
 
   def self.call_id_name_and_arguments(tool_call)
