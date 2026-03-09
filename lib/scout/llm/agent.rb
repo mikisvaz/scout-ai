@@ -83,6 +83,10 @@ You have access to the following databases associating entities:
         messages.delete_if{|info| info[:role] == 'agent' }
 
         if workflow && workflow.tasks.include?(:ask)
+          options.each do |key,value|
+            messages.unshift({role: :option, content: "#{key} #{value}"}) 
+          end
+
           job = workflow.job(:ask, chat: Chat.print(messages))
           job.produce
           
@@ -145,6 +149,7 @@ You have access to the following databases associating entities:
                    Workflow.require_workflow agent_name
                  elsif agent_path.workflow.find_with_extension("rb").exists?
                    Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
+                   Workflow.workflows.last
                  elsif agent_path.python.exists? && agent_path.python.glob('*.py').any?
                    require 'scout/workflow/python'
                    PythonWorkflow.load_directory agent_path.python, 'ScoutAgent'
