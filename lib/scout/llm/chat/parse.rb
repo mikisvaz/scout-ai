@@ -90,7 +90,7 @@ module Chat
 
         current_content = current_content.strip if current_content
         # Save current message if any
-        messages << { role: current_role, content: current_content }
+        messages << { role: current_role, content: current_content } if current_content && ! current_content.empty?
 
         if inline_content.empty?
           # Block message
@@ -98,7 +98,7 @@ module Chat
           current_content = ""
         else
           # Inline message + next block is default role
-          messages << { role: role, content: inline_content }
+          messages << { role: role, content: inline_content } if inline_content && ! inline_content.empty?
           current_role = 'user' if role == 'previous_response_id'
           current_content = ""
         end
@@ -112,7 +112,7 @@ module Chat
     end
 
     # Final message
-    messages << { role: current_role || default_role, content: current_content.strip }
+    messages << { role: current_role || default_role, content: current_content.strip } if current_content && ! current_content.empty?
 
     messages
   end
