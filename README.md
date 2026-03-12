@@ -236,7 +236,7 @@ The ExTRI2 Workflow (Rbbt‑Workflows) uses HuggingfaceModel to score TRI senten
 - Adds fields “Valid score” and “Valid” to the TSV
 - Runs a second SequenceClassification model to produce “MoR” and “MoR scores”
 
-See workflows/ExTRI2/workflow.rb in that repository for the full implementation.
+See workflow.rb in that repository for the full implementation. http://github.com/Rbbt-Workflows/ExTRI2
 
 
 ## Command‑Line Interface

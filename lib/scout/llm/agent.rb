@@ -5,6 +5,10 @@ module LLM
     LLM::Agent.new(...)
   end
 
+  def self.load_agent(...)
+    LLM::Agent.load_agent(...)
+  end
+
   class Agent
     attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options
     def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
@@ -37,35 +41,29 @@ module LLM
       end * "\n"
     end
 
-    def system_prompt
-      system = @system
-      system = [] if system.nil?
-      system = [system] unless system.nil? || system.is_a?(Array)
-      system = [] if system.nil?
+    #def system_prompt
+    #  system = @system
+    #  system = [] if system.nil?
+    #  system = [system] unless system.nil? || system.is_a?(Array)
+    #  system = [] if system.nil?
 
-      if @knowledge_base and @knowledge_base.all_databases.any?
-        system << <<-EOF
-You have access to the following databases associating entities:
-        EOF
+    #  if @knowledge_base and @knowledge_base.all_databases.any?
+    #    system << <<-EOF
+ # Youhave access to the following databases associating entities:
+    #    EOF
 
-        knowledge_base.all_databases.each do |database|
-          system << knowledge_base.markdown(database)
-        end
-      end
+    #    knowledge_base.all_databases.each do |database|
+    #      system << knowledge_base.markdown(database)
+    #    end
+    #  end
 
-      system * "\n"
-    end
-
-    def prompt(messages)
-      if system_prompt
-        [format_message(system_prompt, "system"), messages.collect{|m| format_message(m)}.flatten] * "\n"
-      else
-        messages.collect{|m| format_message(m)}.flatten
-      end
-    end
+    #  system * "\n"
+    #end
 
     # function: takes an array of messages and calls LLM.ask with them
-    def ask(messages, options = {})
+    def ask(messages = nil, options = {})
+      messages, options = nil, messages if options.empty? && Hash === messages
+      messages = current_chat if messages.nil?
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
 
@@ -86,6 +84,7 @@ You have access to the following databases associating entities:
           end
 
           job = workflow.job(:ask, chat: Chat.print(messages))
+          job.clean
           job.produce
           
           messages = LLM.chat job.path
@@ -112,6 +111,12 @@ You have access to the following databases associating entities:
         end
       end
     end
+
+    def prompt(messages, options = {})
+      messages = LLM.chat messages if String === messages
+      ask current_chat + messages, options
+    end
+
 
     def self.load_from_path(path, workflow: nil, knowledge_base: nil, chat: nil)
       workflow_path = path['workflow.rb'].find
@@ -148,7 +153,6 @@ You have access to the following databases associating entities:
                    Workflow.require_workflow agent_name
                  elsif agent_path.workflow.find_with_extension("rb").exists?
                    Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
-                   Workflow.workflows.last
                  elsif agent_path.python.exists? && agent_path.python.glob('*.py').any?
                    require 'scout/workflow/python'
                    PythonWorkflow.load_directory agent_path.python, 'ScoutAgent'

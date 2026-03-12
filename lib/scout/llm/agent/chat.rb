@@ -43,6 +43,7 @@ module LLM
     def json(...)
       current_chat.format :json
       output = ask(current_chat, ...)
+      current_chat.format nil
       obj = JSON.parse output
       if (Hash === obj) and obj.keys == ['content']
         obj['content']

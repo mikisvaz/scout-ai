@@ -66,6 +66,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   test_ollama
   test_gepeto
 
+  visual_code
+
   chat_doc
  }
  doc=doc filter="*"{

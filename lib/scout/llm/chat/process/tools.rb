@@ -1,4 +1,18 @@
 module Chat
+
+  def self.load_workflow(workflow)
+    workflow = begin
+                 Kernel.const_get workflow
+               rescue
+                 if Scout.chats.Agent[workflow]['workflow.rb'].exists?
+                   Workflow.require_workflow_file Scout.chats.Agent[workflow]['workflow.rb'].find
+                   Workflow.main || Workflow.workflows.last
+                 else
+                   Workflow.require_workflow(workflow)
+                 end
+               end
+  end
+
   def self.tasks(messages, original = nil)
     jobs =  []
     new = messages.collect do |message|
@@ -11,11 +25,7 @@ module Chat
         jobname = options.delete :jobname
 
         if String === workflow
-          workflow = begin
-                       Kernel.const_get workflow
-                     rescue
-                       Workflow.require_workflow(workflow)
-                     end
+          workflow = Chat.load_workflow workflow
         end
 
         job = workflow.job(task, jobname, options)
@@ -129,7 +139,7 @@ module Chat
           require 'rbbt/workflow/remote_workflow'
           workflow = RemoteWorkflow.new workflow_name
         else
-          workflow = Workflow.require_workflow workflow_name
+          workflow = Chat.load_workflow workflow_name
         end
 
         if task_name
