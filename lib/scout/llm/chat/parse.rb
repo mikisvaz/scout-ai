@@ -19,12 +19,14 @@ module Chat
       # Detect protected blocks
       if stripped.start_with?("```")
         if in_protected_block
-          in_protected_block = false
-          protected_block_type = nil
-          current_content << "\n" << line unless line.strip.empty?
+          if protected_block_type == :ticks
+            in_protected_block = false
+            protected_block_type = nil
+            current_content << "\n" << line unless line.strip.empty?
+          end
         else
           in_protected_block = true
-          protected_block_type = :square
+          protected_block_type = :ticks
           current_content << "\n" << line unless line.strip.empty?
         end
         next
@@ -81,6 +83,7 @@ module Chat
         protected_stack.push(tag)
         in_protected_block = true
         protected_block_type = :xml
+        next
       end
 
       # Match a new message header
