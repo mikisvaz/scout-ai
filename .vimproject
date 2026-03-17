@@ -6,6 +6,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai
  }
  chats=chats filter="*"{
+  test_agent
   glm-5
 
   system=system{
@@ -61,7 +62,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    web
   }
 
-  test_agent
   test_antropic
   test_ollama
   test_gepeto
@@ -86,13 +86,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    }
    llm=llm{
     utils.rb
-    tools.rb
-    tools=tools{
-     mcp.rb
-     workflow.rb
-     knowledge_base.rb
-     call.rb
-    }
     chat.rb
     chat=chat{
      annotation.rb
@@ -104,6 +97,13 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
       clear.rb
       options.rb
      }
+    }
+    tools.rb
+    tools=tools{
+     mcp.rb
+     workflow.rb
+     knowledge_base.rb
+     call.rb
     }
 
     backends=backends{

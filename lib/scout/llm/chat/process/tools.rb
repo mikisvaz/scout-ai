@@ -161,6 +161,7 @@ module Chat
 
         raise "Workflow not found #{workflow_name}" if workflow.nil?
 
+        next unless workflow.documentation.empty?
         content = <<-EOF
 You have access to tools from workflow '#{workflow.name}'. 
 Below is the documentation of the workflow:
