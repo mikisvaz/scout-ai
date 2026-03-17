@@ -68,7 +68,11 @@ module LLM
       model ||= @model if model
 
       tools = options[:tools] || {}
-      tools = tools.merge @other_options[:tools] if @other_options[:tools]
+      if other_tools = @other_options[:tools]
+        other_tools = JSON.parse other_tools if String === other_tools
+        tools = tools.merge other_tools
+      end
+
       begin
 
         if workflow || knowledge_base
