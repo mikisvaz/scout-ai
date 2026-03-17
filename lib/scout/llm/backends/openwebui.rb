@@ -47,7 +47,11 @@ module LLM
                    raise 'Get not supported'
                  end
 
-      JSON.parse(response.body)
+      if response.body.nil? || response.body == 'null'
+        raise "No response body: #{JSON.pretty_generate(response)}"
+      else
+        JSON.parse(response.body)
+      end
     end
 
     def parse_tool_call(info)

@@ -408,6 +408,10 @@ module LLM
         output
       end
 
+      def log_response(response)
+        #Log.debug  "Response:\n" + JSON.pretty_generate(response.except(:tools))
+      end
+
       def ask(question, options = {}, &block)
         original_options = options.dup
 
@@ -426,6 +430,10 @@ module LLM
                      Log.debug 'Asking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
                      raise $!
                    end
+
+        raise 'No response' if response.nil?
+
+        log_response response
 
         begin
           output = process_response messages, response, tools, options, &block
