@@ -372,6 +372,15 @@ module LLM
       def process_response(messages, response, tools, options, &block)
         Log.debug "Response: #{Log.fingerprint response}"
 
+        tool_calls = response['output'].collect do |output|
+          case output['type']
+          when 'function_call', 'mcp_call'
+            self.parse_tool_call(output.dup)
+          end
+        end.compact
+
+        tool_call_outputs = LLM.process_calls(tools, tool_calls, &block)
+
         output = response['output'].collect do |output|
           case output['type']
           when 'message'
@@ -384,13 +393,7 @@ module LLM
           when 'reasoning'
             next
           when 'function_call', 'mcp_call'
-            tool_call = self.parse_tool_call(output.dup)
-            begin
-              LLM.process_calls(tools, [tool_call.dup], &block)
-            rescue Exception
-              Log.debug 'Processing response error. Response:' + "\n" + JSON.pretty_generate(output)
-              raise $!
-            end
+            [tool_call_outputs.shift, tool_call_outputs.shift]
           when 'web_search_call'
             next
           else

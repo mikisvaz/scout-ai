@@ -48,8 +48,7 @@ module Chat
       end
     end.flatten
 
-    #Workflow.produce(jobs) if jobs.any?
-    jobs.each{|job| job.run }
+    Workflow.produce(jobs) if jobs.any?
 
     new
   end

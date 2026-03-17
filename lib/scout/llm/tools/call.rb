@@ -20,7 +20,8 @@ module LLM
   def self.process_calls(tools, calls, &block)
     max_content_length = LLM.max_content_length
     IndiferentHash.setup tools
-    calls.collect do |tool_call|
+
+    tool_call_content = calls.collect do |tool_call|
       tool_call = IndiferentHash.setup tool_call
       tool_call_id, function_name, function_arguments = call_id_name_and_arguments(tool_call)
 
@@ -52,6 +53,8 @@ module LLM
                           end
 
       content = case function_response
+                when Step
+                  function_response
                 when String
                   function_response
                 when nil
@@ -64,13 +67,50 @@ module LLM
 
       content = content.to_s if Numeric === content
 
-      Log.high "Called #{function_name}: " + Log.fingerprint(content)
+      function_call = tool_call.dup
+      function_call = {'name' => tool_call['name']}.merge tool_call.except('name')
 
-      if content.length > max_content_length
+      function_call['id'] = function_call.delete('call_id') if function_call.dig('call_id')
+
+      [
+        function_name,
+        tool_call_id,
+        IndiferentHash.setup({role: "function_call", content: function_call.to_json}),
+        content
+      ]
+    end
+
+    jobs = tool_call_content.collect{|p| p.last }.select{|c| Step === c }
+    
+    if jobs.reject{|job| job.done? }.any?
+      begin
+        Workflow.produce jobs
+      rescue
+      end
+    end
+
+    tool_call_content.collect do |function_name,tool_call_id,tool_call,content|
+      if Step === content
+        if content.done?
+          content = content.load.to_json if content.done?
+        elsif content.error? && content.exception
+          content = {exception: content.exception.message, stack: content.exception.backtrace }.to_json
+        else
+          begin
+            content = content.run.to_json
+          rescue
+            content = {exception: $!.message, stack: $!.backtrace }.to_json
+          end
+        end
+      end
+
+      if (String === content) && content.length > max_content_length
         exception_msg = "Function #{function_name} called with parameters #{Log.fingerprint function_arguments} returned #{content.length} characters, which is more than the maximum of #{max_content_length}. To protect the model context window this result was not returned."
         Log.high exception_msg
         content = {exception: exception_msg, stack: caller}.to_json
       end
+
+      Log.high "Called #{function_name}: " + Log.fingerprint(content)
 
       response_message = {
         name: function_name,
@@ -78,14 +118,10 @@ module LLM
         id: tool_call_id
       }
 
-      function_call = tool_call.dup
-      function_call = {'name' => tool_call['name']}.merge tool_call.except('name')
 
-      function_call['id'] = function_call.delete('call_id') if function_call.dig('call_id')
-
-      [
-        {role: "function_call", content: function_call.to_json},
-        {role: "function_call_output", content: response_message.to_json},
+      [ 
+        tool_call,
+        IndiferentHash.setup({role: "function_call_output", content: response_message.to_json})
       ]
     end.flatten
   end

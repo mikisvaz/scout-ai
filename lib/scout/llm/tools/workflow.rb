@@ -99,9 +99,10 @@ module LLM
         raise ScoutException, 'Potential recursive call' if parameters[:allow_recursive] != 'true' &&
           (job.running? and job.info[:pid] == Process.pid)
 
-        Workflow.produce(job)
-        job.join
-        job.load
+        #Workflow.produce(job)
+        #job.join
+        #job.load
+        job
       end
     rescue ScoutException
       return $!
