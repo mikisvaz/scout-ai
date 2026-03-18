@@ -23,6 +23,8 @@ module LLM
       raise "Endpoint not found #{endpoint}"
     end
 
+    options[:meta] = Chat.meta messages
+
     if options[:backend].to_s == 'responses' && options[:previous_response].to_s != 'false'
       messages = Chat.clear(messages, 'previous_response_id')
     else

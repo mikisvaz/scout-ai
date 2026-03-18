@@ -24,6 +24,7 @@ module Chat
     chat.reject do |msg|
       IndiferentHash.setup msg
       msg[:role].to_s == 'previous_response_id'
+      msg[:role].to_s == 'meta'
     end
   end
 end

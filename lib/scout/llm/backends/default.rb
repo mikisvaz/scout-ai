@@ -334,29 +334,20 @@ module LLM
 
         raise "Output format unknown #{output}" unless (Hash === output.last) && output.last.include?(:role)
 
-        output = if output.last[:role] == 'function_call_output'
-                   begin
-                     case previous_response_id
-                     when String
-                       output + ask(output, options.except(:tool_choice).merge(return_messages: true, previous_response_id: previous_response_id), &block)
-                     else
-                       output + ask(messages + output, options.except(:tool_choice).merge(return_messages: true), &block)
-                     end
-                   rescue Exception
-                     raise $!
-                   end
-                 else
-                   output
-                 end
-
-        output = if output.last[:role] == :previous_response_id
-                   output
-                 elsif previous_response_id
-                   previous_response_message = { role: :previous_response_id, content: previous_response_id } if previous_response_id
-                   output + [previous_response_message]
-                 else
-                   output
-                 end
+        if output.last[:role] == 'function_call_output'
+          begin
+            case previous_response_id
+            when String
+              output + ask(output, options.except(:tool_choice).merge(return_messages: true, previous_response_id: previous_response_id), &block)
+            else
+              output + ask(messages + output, options.except(:tool_choice).merge(return_messages: true), &block)
+            end
+          rescue Exception
+            raise $!
+          end
+        else
+          output
+        end
       end
 
       def parse_tool_call(info)
@@ -366,7 +357,7 @@ module LLM
                     rescue
                       Log.debug 'Parsing call error. Tool call:' + "\n" + JSON.pretty_generate(info)
                     end if String === arguments
-        { name: name, arguments: arguments, id: call_id || id }
+                    { name: name, arguments: arguments, id: call_id || id }
       end
 
       def process_response(messages, response, tools, options, &block)
@@ -408,14 +399,59 @@ module LLM
         output
       end
 
-      def log_response(response)
-        #Log.debug  "Response:\n" + JSON.pretty_generate(response.except(:tools))
+      META = IndiferentHash.setup({})
+      def log_response(response, current_meta = nil)
+        current_meta = {} if current_meta.nil?
+
+        pattern = {
+          'pt+': [['usage','prompt_tokens']],
+          'ct+': [['usage','completion_tokens']],
+          't+': [['usage','total_tokens']],
+        }
+
+        meta = {}
+        pattern.each do |name,key_list|
+          name = name.to_s
+          key_list.each do |keys|
+            value = response.dig *keys
+            next unless value
+
+            if name.end_with?('+')
+              name = name[0..-2]
+              meta[name] = value
+              session_name = name + '_s'
+
+              meta[session_name] ||= Thread.current[session_name] || 0
+              meta[session_name] += value
+
+              Thread.current[session_name] = meta[session_name]
+              meta.delete name if meta[name] == meta[session_name]
+            else
+              meta[name] = value
+            end
+          end
+        end
+
+        new = {}
+        meta.each do |name,value|
+          if name.end_with?('_s')
+            chat_name = name.sub(/_s$/,'_c')
+            current_value = current_meta[chat_name] || current_meta[name] || 0
+            new[chat_name] = current_value + value
+          end
+        end
+
+        meta.merge! new
+
+        meta
       end
 
       def ask(question, options = {}, &block)
         original_options = options.dup
 
-        return_messages = IndiferentHash.process_options options, :return_messages, return_messages: false
+        return_messages, log_response, current_meta = IndiferentHash.process_options options, 
+          :return_messages, :log_response, :meta,
+          return_messages: false, log_response: true
 
         messages = self.messages question, options
 
@@ -433,22 +469,24 @@ module LLM
 
         raise 'No response' if response.nil?
 
-        log_response response
+        output = process_response messages, response, tools, options, &block
 
-        begin
-          output = process_response messages, response, tools, options, &block
+        meta = self.log_response response, current_meta if log_response
 
-          output = chain_tools messages, output, tools, options.merge(client: client, tools: tools)
+        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, meta: meta)
 
-          if return_messages
-            Chat.setup output
-          else
-            output = LLM.purge(output)
-            return '' if output.empty?
-            LLM.purge(output).last['content']
-          end
-        rescue
-          raise $!
+        output.unshift({role: :meta, content: Chat.serialize_meta(meta)}) if log_response
+
+        if output.last[:role] != :previous_response_id && options[:previous_response_id]
+          output << { role: :previous_response_id, content: options[:previous_response_id] }
+        end
+
+        if return_messages
+          Chat.setup output
+        else
+          output = LLM.purge(output)
+          return '' if output.empty?
+          LLM.purge(output).last['content']
         end
       end
 

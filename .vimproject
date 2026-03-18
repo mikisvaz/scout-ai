@@ -1,10 +1,5 @@
 scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.txt *.conf" {
- Rakefile
  README.md
- LICENSE.txt
- bin=bin filter="*"{
-  scout-ai
- }
  chats=chats filter="*"{
   system=system{
    scout-ai
@@ -50,19 +45,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   }
 
   log_reponse
-
-  doc
-
-  file_nested
-  test_file
-
-  
- }
- doc=doc filter="*"{
-  Agent.md
-  Chat.md
-  LLM.md
-  Model.md
+  test_log_resonse
  }
  lib=lib {
   scout-ai.rb
@@ -170,6 +153,18 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    }
   }
  }
+ share=share{
+  server=server files="*"{
+   chat.html
+   chat.js
+  }
+ }
+ doc=doc filter="*"{
+  Agent.md
+  Chat.md
+  LLM.md
+  Model.md
+ }
  test=test {
   data=data filter="*"{
    person=person{
@@ -181,7 +176,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   }
   test_helper.rb
  }
- data=data filter="*"{
+ bin=bin filter="*"{
+  scout-ai
  }
  scout_commands=scout_commands filter="*"{
   documenter
@@ -194,12 +190,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   agent=agent{
    ask
    kb
-  }
- }
- share=share{
-  server=server files="*"{
-   chat.html
-   chat.js
   }
  }
 }
