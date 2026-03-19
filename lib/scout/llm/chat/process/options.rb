@@ -49,46 +49,4 @@ module Chat
     chat.replace new
     sticky_options.merge options
   end
-
-  def self.serialize_meta(meta) 
-    meta.collect{|p| p * "="} * " "  
-  end  
-
-  def self.parse_meta(str) 
-    parts = str.split('=')    
-    meta = {}   
-    key = parts.shift 
-    while next_part = parts.shift
-
-      if parts.any?
-        rnext_part = next_part.reverse
-        rkey,_, rvalue = rnext_part.partition(/\s+/)
-        next_key = rkey.reverse
-        value = rvalue.reverse
-      else
-        value = next_part
-      end
-
-      case value      
-      when /^-?\d+$/
-        meta[key] = value.to_i 
-      when /^-?\d+\.\d+$/ 
-        meta[key] = value.to_f      
-      else       
-        meta[key] = value
-      end
-
-      key = next_key
-    end 
-    meta
-  end  
-
-  def self.meta(messages)  
-    meta_msg = messages.select{|info| info[:role].to_sym == :meta }.last
-
-    return nil if meta_msg.nil?
-    meta_str = meta_msg[:content] 
-    messages.reject!{|info| info[:role].to_sym == :meta }    
-    parse_meta meta_str
-  end
 end
