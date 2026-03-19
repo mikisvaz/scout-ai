@@ -46,6 +46,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   log_reponse
   test_log_resonse
+
+  test_prompt.rb
  }
  lib=lib {
   scout-ai.rb
@@ -67,6 +69,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
       files.rb
       clear.rb
       options.rb
+      meta.rb
      }
     }
     tools.rb

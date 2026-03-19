@@ -48,6 +48,16 @@ class Test::Unit::TestCase
   def datafile_test(file)
     Test::Unit::TestCase.datafile_test(file)
   end
+
+  def agent(name = nil, options = {})
+    require 'scout/llm/agent'
+    options[:endpoint] = Scout::Config.get(:endpoint, :test)
+    if name.nil?
+      LLM::Agent.new(**options)
+    else
+      LLM.load_agent name, options
+    end
+  end
 end
 
 module Object::Person

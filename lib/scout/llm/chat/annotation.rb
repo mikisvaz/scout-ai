@@ -103,6 +103,37 @@ module Chat
     end
   end
 
+  def self.follow(intro, coda)
+    options = Chat.options(coda.dup)
+    previous_response_id = options[:previous_response_id] if options
+
+    if previous_response_id
+      new = intro + Chat.clear(coda, :previous_response_id)
+      new.unshift({role: :previous_response_id, content: previous_response_id})
+    else
+      new = intro + coda
+    end
+
+    Chat.setup new
+  end
+
+  def append(coda)
+    coda = [coda] if Hash === coda
+    new = Chat.follow(self.dup, coda)
+    self.replace new
+  end
+
+  def follow(coda)
+    new = Chat.follow(self.dup, coda)
+    self.replace new
+  end
+
+  def prepend(intro)
+    into = [intro] if Hash === intro
+    new = Chat.follow(intro, self.dup)
+    self.replace new
+  end
+
   def json(...)
     self.format :json
     output = ask(...)

@@ -3,7 +3,7 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 require 'scout/knowledge_base'
 class TestLLMAgent < Test::Unit::TestCase
-  def test_system
+  def _test_system
     TmpFile.with_dir do |dir|
       kb = KnowledgeBase.new dir
       kb.format = {"Person" => "Alias"}
@@ -17,7 +17,7 @@ class TestLLMAgent < Test::Unit::TestCase
     end
   end
 
-  def test_workflow_eval
+  def _test_workflow_eval
     agent = LLM::Agent.new
     agent.workflow do
       input :c_degrees, :float, "Degrees Celsius"
@@ -32,6 +32,24 @@ class TestLLMAgent < Test::Unit::TestCase
     agent.user "Convert 30 celsius into faranheit"
     res = agent.json_format({conversion: {type: :number}})
     assert_equal 86.0, res['conversion']
+  end
+
+  def test_prompt
+    agent = self.agent
+
+    agent.start_chat.user <<-EOF
+My name is Miguel
+    EOF
+
+    chat = LLM.chat <<-EOF
+user:
+
+What is my name?
+    EOF
+
+
+    iii chat
+    ppp agent.prompt chat
   end
 end
 

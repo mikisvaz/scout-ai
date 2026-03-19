@@ -74,6 +74,7 @@ module LLM
 
       [
         function_name,
+        function_arguments,
         tool_call_id,
         IndiferentHash.setup({role: "function_call", content: function_call.to_json}),
         content
@@ -89,7 +90,7 @@ module LLM
       end
     end
 
-    tool_call_content.collect do |function_name,tool_call_id,tool_call,content|
+    tool_call_content.collect do |function_name,function_arguments,tool_call_id,tool_call,content|
       if Step === content
         if content.done?
           content = content.load.to_json if content.done?
@@ -105,12 +106,12 @@ module LLM
       end
 
       if (String === content) && content.length > max_content_length
-        exception_msg = "Function #{function_name} called with parameters #{Log.fingerprint function_arguments} returned #{content.length} characters, which is more than the maximum of #{max_content_length}. To protect the model context window this result was not returned."
+        exception_msg = "Function #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}) returned #{content.length} characters, which is more than the maximum of #{max_content_length}. To protect the model context window this result was not returned."
         Log.high exception_msg
         content = {exception: exception_msg, stack: caller}.to_json
       end
 
-      Log.high "Called #{function_name}: " + Log.fingerprint(content)
+      Log.high "Called #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}): " + Log.fingerprint(content)
 
       response_message = {
         name: function_name,

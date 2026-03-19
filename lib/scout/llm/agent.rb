@@ -67,6 +67,13 @@ module LLM
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
 
+      messages.delete_if{|info| info[:role] == 'agent' }
+      if (list = messages.select{|info| info[:role] == 'socialize'}).any?
+        socialize = list.last[:content]
+        messages.delete_if{|info| info[:role] == 'socialize' }
+        self.socialize(options.dup) if socialize && %w(true TRUE True T 1).include?(socialize.to_s)
+      end
+
       tools = options[:tools] || {}
       if other_tools = @other_options[:tools]
         other_tools = JSON.parse other_tools if String === other_tools
@@ -79,8 +86,6 @@ module LLM
           tools.merge!(LLM.workflow_tools(workflow)) if workflow
           tools.merge!(LLM.knowledge_base_tool_definition(knowledge_base)) if knowledge_base and knowledge_base.all_databases.any?
         end
-
-        messages.delete_if{|info| info[:role] == 'agent' }
 
         if workflow && workflow.tasks.include?(:ask)
           options.each do |key,value|
@@ -118,9 +123,9 @@ module LLM
 
     def prompt(messages, options = {})
       messages = LLM.chat messages if String === messages
-      ask current_chat + messages, options
+      messages = Chat.follow start_chat, messages
+      ask messages, options
     end
-
 
     def self.load_from_path(path, workflow: nil, knowledge_base: nil, chat: nil)
       workflow_path = path['workflow.rb'].find
@@ -152,6 +157,8 @@ module LLM
       agent_path = Scout.var.Agent[agent_name]
       agent_path = Scout.chats[agent_name] unless agent_path.exists?
       agent_path = Scout.chats.Agent[agent_name] unless agent_path.exists?
+
+      raise ScoutException, "No agent found with name #{agent_name}" unless workflow_path.exists? || agent_path.exists?
 
       workflow = if workflow_path.exists?
                    Workflow.require_workflow agent_name

@@ -103,6 +103,7 @@ module Chat
           # Inline message + next block is default role
           messages << { role: role, content: inline_content } if inline_content && ! inline_content.empty?
           current_role = 'user' if role == 'previous_response_id'
+          current_role = 'user' if role == 'agent'
           current_content = ""
         end
       else
