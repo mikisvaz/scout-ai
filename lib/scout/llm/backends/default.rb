@@ -403,10 +403,14 @@ module LLM
       def log_response(response, current_meta = nil)
         current_meta = {} if current_meta.nil?
 
+        reasoning_content = response.dig('choices', 0, 'message', 'reasoning_content')
+        Log.medium "Reasoning:\n" + reasoning_content if reasoning_content
+
         pattern = {
           'pt+': [['usage','prompt_tokens']],
           'ct+': [['usage','completion_tokens']],
           't+': [['usage','total_tokens']],
+          'r': [['choices', 0, 'message', 'reasoning_content']],
         }
 
         meta = {}
@@ -427,6 +431,7 @@ module LLM
               Thread.current[session_name] = meta[session_name]
               meta.delete name if meta[name] == meta[session_name]
             else
+              value = value.gsub(/\s+/,' ') if String === value
               meta[name] = value
             end
           end

@@ -6,6 +6,15 @@ module LLM
     messages = LLM.chat(question)
     options = IndiferentHash.add_defaults LLM.options(messages), options
 
+    endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
+
+    endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT,ENDPOINT,LLM,ASK'
+    if endpoint && Scout.etc.AI[endpoint].exists?
+      options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
+    elsif endpoint && endpoint != ""
+      raise "Endpoint not found #{endpoint}"
+    end
+
     if options[:backend].to_s == 'responses' && options[:previous_response].to_s != 'false'
       messages = Chat.clear(messages, 'previous_response_id')
     else
@@ -19,15 +28,6 @@ module LLM
       agent.follow messages
       res = agent.ask options
       return res
-    end
-
-    endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
-
-    endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT,ENDPOINT,LLM,ASK'
-    if endpoint && Scout.etc.AI[endpoint].exists?
-      options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
-    elsif endpoint && endpoint != ""
-      raise "Endpoint not found #{endpoint}"
     end
 
     options[:meta] = Chat.meta messages
