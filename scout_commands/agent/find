@@ -1,0 +1,31 @@
+#!/usr/bin/env ruby
+
+require 'scout'
+require 'scout-ai'
+
+$0 = "scout #{$previous_commands.any? ? $previous_commands*" " + " " : "" }#{ File.basename(__FILE__) }" if $previous_commands
+
+options = SOPT.setup <<EOF
+
+Find an Agent
+
+$ #{$0} [<options>]
+
+-h--help Print this help
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage 
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+Log.severity = options.delete(:log).to_i if options.include? :log
+
+agent_name, *question_parts = ARGV
+
+agent = LLM.load_agent agent_name, options
+
+puts agent.path

@@ -49,7 +49,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   test_prompt.rb
 
-  openclaw
+  from_python
  }
  lib=lib {
   scout-ai.rb
@@ -144,17 +144,21 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  python=python filter="*"{
   scout_ai=scout_ai{
    __init__.py
-   language_model.py
+   agent.py
+   chat.py
+   data.py
+   message.py
+   runner.py
    util.py
    huggingface=huggingface{
     data.py
     eval.py
     model.py
+    rlhf.py
     train=train{
      __init__.py
      next_token.py
     }
-    rlhf.py
    }
   }
  }
@@ -188,6 +192,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   documenter
   llm=llm{
    ask
+   json
    template
    process
    server
@@ -195,6 +200,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   agent=agent{
    ask
    kb
+   find
   }
  }
 }

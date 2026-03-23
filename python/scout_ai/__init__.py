@@ -1,35 +1,27 @@
-import scout
-import torch
-from .util import *
+from .agent import Agent, load_agent
+from .chat import Chat
+from .message import Message
+from .runner import CommandError, ScoutRunner
 
-class TSVDataset(torch.utils.data.Dataset):
-    def __init__(self, tsv):
-        self.tsv = tsv
+__all__ = [
+    "Agent",
+    "Chat",
+    "CommandError",
+    "Message",
+    "ScoutRunner",
+    "load_agent",
+]
 
-    def __getitem__(self, key):
-        if (type(key) == int):
-            row = self.tsv.iloc[key]
-        else:
-            row = self.tsv.loc[key]
+try:
+    from .util import deterministic, device, model_device, set_seed
 
-        row = row.to_numpy()
-        features = row[:-1]
-        label = row[-1]
+    __all__ += ["deterministic", "device", "model_device", "set_seed"]
+except Exception:
+    pass
 
-        return features, label
+try:
+    from .data import TSVDataset, data_dir, tsv, tsv_dataset, tsv_loader
 
-    def __len__(self):
-        return len(self.tsv)
-
-def tsv_dataset(filename, *args, **kwargs):
-    return TSVDataset(scout.tsv(filename, *args, **kwargs))
-
-def tsv(*args, **kwargs):
-    return tsv_dataset(*args, **kwargs)
-
-def tsv_loader(*args, **kwargs):
-    dataset = tsv(*args, kwargs)
-    return torch.utils.data.DataLoader(dataset, batch_size=2, shuffle=True)
-
-def data_dir():
-    return scout.path('var/scout_dm/data')
+    __all__ += ["TSVDataset", "data_dir", "tsv", "tsv_dataset", "tsv_loader"]
+except Exception:
+    pass

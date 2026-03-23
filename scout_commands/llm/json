@@ -1,0 +1,61 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'scout'
+
+cmd = $previous_commands ?
+  "scout #{$previous_commands.any? ? "#{$previous_commands * ' '} " : ''}#{File.basename(__FILE__)}" :
+  $PROGRAM_NAME
+
+options = SOPT.setup <<~EOF
+
+Translate chats to and from json format
+
+$ #{cmd} [<options>] <filename>
+
+Reads the file as JSON or Chat format and prints it in the oposite format.
+Use `--chat` and `--json` to speciy the format on the input. Use
+the `output` flag to save it to a file.
+
+-h--help This help
+-c--chat Load as Chat format
+-j--json Load as JSON format (Default)
+-o--output* Save to file instead of printing to STDOUT
+
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+help = IndiferentHash.process_options options, :help
+
+filename,  _ = ARGV
+
+raise MissingParameterException, :filename if filename.nil?
+
+raise ParameterException, "Don't use the json and chat flags at the same time, only the one that corresponds to the input file fomat" if options[:chat] && options[:json]
+
+input = :json unless options[:chat]
+
+if input == :json
+  messages = Chat.setup(Open.json(filename))
+else
+  messages = LLM.chat(filename)
+end
+
+if input == :json
+  str = LLM.print messages
+else
+  str = messages.to_json
+end
+
+if options[:output]
+  Open.write(options[:output], str)
+else
+  puts str
+end
