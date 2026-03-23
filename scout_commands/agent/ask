@@ -10,7 +10,7 @@ $0 = "scout #{$previous_commands.any? ? $previous_commands*" " + " " : "" }#{ Fi
 
 options = SOPT.setup <<EOF
 
-Ask GPT
+Ask an Agent
 
 $ #{$0} [<options>] [question]
 
