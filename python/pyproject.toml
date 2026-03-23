@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scout-ai"
+version = "1.2.2"
+description = "Python interface for Scout-AI chats, agents, and model helpers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Miki S. Vazquez" }
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Libraries :: Python Modules"
+]
+dependencies = []
+
+[project.optional-dependencies]
+ml = [
+  "numpy",
+  "pandas",
+  "torch"
+]
+huggingface = [
+  "datasets",
+  "transformers",
+  "trl"
+]
+
+[project.urls]
+Homepage = "https://github.com/mikisvaz/scout-ai"
+Repository = "https://github.com/mikisvaz/scout-ai"
+Issues = "https://github.com/mikisvaz/scout-ai/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scout_ai*"]
+
+[tool.setuptools]
+include-package-data = true
