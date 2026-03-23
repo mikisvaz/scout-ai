@@ -134,6 +134,12 @@ module Chat
     self.replace new
   end
 
+  def remove_role(role=:clear)
+    messages = self.select{|m| m[:role].to_s == role.to_s }
+    self.reject!{|m| m[:role].to_s == role.to_s }
+    messages
+  end
+
   def json(...)
     self.format :json
     output = ask(...)

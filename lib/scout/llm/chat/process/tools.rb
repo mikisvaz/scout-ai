@@ -150,6 +150,10 @@ module Chat
         next
       elsif message[:role] == 'introduce'
         workflow_name = message[:content]
+        workflow = begin
+                     Kernel.const_get workflow_name
+                   rescue
+                   end
         if Open.remote? workflow_name
           require 'rbbt'
           require 'scout/offsite/ssh'
@@ -157,7 +161,7 @@ module Chat
           workflow = RemoteWorkflow.new workflow_name
         else
           workflow = Workflow.require_workflow workflow_name
-        end
+        end unless workflow
 
         raise "Workflow not found #{workflow_name}" if workflow.nil?
 

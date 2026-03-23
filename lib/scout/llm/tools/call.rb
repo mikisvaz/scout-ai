@@ -92,6 +92,7 @@ module LLM
 
     tool_call_content.collect do |function_name,function_arguments,tool_call_id,tool_call,content|
       if Step === content
+        step = content
         if content.done?
           content = content.load.to_json if content.done?
         elsif content.error? && content.exception
@@ -103,10 +104,13 @@ module LLM
             content = {exception: $!.message, stack: $!.backtrace }.to_json
           end
         end
+      else
+        step = nil
       end
 
       if (String === content) && content.length > max_content_length
         exception_msg = "Function #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}) returned #{content.length} characters, which is more than the maximum of #{max_content_length}. To protect the model context window this result was not returned."
+        exception_msg += " The results is made available at '#{step.path}'." if step
         Log.high exception_msg
         content = {exception: exception_msg, stack: caller}.to_json
       end

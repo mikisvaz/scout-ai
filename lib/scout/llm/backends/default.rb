@@ -409,8 +409,8 @@ module LLM
         pattern = {
           'pt+': [['usage','prompt_tokens']],
           'ct+': [['usage','completion_tokens']],
-          't+': [['usage','total_tokens']],
-          'r': [['choices', 0, 'message', 'reasoning_content']],
+          'tt+': [['usage','total_tokens']],
+          'reas': [['choices', 0, 'message', 'reasoning_content']],
         }
 
         meta = {}

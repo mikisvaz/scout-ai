@@ -48,6 +48,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   test_log_resonse
 
   test_prompt.rb
+
+  openclaw
  }
  lib=lib {
   scout-ai.rb

@@ -1,6 +1,13 @@
 module Chat
   def self.serialize_meta(meta) 
-    meta.collect{|p| p * "="} * " "  
+    keys = meta.keys
+
+    keys = keys.sort_by do |k|
+      v = meta[k]
+      String === v ? v.length : 0
+    end
+
+    keys.collect{|k| [k,meta[k]] * "="} * " "  
   end  
 
   def self.parse_meta(str) 
@@ -29,6 +36,7 @@ module Chat
 
       key = next_key
     end 
+
     meta
   end  
 

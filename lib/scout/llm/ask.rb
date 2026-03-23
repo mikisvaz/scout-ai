@@ -32,7 +32,7 @@ module LLM
 
     options[:meta] = Chat.meta messages
 
-    Log.high Log.color :green, "Asking #{endpoint || 'client'}: #{options[:previous_response_id]}\n" + LLM.print(messages)
+    Log.high Log.color :green, "Asking #{endpoint || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages)
     tools = options[:tools]
     Log.high "Tools: #{Log.fingerprint tools.keys}" if tools
     Log.debug "#{Log.fingerprint tools}}" if tools
@@ -71,7 +71,9 @@ module LLM
       end
     end
 
-    Log.high Log.color :blue, "Response:\n" + LLM.print(res) 
+    Chat.setup res if Array === res
+
+    Log.high Log.color :blue, "Response:\n" + Chat.print_brief(res, %w(meta assistant)) 
 
     res
   end

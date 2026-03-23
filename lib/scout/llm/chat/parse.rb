@@ -139,4 +139,30 @@ module Chat
       end
     end * "\n\n"
   end
+
+  def self.print_brief(chat, expand = [])
+    return chat if String  === chat
+    expand = expand.collect{|role| role.to_s }
+
+    "\n" + chat.collect do |message|
+      message = IndiferentHash.setup message
+      role, content = message.values_at :role, :content
+      role = role.to_s
+
+      str = case message[:content]
+            when Hash, Array
+              message[:content].to_json
+            when nil, ''
+              ''
+            else
+              message[:content].to_s
+            end
+
+      next role, "\n\n" + str if expand.include?(role)
+
+      [role, Log.fingerprint(str)[1..-2]]
+    end.compact.collect do |role,str|
+      "#{role}: #{str}"
+    end * "\n\n"
+  end
 end
