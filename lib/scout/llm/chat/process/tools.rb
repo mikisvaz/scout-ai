@@ -109,8 +109,10 @@ module Chat
 
   def self.tools(messages)
     tool_definitions = IndiferentHash.setup({})
+    introduced_workflows = []
     new = messages.collect do |message|
-      if message[:role] == 'mcp'
+      role = message[:role]
+      if role == 'mcp'
         url, *tools = content_tokens(message)
 
         if url == 'stdio'
@@ -128,7 +130,7 @@ module Chat
           tool_definitions.merge!(mcp_tool_definitions)
         end
         next
-      elsif message[:role] == 'tool'
+      elsif role == 'tool'
         workflow_name, task_name, *inputs = content_tokens(message)
         inputs = nil if inputs.empty?
         inputs = [] if inputs == ['none'] || inputs == ['noinputs']
@@ -148,8 +150,10 @@ module Chat
           tool_definitions.merge!(LLM.workflow_tools(workflow))
         end
         next
-      elsif message[:role] == 'introduce'
+      elsif role == 'introduce'
         workflow_name = message[:content]
+        next if introduced_workflows.include? workflow_name
+        introduced_workflows << workflow_name
         workflow = begin
                      Kernel.const_get workflow_name
                    rescue
@@ -176,7 +180,7 @@ Below is the documentation of the workflow:
         EOF
 
         {role: :user, content: content}
-      elsif message[:role] == 'kb'
+      elsif role == 'kb'
         knowledge_base_name, *databases = content_tokens(message)
         databases = nil if databases.empty?
         knowledge_base = KnowledgeBase.load knowledge_base_name
@@ -184,7 +188,7 @@ Below is the documentation of the workflow:
         knowledge_base_definition = LLM.knowledge_base_tool_definition(knowledge_base, databases)
         tool_definitions.merge!(knowledge_base_definition)
         next
-      elsif message[:role] == 'clear_tools'
+      elsif role == 'clear_tools'
         tool_definitions = {}
       else
         message
@@ -197,7 +201,8 @@ Below is the documentation of the workflow:
   def self.associations(messages, kb = nil)
     tool_definitions = {}
     new = messages.collect do |message|
-      if message[:role] == 'association'
+      role = message[:role]
+      if role == 'association'
         name, path, *options = content_tokens(message)
 
         kb ||= KnowledgeBase.new Scout.var.Agent.Chat.knowledge_base
@@ -205,7 +210,7 @@ Below is the documentation of the workflow:
 
         tool_definitions.merge!(LLM.knowledge_base_tool_definition( kb, [name]))
         next
-      elsif message[:role] == 'clear_associations'
+      elsif role == 'clear_associations'
         tool_definitions = {}
       else
         message
