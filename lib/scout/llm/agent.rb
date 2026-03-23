@@ -10,7 +10,7 @@ module LLM
   end
 
   class Agent
-    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options
+    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options, :path
     def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
       @workflow = workflow
       @workflow = Workflow.require_workflow @workflow if String === @workflow
@@ -161,6 +161,7 @@ module LLM
       raise ScoutException, "No agent found with name #{agent_name}" unless workflow_path.exists? || agent_path.exists?
 
       workflow = if workflow_path.exists?
+                   agent_path = workflow_path
                    Workflow.require_workflow agent_name
                  elsif agent_path.workflow.find_with_extension("rb").exists?
                    Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
@@ -185,7 +186,9 @@ module LLM
                Chat.setup([ {role: 'introduce', content: workflow.name} ])
              end
 
-      LLM::Agent.new **options.merge(workflow: workflow, knowledge_base: knowledge_base, start_chat: chat)
+      agent = LLM::Agent.new **options.merge(workflow: workflow, knowledge_base: knowledge_base, start_chat: chat)
+      agent.path = agent_path.find if agent_path
+      agent
     end
   end
 end
