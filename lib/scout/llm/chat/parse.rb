@@ -48,10 +48,10 @@ module Chat
         line = line.sub("]]", "")
         current_content << "\n" << line unless line.strip.empty?
         next
-      elsif stripped.match(/^.*:-- .* {{{/)
+      elsif stripped.match(/^[^\s]*:-- .* {{{/)
         in_protected_block = true
         protected_block_type = :square
-        line = line.sub(/^.*:-- (.*) {{{.*/, '<cmd_output cmd="\1">')
+        line = line.sub(/^[^\s]*:-- (.*) {{{.*/, '<cmd_output cmd="\1">')
         current_content << "\n" << line unless line.strip.empty?
         next
       elsif stripped.match(/^.*:--.* }}}/) && in_protected_block && protected_block_type == :square
