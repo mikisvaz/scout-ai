@@ -4,9 +4,11 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
+import threading
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence, TextIO
 
 
 class CommandError(RuntimeError):
@@ -27,7 +29,12 @@ class ScoutRunner:
     commands.
     """
 
-    def __init__(self, command: Optional[Sequence[str] | str] = None):
+    def __init__(
+        self,
+        command: Optional[Sequence[str] | str] = None,
+        show_stderr: bool = True,
+        stderr: Optional[TextIO] = None,
+    ):
         if command is None:
             command = os.environ.get("SCOUT_AI_COMMAND", "scout-ai")
 
@@ -39,15 +46,49 @@ class ScoutRunner:
         if not self.command:
             raise ValueError("command can not be empty")
 
-    def _run(self, *args: str) -> str:
-        cmd = self.command + [str(arg) for arg in args]
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-        if proc.returncode != 0:
-            raise CommandError(cmd, proc.stdout, proc.stderr, proc.returncode)
-        return proc.stdout
+        self.show_stderr = show_stderr
+        self.stderr = stderr
 
-    def _write_json(self, path: Path, messages: Iterable[dict]) -> None:
-        path.write_text(json.dumps(list(messages), ensure_ascii=False, indent=2), encoding="utf-8")
+    def _run(self, *args: str, stream_stderr: bool = False) -> str:
+        cmd = self.command + [str(arg) for arg in args]
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        stdout_chunks: List[str] = []
+        should_stream = stream_stderr and self.show_stderr
+        stderr_target = self.stderr if self.stderr is not None else sys.stderr
+
+        def forward_stderr() -> None:
+            assert proc.stderr is not None
+            while True:
+                chunk = proc.stderr.readline()
+                if chunk == "":
+                    break
+                if should_stream:
+                    stderr_target.write(chunk)
+                    stderr_target.flush()
+
+        stderr_thread = threading.Thread(target=forward_stderr, daemon=True)
+        stderr_thread.start()
+
+        assert proc.stdout is not None
+        stdout_chunks.append(proc.stdout.read())
+        proc.stdout.close()
+
+        stderr_thread.join()
+        returncode = proc.wait()
+
+        stdout = "".join(stdout_chunks)
+
+        if returncode != 0:
+            raise CommandError(cmd, stdout, "", returncode)
+        return stdout
 
     def json_to_chat_file(self, messages: Iterable[dict], chat_file: Path) -> Path:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as handle:
@@ -115,9 +156,9 @@ class ScoutRunner:
         try:
             self.json_to_chat_file(messages, chat_file)
             if agent_name:
-                self._run("agent", "ask", str(agent_name), "--chat", str(chat_file))
+                self._run("agent", "ask", str(agent_name), "--chat", str(chat_file), stream_stderr=True)
             else:
-                self._run("llm", "ask", "--chat", str(chat_file))
+                self._run("llm", "ask", "--chat", str(chat_file), stream_stderr=True)
             return self.chat_file_to_messages(chat_file)
         finally:
             chat_file.unlink(missing_ok=True)

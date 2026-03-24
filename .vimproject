@@ -51,6 +51,12 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   test_prompt.rb
 
   from_python
+
+  python_delegation
+
+  python_package
+
+  stderr_python
  }
  lib=lib {
   scout-ai.rb
