@@ -19,6 +19,7 @@ module LLM
 
     end
 
+
     properties = task_info[:inputs].inject({}) do |acc,input|
       next acc if names and not names.include?(input)
       type = task_info[:input_types][input]
@@ -31,8 +32,8 @@ module LLM
       type = :array if type.to_s.end_with?('_array')
 
       acc[input] = {
-        "type": type,
-        "description": description || ''
+        type: type,
+        description: description || ''
       }
 
       if type == :array
@@ -47,6 +48,13 @@ module LLM
       end
 
       acc
+    end
+
+    if not workflow.exec_exports.include?(task_name.to_sym)
+      properties[:return_path] = {
+        type: 'boolean',
+        description: 'Instead of the result of the job, return the path were it is persisted'
+      }
     end
 
     required_inputs = task_info[:inputs].select do |input|
@@ -89,20 +97,20 @@ module LLM
 
   def self.call_workflow(workflow, task_name, parameters={})
     parameters = {} if parameters.nil?
-    jobname = parameters.delete :jobname
+    jobname, return_path, exec_type, allow_recursive = IndiferentHash.process_options parameters, :jobname, :return_path, :exec_type, :allow_recursive
     begin
-      exec_type = parameters[:exec_type]
       job = workflow.job(task_name.to_sym, jobname, parameters)
-      if workflow.exec_exports.include?(task_name.to_sym) || parameters[:exec_type].to_s == 'exec'
+      if workflow.exec_exports.include?(task_name.to_sym) || exec_type.to_s == 'exec'
         job.exec
       else
-        raise ScoutException, 'Potential recursive call' if parameters[:allow_recursive] != 'true' &&
-          (job.running? and job.info[:pid] == Process.pid)
-
-        #Workflow.produce(job)
-        #job.join
-        #job.load
-        job
+        if return_path
+          job.run(true)
+          job.path
+        else
+          raise ScoutException, 'Potential recursive call' if allow_recursive != 'true' &&
+            (job.running? and job.info[:pid] == Process.pid)
+          job
+        end
       end
     rescue ScoutException
       return $!
