@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'scout'
+
+cmd = $previous_commands ?
+  "scout #{$previous_commands.any? ? "#{$previous_commands * ' '} " : ''}#{File.basename(__FILE__)}" :
+  $PROGRAM_NAME
+
+options = SOPT.setup <<~EOF
+
+Run a workflow as an MCP service
+
+$ #{cmd} [<options>] <workflow> [<task_name>]*
+
+You can name the tasks to export. If no tasks are named then it export all
+those that were explicitedly exported by the workflow. If no tasks are defined
+either way then all workflow tasks will be exported.
+
+-h--help Print this help
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+help = IndiferentHash.process_options options, :help
+
+workflow, *task_names = ARGV
+
+require 'scout/llm/mcp'
+
+raise MissingParameterException, :workflow if workflow.nil?
+
+
+workflow = Workflow.require_workflow workflow
+
+workflow.mcp_stdio(*task_names)
+

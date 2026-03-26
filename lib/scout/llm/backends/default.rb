@@ -308,7 +308,7 @@ module LLM
         tools.merge!(LLM.tools messages)
         tools.merge!(LLM.associations messages)
 
-        Log.medium "Tools: #{Log.fingerprint tools.keys}" if tools
+        Log.high "Tools: #{Log.fingerprint tools.keys}" if tools
 
         tools
       end

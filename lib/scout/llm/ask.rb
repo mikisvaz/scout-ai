@@ -34,7 +34,7 @@ module LLM
 
     Log.high Log.color :green, "Asking #{endpoint || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages)
     tools = options[:tools]
-    Log.high "Tools: #{Log.fingerprint tools.keys}" if tools
+    Log.medium "Tools: #{Log.fingerprint tools.keys}" if tools
     Log.debug "#{Log.fingerprint tools}}" if tools
 
     res = Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist, dir: Scout.var.cache.ask) do
