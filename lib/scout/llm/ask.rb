@@ -62,6 +62,9 @@ module LLM
       when :openwebui, "openwebui"
         require_relative 'backends/openwebui'
         LLM::OpenWebUI.ask(messages, options, &block)
+      when :huggingface, "huggingface"
+        require_relative 'backends/huggingface'
+        LLM::Huggingface.ask(messages, options, &block)
       when :relay, "relay"
         require_relative 'backends/relay'
         LLM::Relay.ask(messages, options, &block)

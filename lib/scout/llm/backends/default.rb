@@ -487,7 +487,7 @@ module LLM
 
         output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta)
 
-        output.unshift({role: :meta, content: Chat.serialize_meta(meta)}) if log_response
+        output.unshift({role: :meta, content: Chat.serialize_meta(meta)}) if log_response && meta && meta.any?
 
         if output.last[:role] != :previous_response_id && options[:previous_response_id]
           output << { role: :previous_response_id, content: options[:previous_response_id] }

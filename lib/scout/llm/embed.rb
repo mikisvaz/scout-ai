@@ -24,6 +24,9 @@ module LLM
     when :openwebui, "openwebui"
       require_relative 'backends/openwebui'
       LLM::OpenWebUI.embed(text, options)
+    when :huggingface, "huggingface"
+      require_relative 'backends/huggingface'
+      LLM::Huggingface.embed(text, options)
     when :relay, "relay"
       require_relative 'backends/relay'
       LLM::Relay.embed(text, options)
