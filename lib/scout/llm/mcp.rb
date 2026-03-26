@@ -15,14 +15,22 @@ module Workflow
       annotations[:idempotent_hint] = true
       annotations[:open_world_hint] = false
       MCP::Tool.define(name:task, description: description, input_schema: input_schema, annotations:annotations) do |parameters,context|
-        self.job(name, parameters)
+        self.job(name, parameters).run
       end
     end
 
+    version = "1.0.0"
     MCP::Server.new(
       name: self.name,
-      version: "1.0.0",
+      version: version,
       tools: tools
     )
+  end
+
+  def mcp_stdio(*tasks)
+    server = mcp(*tasks)
+    transport = MCP::Server::Transports::StdioTransport.new(server)
+    server.transport = transport
+    transport.open
   end
 end
