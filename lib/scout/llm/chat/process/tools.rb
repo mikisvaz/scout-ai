@@ -203,10 +203,14 @@ Below is the documentation of the workflow:
     new = messages.collect do |message|
       role = message[:role]
       if role == 'association'
-        name, path, *options = content_tokens(message)
-
+        name, path, *_ = content_tokens(message)
         kb ||= KnowledgeBase.new Scout.var.Agent.Chat.knowledge_base
-        kb.register name, Path.setup(path), IndiferentHash.parse_options(message[:content])
+
+        options = IndiferentHash.parse_options(message[:content])
+        options[:fields] = options[:fields].split(/,\s*/) if String === options[:fields]
+        options[:type] = options[:type].to_sym if String === options[:type]
+
+        kb.register name, Path.setup(path), options
 
         tool_definitions.merge!(LLM.knowledge_base_tool_definition( kb, [name]))
         next

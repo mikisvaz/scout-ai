@@ -22,14 +22,14 @@ module Chat
       relative_lib = File.join(caller_lib_dir, file) if caller_lib_dir
     end
 
-    if Open.exist?(file)
-      file
-    elsif Open.remote?(file)
-      file
-    elsif relative && Open.exist?(relative)
+    if relative && Open.exist?(relative)
       relative
     elsif relative_lib && Open.exist?(relative_lib)
       relative_lib
+    elsif Open.exist?(file)
+      file
+    elsif Open.remote?(file)
+      file
     elsif path.exists?
       path
     end

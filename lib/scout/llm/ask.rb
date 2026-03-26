@@ -16,12 +16,16 @@ module LLM
     end
 
     agent_name = IndiferentHash.process_options options, :agent
+    agent_name = nil if %(none false nil).include?(agent_name.to_s)
     if agent_name
       agent = LLM::Agent.load_agent agent_name
       agent.follow messages
       res = agent.ask options
       return res
     end
+
+    meta = Chat.meta(messages)
+    options[:current_meta] = meta if meta and meta.any?
 
     if options[:backend].to_s == 'responses' && options[:previous_response].to_s != 'false'
       messages = Chat.clear(messages, 'previous_response_id')
@@ -30,9 +34,7 @@ module LLM
       options.delete :previous_response_id
     end
 
-    options[:meta] = Chat.meta messages
-
-    Log.high Log.color :green, "Asking #{endpoint || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages)
+    Log.high Log.color :green, "Asking #{endpoint || options[:endpoint] || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages)
     tools = options[:tools]
     Log.medium "Tools: #{Log.fingerprint tools.keys}" if tools
     Log.debug "#{Log.fingerprint tools}}" if tools

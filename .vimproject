@@ -5,13 +5,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  l
  chats=chats filter="*"{
   system=system{
-   scout-ai
-  }
-  doc=doc{
    agent
-   chat
-   model
-   model.analysis
+   scout-ai
   }
   refactor=refactor{
    chat
@@ -36,31 +31,31 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    cmd
    web
   }
-
   develop=develop{
+   agent
+   agent_system
+   causalLM
+   chat
+   digest
+   finetuning
+   json_format
+   model
+   rf
+   scout-ai
    training=training{
+    basics
+    data.tmp
+    intro
+    python
     data=data{
+     main
+     next_token
+     test.rb
     }
    }
-
-   scout-ai
-   agent
   }
 
-  log_reponse
-  test_log_resonse
 
-  test_prompt.rb
-
-  from_python
-
-  python_delegation
-
-  python_package
-
-  stderr_python
-
-  guide
  }
  lib=lib {
   scout-ai.rb

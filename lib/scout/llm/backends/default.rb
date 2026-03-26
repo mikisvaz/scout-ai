@@ -455,7 +455,7 @@ module LLM
         original_options = options.dup
 
         return_messages, log_response, current_meta = IndiferentHash.process_options options, 
-          :return_messages, :log_response, :meta,
+          :return_messages, :log_response, :current_meta,
           return_messages: false, log_response: true
 
         messages = self.messages question, options
@@ -465,7 +465,7 @@ module LLM
         tools = tools(formatted_messages, options)
 
         response = begin
-                     Log.low "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
+                     Log.medium "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
                      query(client, formatted_messages, tools, options)
                    rescue Exception
                      Log.debug 'Asking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
@@ -485,7 +485,7 @@ module LLM
           meta['reas'] = reasoning if reasoning
         end
 
-        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, meta: meta)
+        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta)
 
         output.unshift({role: :meta, content: Chat.serialize_meta(meta)}) if log_response
 
