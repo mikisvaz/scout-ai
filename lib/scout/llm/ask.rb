@@ -15,19 +15,19 @@ module LLM
       raise "Endpoint not found #{endpoint}"
     end
 
-    if options[:backend].to_s == 'responses' && options[:previous_response].to_s != 'false'
-      messages = Chat.clear(messages, 'previous_response_id')
-    else
-      messages = Chat.clean(messages, 'previous_response_id')
-      options.delete :previous_response_id
-    end
-
     agent_name = IndiferentHash.process_options options, :agent
     if agent_name
       agent = LLM::Agent.load_agent agent_name
       agent.follow messages
       res = agent.ask options
       return res
+    end
+
+    if options[:backend].to_s == 'responses' && options[:previous_response].to_s != 'false'
+      messages = Chat.clear(messages, 'previous_response_id')
+    else
+      messages = Chat.clean(messages, 'previous_response_id')
+      options.delete :previous_response_id
     end
 
     options[:meta] = Chat.meta messages

@@ -40,17 +40,19 @@ module LLM
       parameters[:verify_ssl] = false
 
       headers = IndiferentHash.setup({ 'Authorization' => "Bearer #{key}", 'Content-Type' => 'application/json' })
-      response = case method.to_sym
-                 when :post
-                   RestClient.post(url, parameters.to_json, headers)
-                 else
-                   raise 'Get not supported'
-                 end
+      Misc.insist do
+        response = case method.to_sym
+                   when :post
+                     RestClient.post(url, parameters.to_json, headers)
+                   else
+                     raise 'Get not supported'
+                   end
 
-      if response.body.nil? || response.body == 'null'
-        raise "No response body: #{JSON.pretty_generate(response)}"
-      else
-        JSON.parse(response.body)
+        if response.body.nil? || response.body == 'null'
+          raise "No response body: #{JSON.pretty_generate(response)}"
+        else
+          JSON.parse(response.body)
+        end
       end
     end
 

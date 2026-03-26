@@ -41,11 +41,8 @@ module Chat
   end  
 
   def self.meta(messages)  
-    meta_msg = messages.select{|info| info[:role].to_sym == :meta }.last
-
+    meta_msg = pull(messages, :meta)
     return nil if meta_msg.nil?
-    meta_str = meta_msg[:content] 
-    messages.reject!{|info| info[:role].to_sym == :meta }    
-    parse_meta meta_str
+    parse_meta meta_msg[:content] 
   end
 end

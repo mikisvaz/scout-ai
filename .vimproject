@@ -209,5 +209,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    kb
    find
   }
+  workflow=workflow{
+   mcp
+  }
  }
 }

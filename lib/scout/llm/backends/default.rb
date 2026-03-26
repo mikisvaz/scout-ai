@@ -361,8 +361,6 @@ module LLM
       end
 
       def process_response(messages, response, tools, options, &block)
-        Log.debug "Response: #{Log.fingerprint response}"
-
         tool_calls = response['output'].collect do |output|
           case output['type']
           when 'function_call', 'mcp_call'
@@ -399,18 +397,13 @@ module LLM
         output
       end
 
-      META = IndiferentHash.setup({})
-      def log_response(response, current_meta = nil)
+      def update_meta(response, current_meta = nil)
         current_meta = {} if current_meta.nil?
-
-        reasoning_content = response.dig('choices', 0, 'message', 'reasoning_content')
-        Log.medium "Reasoning:\n" + reasoning_content if reasoning_content
 
         pattern = {
           'pt+': [['usage','prompt_tokens']],
           'ct+': [['usage','completion_tokens']],
           'tt+': [['usage','total_tokens']],
-          'reas': [['choices', 0, 'message', 'reasoning_content']],
         }
 
         meta = {}
@@ -451,6 +444,13 @@ module LLM
         meta
       end
 
+      def reasoning(response, current_meta = nil)
+        reasoning_content = response.dig('choices', 0, 'message', 'reasoning_content')
+        reasoning_content = reasoning_content.gsub("\n", ' ') if String === reasoning_content
+        Log.medium "Reasoning:\n" + Log.color(:cyan, reasoning_content) if reasoning_content
+        reasoning_content
+      end
+
       def ask(question, options = {}, &block)
         original_options = options.dup
 
@@ -472,11 +472,18 @@ module LLM
                      raise $!
                    end
 
+        Log.debug "Response: #{Log.fingerprint response}"
+
         raise 'No response' if response.nil?
+
+        reasoning = reasoning response
 
         output = process_response messages, response, tools, options, &block
 
-        meta = self.log_response response, current_meta if log_response
+        if log_response
+          meta = self.update_meta response, current_meta
+          meta['reas'] = reasoning if reasoning
+        end
 
         output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, meta: meta)
 
@@ -489,9 +496,9 @@ module LLM
         if return_messages
           Chat.setup output
         else
-          output = LLM.purge(output)
-          return '' if output.empty?
-          LLM.purge(output).last['content']
+          output = Chat.clean(output)
+          return '' if output.nil? || output.empty?
+          Chat.purge(output).last['content']
         end
       end
 

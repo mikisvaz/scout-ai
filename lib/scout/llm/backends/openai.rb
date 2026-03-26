@@ -82,8 +82,6 @@ module LLM
     end
 
     def process_response(messages, response, tools, options, &block)
-      Log.debug "Response: #{Log.fingerprint response}"
-
       raise Exception, response['error'] if response['error']
 
       message = response.dig('choices', 0, 'message')

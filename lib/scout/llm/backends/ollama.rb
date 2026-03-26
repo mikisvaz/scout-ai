@@ -59,7 +59,6 @@ module LLM
     end
 
     def process_response(messages, responses, tools, options, &block)
-      Log.debug "Respose: #{Log.fingerprint responses}"
       output = responses.collect do |response|
 
         message = IndiferentHash.setup response['message']

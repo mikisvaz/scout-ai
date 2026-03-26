@@ -52,9 +52,9 @@ module LLM
       end
     end
 
-    def json_format(format, ...)
+    def json_format(format, options = {})
       current_chat.format format
-      output = ask(current_chat, ...)
+      output = ask(current_chat, options.merge({return_messages: false}))
       obj = begin
               JSON.parse output
             rescue JSON::ParserError

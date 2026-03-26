@@ -238,4 +238,10 @@ module Chat
     base64_image = LLM.image(LLM.chat(self), ...)
     Open.write(file, Base64.decode(file_content), mode: 'wb')
   end
+
+  def meta()
+    meta_msg = self.select{|info| info[:role].to_s == "meta" }.last
+    return {} if meta_msg.nil?
+    Chat.parse_meta meta_msg[:content]
+  end
 end
