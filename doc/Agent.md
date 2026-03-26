@@ -13,6 +13,7 @@ Use an Agent when you want **one or more ongoing conversations** (state), plus:
 
 Related docs:
 
+- `USER_GUIDE.md` — step-by-step introduction to chats, agents, workflows, and multi-agent patterns
 - `doc/LLM.md` — `LLM.ask`, endpoints/backends, tool calling
 - `doc/Chat.md` — chat file roles/options (including `tool`, `task`, `mcp`, `previous_response_id`)
 
@@ -138,6 +139,19 @@ The Agent merges them roughly as:
 - merge workflow and knowledge base tools
 
 If the same tool name appears multiple times, later merges override earlier ones.
+
+### 4.4 Workflows as toolkits (and how they relate to "skills")
+
+In Scout-AI, a `Workflow` is the main executable toolkit abstraction. When you attach a workflow to an Agent or expose it in a chat with `tool:`, its exported tasks become callable tools with typed input schemas.
+
+If you come from systems that talk about "skills", the closest Scout-AI equivalents are usually:
+
+- a `Workflow` for executable capabilities
+- a `start_chat` file for instructions, conventions, and examples
+- an optional `KnowledgeBase` for retrieval tools
+- an agent directory that bundles those pieces together
+
+So a small agent directory often plays the role of a skill package, but with stronger typing and provenance because the executable part is a real Scout Workflow.
 
 ---
 
@@ -301,7 +315,14 @@ If the Agent’s workflow defines a task named `ask`, `Agent#ask` can delegate t
 - the Agent passes `chat: Chat.print(messages)` as input
 - the workflow task can implement a custom control loop, custom tool execution, etc.
 
-This is an escape hatch for “agent frameworks built as workflows”.
+This is the main Scout-AI escape hatch for building agent strategies as workflows. It is especially useful when you want Ruby to control a multi-step pattern such as:
+
+- intake -> plan -> execute -> review
+- search only when blocked
+- validation chains
+- artifact-first multi-agent collaboration
+
+In that style, the workflow owns the orchestration and writes artifacts with normal Scout `Step#file` helpers, while the individual agents stay role-specialized.
 
 ---
 

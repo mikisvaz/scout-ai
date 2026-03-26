@@ -28,8 +28,30 @@ This document is the reference for **all chat roles and options**, and how they 
 
 Related docs:
 
+- `USER_GUIDE.md` — first practical guide to chats, agents, workflows, and multi-agent patterns
 - `doc/LLM.md` — how `LLM.ask` expands/executes chats and calls backends
 - `doc/Agent.md` — stateful agents and programmatic control loops
+
+---
+
+## 0. Mental model
+
+A chat file is best understood as two things at once:
+
+- a persistent conversation record
+- a declarative control surface for tools, files, jobs, and options
+
+The roles fall into a few families:
+
+- conversation: `system`, `user`, `assistant`
+- composition: `import`, `continue`, `last`
+- attached context: `file`, `directory`, `image`, `pdf`
+- executable toolkits: `introduce`, `tool`, `task`, `exec_task`, `job`, `inline_job`
+- retrieval and external tool providers: `association`, `kb`, `mcp`
+- runtime options: `endpoint`, `backend`, `model`, `format`, `persist`, `previous_response_id`, `option`, `sticky_option`
+- maintenance: `clear`, `skip`, `clear_tools`, `clear_associations`
+
+For a tutorial-style walkthrough, start with `USER_GUIDE.md` and come back here as a reference.
 
 ---
 

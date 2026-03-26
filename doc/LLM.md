@@ -14,9 +14,25 @@ The core entry points are:
 - `LLM.print(messages)` — serialize messages back to chat-file format
 - `LLM.embed(text, options={})` — embeddings (not the focus of this document)
 
+If you are new to Scout-AI, start with `USER_GUIDE.md`.
+
 For stateful multi-turn conversations, see `doc/Agent.md`.
 
 For the full chat-file role reference, see `doc/Chat.md`.
+
+---
+
+## 0. Getting started path
+
+A good first learning sequence is:
+
+1. create one endpoint under `~/.scout/etc/AI/<name>`
+2. run `scout-ai llm ask -e <name> "Say hi"`
+3. create a chat file and continue it with `-c`
+4. load a stateful `LLM::Agent`
+5. expose one Scout `Workflow` as a tool
+
+Use `USER_GUIDE.md` for the step-by-step walkthrough, then come back here for backend and CLI details.
 
 ---
 
