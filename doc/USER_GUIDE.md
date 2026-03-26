@@ -16,6 +16,8 @@ For detailed reference material, keep these documents nearby:
 - `LLM.md` — endpoints, backends, tool calling, CLI
 - `Chat.md` — chat file roles and compilation rules
 - `Agent.md` — stateful agents, tool wiring, delegation, workflow-backed `ask`
+- `../python/README.md` — Python SDK for `Chat` and `Agent` wrappers
+- `PythonAgentTasks.md` — packaging Python-backed tasks in an agent directory
 - `Workflow.md` in `scout-gear` — the underlying Workflow system used to expose tools and orchestrate jobs
 
 ## 1. What Scout-AI is
@@ -285,6 +287,29 @@ Important concepts:
 
 For details, see `Agent.md`.
 
+### 7.0 Using Scout-AI from Python
+
+Scout-AI also ships a thin Python SDK in `python/scout_ai`. The SDK mirrors the Ruby chat and agent builder style rather than inventing a second runtime.
+
+A minimal example:
+
+```python
+from scout_ai import load_agent
+
+agent = load_agent("Planner", endpoint="nano")
+agent.file("README.md")
+agent.user("Summarize this repository")
+message = agent.chat()
+print(message.content)
+```
+
+The most important semantic distinction is:
+
+- `ask()` returns a new `Chat` containing only the newly added messages
+- `chat()` mutates the current chat and returns the last meaningful new message
+
+For the full Python-side API, see `../python/README.md`.
+
 ### 7.1 Agent directories
 
 An agent can also be loaded from a directory or a named chat bundle.
@@ -295,13 +320,17 @@ A typical agent directory can contain:
 <agent_dir>/workflow.rb
 <agent_dir>/knowledge_base/
 <agent_dir>/start_chat
+<agent_dir>/python/*.py
 ```
+
+If `workflow.rb` is absent but `python/*.py` files are present, Scout-AI can auto-load them as workflow tasks for the agent. See `PythonAgentTasks.md` for the Python-backed pattern.
 
 This is a very important pattern in Scout-AI because it lets you package:
 
 - instructions
 - toolkits
 - optional knowledge bases
+- optional Python-backed tasks
 
 as a reusable unit.
 
@@ -530,6 +559,8 @@ Reference documents:
 - `LLM.md` — backend and CLI reference
 - `Chat.md` — chat file reference
 - `Agent.md` — agent reference
+- `../python/README.md` — Python SDK reference for chats and agents
+- `PythonAgentTasks.md` — Python-backed task packaging for agents
 - `Workflow.md` in `scout-gear` — workflow engine reference
 
 If you keep one idea in mind, make it this one:

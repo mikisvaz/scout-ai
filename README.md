@@ -22,10 +22,24 @@ Scout originates from the Rbbt ecosystem (bioinformatics workflows). Numerous en
 
 The sections below summarize the main components (LLM, Chat, Agent, Model), quick starts, and the command‑line interface. For full APIs, see the doc/ directory.
 
+- doc/USER_GUIDE.md — practical first guide to endpoints, chat files, agents, workflow toolkits, and simple multi-agent patterns
 - doc/LLM.md — multi‑backend LLM orchestration, tool calling, endpoints, CLI
 - doc/Chat.md — chat files: roles/options, compilation pipeline, persistence
 - doc/Agent.md — stateful agents wired to Workflows and KnowledgeBases
+- python/README.md — Python SDK for Scout-AI chats and agents
+- doc/PythonAgentTasks.md — writing agent tasks in Python with PythonWorkflow auto-loading
 - doc/Model.md — model wrappers (ScoutModel, Python/Torch/Hugging Face)
+
+## Start here
+
+If you are new to Scout-AI, use this order:
+
+1. `doc/USER_GUIDE.md` — first practical walkthrough
+2. `doc/LLM.md` — backend, endpoint, and CLI details
+3. `doc/Chat.md` — full chat role reference
+4. `doc/Agent.md` — stateful agents, tool wiring, delegation, workflow-backed `ask`
+5. `python/README.md` — use Scout-AI chats and agents from Python
+6. `doc/PythonAgentTasks.md` — package Python-backed tasks inside an agent directory
 
 
 ## Installation and requirements
@@ -107,6 +121,22 @@ chat.system "You are a terse assistant"
 chat.user   "List three colors"
 puts chat.ask(endpoint: :nano)
 ```
+
+### Use Scout-AI from Python
+
+The Python package under `python/scout_ai` is a thin wrapper around the Ruby runtime. It builds chats and agents in Python, but still uses Ruby for parsing, printing, and execution.
+
+```python
+from scout_ai import load_agent
+
+agent = load_agent("Planner", endpoint="nano")
+agent.file("README.md")
+agent.user("Summarize this repository")
+message = agent.chat()
+print(message.content)
+```
+
+See `python/README.md` for the Python-side API and `doc/PythonAgentTasks.md` for writing Python-backed workflow tasks.
 
 ### Tool calling with a Workflow
 

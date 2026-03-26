@@ -14,6 +14,7 @@ Use an Agent when you want **one or more ongoing conversations** (state), plus:
 Related docs:
 
 - `USER_GUIDE.md` — step-by-step introduction to chats, agents, workflows, and multi-agent patterns
+- `../python/README.md` — Python SDK for Scout-AI chats and agents
 - `doc/LLM.md` — `LLM.ask`, endpoints/backends, tool calling
 - `doc/Chat.md` — chat file roles/options (including `tool`, `task`, `mcp`, `previous_response_id`)
 
@@ -302,9 +303,14 @@ If you create an agent directory, these files are detected automatically:
 <agent_dir>/workflow.rb        # optional
 <agent_dir>/knowledge_base/    # optional
 <agent_dir>/start_chat         # optional chat file
+<agent_dir>/python/*.py        # optional Python-backed workflow tasks
 ```
 
+If `workflow.rb` is absent but the agent directory contains `python/*.py`, Scout-AI auto-loads those files through `PythonWorkflow.load_directory(..., 'ScoutAgent')` and treats them as workflow tasks for the agent.
+
 If `start_chat` is not present but a workflow exists, the Agent will create a base chat containing an `introduce: <workflow>` message (workflow documentation injected).
+
+See `doc/PythonAgentTasks.md` for the Python-backed agent pattern.
 
 ---
 

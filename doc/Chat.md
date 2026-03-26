@@ -29,6 +29,7 @@ This document is the reference for **all chat roles and options**, and how they 
 Related docs:
 
 - `USER_GUIDE.md` — first practical guide to chats, agents, workflows, and multi-agent patterns
+- `../python/README.md` — Python SDK for `Chat` and `Agent` wrappers
 - `doc/LLM.md` — how `LLM.ask` expands/executes chats and calls backends
 - `doc/Agent.md` — stateful agents and programmatic control loops
 
