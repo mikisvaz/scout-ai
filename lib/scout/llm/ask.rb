@@ -18,6 +18,7 @@ module LLM
     agent_name = IndiferentHash.process_options options, :agent
     agent_name = nil if %(none false nil).include?(agent_name.to_s)
     if agent_name
+      options[:endpoint] ||= endpoint
       agent = LLM::Agent.load_agent agent_name
       agent.follow messages
       res = agent.ask options
