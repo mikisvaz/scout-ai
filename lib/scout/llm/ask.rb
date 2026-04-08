@@ -9,7 +9,7 @@ module LLM
     endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
 
     endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT,ENDPOINT,LLM,ASK'
-    if endpoint && Scout.etc.AI[endpoint].exists?
+    if endpoint && Scout.etc.AI[endpoint].find_with_extension(:yaml).exists?
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
     elsif endpoint && endpoint != ""
       raise "Endpoint not found #{endpoint}"
