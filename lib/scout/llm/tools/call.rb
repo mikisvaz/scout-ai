@@ -40,6 +40,9 @@ module LLM
       function_response = case obj
                           when Proc
                             obj.call function_name, function_arguments
+                          when String
+                            wf = Workflow.require_workflow obj
+                            call_workflow(wf, function_name, function_arguments)
                           when Workflow
                             call_workflow(obj, function_name, function_arguments)
                           when KnowledgeBase
