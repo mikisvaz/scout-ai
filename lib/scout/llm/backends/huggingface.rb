@@ -58,7 +58,8 @@ module LLM
       parameters[:chat_template] ||= IndiferentHash.pull_keys parameters, :chat_template
       parameters = parameters.keys_to_sym 
       response = client.chat(messages, formatted_tools, parameters)
-      IndiferentHash.setup(message: response)
+      response = ScoutPython.dict2hash(response)
+      IndiferentHash.setup({message: response})
     rescue
       Log.debug 'Input parameters: ' + "\n" + JSON.pretty_generate(parameters.except(:tools))
       raise $!
@@ -132,9 +133,8 @@ module LLM
     end
 
     def process_response(messages, response, tools, options, &block)
-      response = IndiferentHash.setup(response.dup)
-      message = response[:message] || response
-      content = message[:content]
+      message = response['message']
+      content = message['content']
       
       output = []
       output << IndiferentHash.setup(role: :assistant, content: content) if String === content && !content.empty?

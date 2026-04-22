@@ -34,7 +34,8 @@ class HuggingfaceModel < TorchModel
                                        self.options.except(
                                          :training_args, :tokenizer_args, 
                                          :task, :checkpoint, :class_labels, 
-                                         :model_options, :return_logits
+                                         :model_options, :return_logits, :chat_template,
+                                         :chat_template_kwargs, :generation_kwargs
                                        ))))
 
       tokenizer_checkpoint = self.options[:tokenizer_args][:checkpoint] || checkpoint
