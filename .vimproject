@@ -24,6 +24,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    prev
    rf.rb
    tool
+
+   save_reponse
+
+   relay
   }
   web=web{
    chat
@@ -98,11 +102,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      ollama.rb
      anthropic.rb
      vllm.rb
-
+     huggingface.rb
      openwebui.rb
 
      bedrock.rb
-     huggingface.rb
      relay.rb
     }
 
@@ -203,6 +206,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    json
    template
    process
+   process_queries
    server
   }
   agent=agent{

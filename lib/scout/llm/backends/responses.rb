@@ -11,7 +11,7 @@ module LLM
   end
 
   module Responses
-    TAG = 'openai'
+    TAG = 'responses'
     DEFAULT_MODEL = 'gpt-5-nano'
 
     class << self

@@ -1,0 +1,49 @@
+#!/usr/bin/env ruby
+
+require 'scout'
+require 'scout-ai'
+require 'scout/llm/backends/relay'
+
+$0 = "scout #{$previous_commands.any? ? $previous_commands*" " + " " : "" }#{ File.basename(__FILE__) }" if $previous_commands
+
+options = SOPT.setup <<EOF
+
+Ask GPT
+
+$ #{$0} [<options>] [<directory>]
+
+Use STDIN to add context to the question
+
+-h--help Print this help
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage 
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+Log.severity = options.delete(:log).to_i if options.include? :log
+
+directory = ARGV.first || Scout.var.query.find
+
+directory = Path.setup directory
+
+while true
+  files = directory.glob('*.json')
+
+  files.each do |file|
+    id = File.basename(file, '.json')
+
+    messages = Open.json(file)
+
+    iii messages
+    LLM.ask(messages, options.merge(process: id))
+
+    Open.rm(file)
+  end
+
+  sleep 1 if files.empty?
+end

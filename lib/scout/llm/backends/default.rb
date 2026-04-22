@@ -451,26 +451,59 @@ module LLM
         reasoning_content
       end
 
+
+      def upload_messages(server, messages)
+        id = Misc.digest(messages)
+        messages.unshift({role: 'backend', content: self::TAG})
+        TmpFile.with_file messages.to_json do |file|
+          CMD.cmd("scp #{file} #{server}:.scout/var/query/#{ id }.json")
+        end
+        id
+      end
+
+      def gather_response(server, id)
+        TmpFile.with_file do |file|
+          begin
+            CMD.cmd("scp #{server}:.scout/var/query/response/#{ id }.json #{ file }")
+            JSON.parse(Open.read(file))
+          rescue
+            sleep 1
+            retry
+          end
+        end
+      end
+
       def ask(question, options = {}, &block)
         original_options = options.dup
 
-        return_messages, log_response, current_meta = IndiferentHash.process_options options, 
-          :return_messages, :log_response, :current_meta,
+        return_messages, log_response, current_meta, relay, process = IndiferentHash.process_options options, 
+          :return_messages, :log_response, :current_meta, :relay, :process,
           return_messages: false, log_response: true
 
         messages = self.messages question, options
+        
+        if relay
+          id = upload_messages(relay,  messages)
+          response = gather_response(relay, id)
+        else
 
-        client = prepare_client options, messages
-        formatted_messages = format_messages(messages)
-        tools = tools(formatted_messages, options)
+          client = prepare_client options, messages
+          formatted_messages = format_messages(messages)
+          tools = tools(formatted_messages, options)
 
-        response = begin
-                     Log.medium "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
-                     query(client, formatted_messages, tools, options)
-                   rescue Exception
-                     Log.debug 'Asking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
-                     raise $!
-                   end
+          response = begin
+                       Log.medium "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
+                       query(client, formatted_messages, tools, options)
+                     rescue Exception
+                       Log.debug 'Asking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
+                       raise $!
+                     end
+        end
+
+        if process
+          Scout.var.query.response[process].set_extension(:json).write response.to_json
+          return response
+        end
 
         Log.debug "Response: #{Log.fingerprint response}"
 

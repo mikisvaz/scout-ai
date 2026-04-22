@@ -2,6 +2,13 @@ require 'scout'
 require_relative 'chat'
 
 module LLM
+
+  BACKENDS = IndiferentHash.setup({})
+
+  def self.register_backend(name, mod)
+    BACKENDS[name] = mod
+  end
+
   def self.ask(question, options = {}, &block)
     messages = LLM.chat(question)
     options = IndiferentHash.add_defaults LLM.options(messages), options
@@ -73,13 +80,15 @@ module LLM
         require_relative 'backends/bedrock'
         LLM::Bedrock.ask(messages, options, &block)
       else
-        raise "Unknown backend: #{backend}"
+        mod = BACKENDS[backend]
+        raise "Unknown backend: #{backend}" if mod.nil?
+        mod.ask(messages, options, &block)
       end
     end
 
     Chat.setup res if Array === res
 
-    Log.high Log.color :blue, "Response:\n" + Chat.print_brief(res, %w(meta assistant)) 
+    Log.high Log.color :blue, "Response:\n" + Chat.print_brief(res, %w(meta assistant)) if Array === res
 
     res
   end
