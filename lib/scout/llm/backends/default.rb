@@ -452,10 +452,10 @@ module LLM
       end
 
 
-      def upload_messages(server, messages)
+      def upload_messages(server, messages, options)
         id = Misc.digest(messages)
         messages.unshift({role: 'backend', content: self::TAG})
-        TmpFile.with_file messages.to_json do |file|
+        TmpFile.with_file [messages, options].to_json do |file|
           CMD.cmd("scp #{file} #{server}:.scout/var/query/#{ id }.json")
         end
         id
@@ -483,7 +483,7 @@ module LLM
         messages = self.messages question, options
         
         if relay
-          id = upload_messages(relay,  messages)
+          id = upload_messages(relay,  messages, options)
           response = gather_response(relay, id)
         else
 

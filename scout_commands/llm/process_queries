@@ -37,9 +37,8 @@ while true
   files.each do |file|
     id = File.basename(file, '.json')
 
-    messages = Open.json(file)
+    messages, options = Open.json(file)
 
-    iii messages
     LLM.ask(messages, options.merge(process: id))
 
     Open.rm(file)
