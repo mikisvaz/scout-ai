@@ -455,7 +455,7 @@ module LLM
       def upload_messages(server, messages, options)
         id = Misc.digest(messages)
         messages.unshift({role: 'backend', content: self::TAG})
-        TmpFile.with_file [messages, options.except(:client)].to_json do |file|
+        TmpFile.with_file [messages, options].to_json do |file|
           CMD.cmd("scp #{file} #{server}:.scout/var/query/#{ id }.json")
         end
         id
@@ -486,7 +486,6 @@ module LLM
           id = upload_messages(relay,  messages, options)
           response = gather_response(relay, id)
           IndiferentHash.setup(response)
-          client = prepare_client options, messages
           formatted_messages = format_messages(messages)
           tools = tools(formatted_messages, options)
         else
