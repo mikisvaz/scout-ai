@@ -29,7 +29,7 @@ module LLM
       def client(options)
         url, key, model, api_version, log_errors, request_timeout = IndiferentHash.process_options options,
           :url, :key, :model, :api_version, :log_errors, :request_timeout,
-          log_errors: true, request_timeout: 1200, api_version: 'v1'
+          log_errors: true, request_timeout: 12000, api_version: 'v1'
 
         Object::OpenAI::Client.new(api_version: api_version, access_token: key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout)
       end
@@ -497,9 +497,18 @@ module LLM
           response = begin
                        Log.medium "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
                        query(client, formatted_messages, tools, options)
-                     rescue Exception
+                     rescue Exception => e
                        Log.debug 'Asking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
-                       raise $!
+                       begin
+                         tmpfile = TmpFile.tmp_file 
+                         Open.write tmpfile + ".chat", Chat.print(messages)
+                         Open.write tmpfile + ".options", options.except(:messages, :tools).to_json
+                         Open.write tmpfile + ".meta", current_meta.to_json
+                         Log.warn "Messages and options saved in #{tmpfile}"
+                       rescue
+                       end
+
+                       raise e
                      end
         end
 
