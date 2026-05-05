@@ -3,13 +3,13 @@ require 'scout'
 module LLM
   def self.embed(text, options = {})
     endpoint = IndiferentHash.process_options options, :endpoint
-    endpoint ||= Scout::Config.get :endpoint, :embed, :llm, env: 'EMBED_ENDPOINT,LLM_ENDPOINT', default: :openai
+    endpoint ||= Scout::Config.get :endpoint, :embed, :llm, env: 'EMBED_ENDPOINT,LLM_ENDPOINT', default: :embed
     if endpoint && Scout.etc.AI[endpoint].exists?
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
     end
 
     backend = IndiferentHash.process_options options, :backend
-    backend ||= Scout::Config.get :backend, :embed, :llm, env: 'EMBED_BACKEND,LLM_BACKEND', default: :openai
+    backend ||= Scout::Config.get :backend, :embed, :llm, env: 'EMBED_BACKEND,LLM_BACKEND', default: :embed
 
     case backend
     when :openai, "openai"
