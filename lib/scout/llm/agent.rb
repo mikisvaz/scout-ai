@@ -140,6 +140,7 @@ module LLM
     end
 
     def self.load_agent(agent_name = nil, options = {})
+      agent_name = agent_name.to_s if Symbol === agent_name
       if agent_name && Path.is_filename?(agent_name) 
         if File.directory?(agent_name)
           dir = Path.setup(agent_name) unless Path === agent_name
