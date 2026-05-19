@@ -33,11 +33,10 @@ module Chat
         jobs << job unless message[:role] == 'exec_task'
 
         if message[:role] == 'exec_task'
-          begin
-            {role: 'user', content: job.exec}
-          rescue
-            {role: 'exec_job', content: $!}
-          end
+          result = job.exec
+          result = result.to_s if TSV === result
+          result = result.to_json unless String === result
+          {role: 'user', content: result}
         elsif message[:role] == 'inline_task'
           {role: 'inline_job', content: job.path.find}
         else

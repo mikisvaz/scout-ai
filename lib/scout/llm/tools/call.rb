@@ -97,12 +97,20 @@ module LLM
       if Step === content
         step = content
         if content.done?
-          content = content.load.to_json if content.done?
+          content = content.load if content.done?
+          content = content.to_s if TSV === content
+          content = content.to_json unless String === content
         elsif content.error? && content.exception
-          content = {exception: content.exception.message, stack: content.exception.backtrace }.to_json
+          content = if String === content.exception
+                      {exception: content.exception}.to_json
+                    else
+                      {exception: content.exception.message, stack: content.exception.backtrace }.to_json
+                    end
         else
           begin
-            content = content.run.to_json
+            content = content.run
+            content = content.to_s if TSV === content
+            content = content.to_json unless String === content
           rescue
             content = {exception: $!.message, stack: $!.backtrace }.to_json
           end

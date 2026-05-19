@@ -62,6 +62,13 @@ module Chat
     message(:task, content)
   end
 
+  def exec_task(workflow, task_name, inputs = {})
+    input_str = IndiferentHash.print_options inputs
+    content = [workflow, task_name, input_str]*" "
+    message(:exec_task, content)
+  end
+
+
   def inline_task(workflow, task_name, inputs = {})
     input_str = IndiferentHash.print_options inputs
     content = [workflow, task_name, input_str]*" "
