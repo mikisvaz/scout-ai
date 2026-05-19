@@ -92,7 +92,6 @@ prompt.
 
       @other_options[:tools][task_name] = [block, definition]
     end
-  end
     def delegate(agent, name, description, &block)
       @other_options[:tools] ||= {}
       task_name = "hand_off_to_#{name}".to_sym
@@ -139,5 +138,6 @@ prompt.
 
       @other_options[:tools][task_name] = [block, definition]
     end
+  end
 
 end
