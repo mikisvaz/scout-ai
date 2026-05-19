@@ -1,0 +1,60 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'scout'
+
+cmd = $previous_commands ?
+  "scout #{$previous_commands.any? ? "#{$previous_commands * ' '} " : ''}#{File.basename(__FILE__)}" :
+  $PROGRAM_NAME
+
+options = SOPT.setup <<~EOF
+
+Format a chat in word
+
+$ #{cmd} [<options>] <chat> <word>
+
+-h--help Print this help
+-r--reference* Use a different reference.docx
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+help, reference = IndiferentHash.process_options options, :help, :reference
+
+reference ||= Scout.share.word["reference.docx"].find
+
+chat, word, _ = ARGV
+
+raise MissingParameterException, :chat if chat.nil?
+raise MissingParameterException, :word if word.nil?
+
+messages = Chat.parse Open.read(chat)
+
+out = [] 
+messages.each do |message|
+  IndiferentHash.setup(message)
+  case message['role']
+  when 'user'
+    out.push <<-EOF
+::: {custom-style="UserBlock"}
+
+#{message['content']}
+
+:::
+    EOF
+  when 'assistant'
+    out.push message['content']
+  else
+    next
+  end
+end
+
+TmpFile.with_file out * "\n", extension: :md do |markdown|
+  CMD.cmd(:pandoc, "'#{markdown}' --reference-doc=#{reference} -o #{word} ")
+end
