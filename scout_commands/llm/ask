@@ -111,10 +111,10 @@ elsif inline
     chat = [
       {role: :system, content: "Write a succint reply with no commentary and no formatting."},
       {role: :user, content: "Find the following question as a comment in the file give a response to be placed inline: #{question}"},
-      LLM.tag('file', file, inline)
+      Chat.tag('file', file, inline)
     ]
 
-    chat = Chat.chat(chat)
+    chat = LLM.chat(chat)
 
     imports.each{|import| chat.import import } if imports
 

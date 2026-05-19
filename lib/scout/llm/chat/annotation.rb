@@ -91,7 +91,7 @@ module Chat
   end
 
   def tag(content, name=nil, tag=:file, role=:user)
-    self.message role, LLM.tag(tag, content, name)
+    self.message role, Chat.tag(tag, content, name)
   end
 
 
