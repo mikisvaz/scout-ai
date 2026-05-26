@@ -48,6 +48,7 @@ messages.each do |message|
 #{message['content']}
 
 :::
+
     EOF
   when 'assistant'
     out.push message['content']
@@ -57,5 +58,5 @@ messages.each do |message|
 end
 
 TmpFile.with_file out * "\n", extension: :md do |markdown|
-  CMD.cmd(:pandoc, "'#{markdown}' --reference-doc=#{reference} -o #{word} ")
+  CMD.cmd(:pandoc, "'#{markdown}' --reference-doc=#{reference} -o #{word}")
 end
