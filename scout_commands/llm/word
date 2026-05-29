@@ -42,6 +42,7 @@ messages.each do |message|
   case message['role']
   when 'user'
     out.push <<-EOF
+
 ::: {custom-style="UserBlock"}
 
 #{message['content']}
