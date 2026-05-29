@@ -115,6 +115,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
     embed.rb
 
+    image.rb
+
     rag.rb
 
     mcp.rb

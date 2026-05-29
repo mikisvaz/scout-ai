@@ -39,6 +39,10 @@ module LLM
       end
     end
 
+    def create_image(file, options = {})
+      current_chat.create_image(file, @other_options.merge(options))
+    end
+
 
     def json(...)
       current_chat.format :json

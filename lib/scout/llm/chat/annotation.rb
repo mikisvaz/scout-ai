@@ -243,7 +243,7 @@ module Chat
   # Image
   def create_image(file, ...)
     base64_image = LLM.image(LLM.chat(self), ...)
-    Open.write(file, Base64.decode(file_content), mode: 'wb')
+    Open.write(file, Base64.decode64(base64_image), mode: 'wb')
   end
 
   def meta()

@@ -215,6 +215,8 @@ module LLM
           definition = obj if Hash === obj
           definition
 
+          next definition if definition.keys.collect{|k| k.to_s } == ['type']
+
           definition = case definition[:function]
                        when Hash
                          definition.merge(definition.delete :function)
@@ -297,9 +299,14 @@ module LLM
         case tools
         when Array
           tools = tools.inject({}) do |acc, definition|
+            next definition unless Hash === definition
             IndiferentHash.setup definition
             name = definition.dig('name') || definition.dig('function', 'name')
-            acc.merge(name => definition)
+            if name
+              acc.merge(name => definition)
+            else
+              acc.merge(definition[:type] => definition)
+            end
           end
         when nil
           tools = {}
@@ -383,6 +390,8 @@ module LLM
             next
           when 'function_call', 'mcp_call'
             [tool_call_outputs.shift, tool_call_outputs.shift]
+          when 'image_generation_call'
+            {role: 'image', content: output}
           when 'web_search_call'
             next
           else
@@ -548,37 +557,14 @@ module LLM
       end
 
       def image(question, options = {}, &block)
-        messages = LLM.chat(question)
-        options = options.merge LLM.options messages
-        tools = LLM.tools messages
-        associations = LLM.associations messages
+        messages = ask(question, options.merge({tools: [{type: 'image_generation'}], return_messages: true}), &block)
 
-        client, url, key, model, log_errors, return_messages, format = IndiferentHash.process_options options,
-          :client, :url, :key, :model, :log_errors, :return_messages, :format,
-          log_errors: true
-
-        if client.nil?
-          url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
-          key ||= LLM.get_url_config(:key, url, :openai_ask, :ask, :openai, env: 'OPENAI_KEY')
-          client = LLM::OpenAI.client url, key, log_errors
-        end
-
-        if model.nil?
-          url ||= Scout::Config.get(:url, :openai_ask, :ask, :openai, env: 'OPENAI_URL')
-          model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: 'OPENAI_MODEL', default: 'gpt-image-1')
-        end
-
-        messages = process_input messages
-        input = []
-        parameters = {}
-        messages.each do |message|
-          input << message
-        end
-        parameters[:prompt] = LLM.print(input)
-
-        response = client.images.generate(parameters: parameters)
-
-        response
+        base64_image = begin
+                         messages.select{|info| info[:role] == 'image' }.first['content']['result']
+                       rescue
+                         Log.warn 'Image error: ' + "\n" + JSON.pretty_generate(messages)
+                         raise $!
+                       end
       end
 
       def embed_query(client, text, parameters = {})
