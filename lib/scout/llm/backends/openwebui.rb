@@ -17,20 +17,22 @@ module LLM
     include OpenAIMethods
 
     def client(options, messages = nil)
-      url, key, model = IndiferentHash.process_options options,
-        :url, :key, :model
+      url, key, model, request_timeout = IndiferentHash.process_options options,
+        :url, :key, :model, :request_timeout, 
+        request_timeout: 12000
 
       {
         base_url: url,
         key: key,
         model: model,
         method: :post,
+        request_timeout: request_timeout,
         action: 'chat/completions'
       }
     end
 
     def query(client, messages, tools = [], parameters = {})
-      base_url, key, model, method, action = IndiferentHash.process_options client.dup, :base_url, :key, :model, :method, :action
+      base_url, key, model, method, action, timeout = IndiferentHash.process_options client.dup, :base_url, :key, :model, :method, :action, :request_timeout
       url = File.join(base_url, action.to_s)
 
       parameters = parameters.dup
@@ -38,6 +40,9 @@ module LLM
       parameters[:tools] = format_tool_definitions(tools) if tools && tools.any?
       parameters[:messages] = messages
       parameters[:verify_ssl] = false
+      parameters[:timeout] = timeout.to_i if timeout
+      parameters[:read_timeout] = timeout.to_i if timeout
+      parameters[:open_timeout] = timeout.to_i if timeout
 
       headers = IndiferentHash.setup({ 'Authorization' => "Bearer #{key}", 'Content-Type' => 'application/json' })
       Misc.insist do

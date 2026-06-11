@@ -35,7 +35,7 @@ module LLM
           :url, :key, :model, :api_version, :log_errors, :request_timeout,
           log_errors: true, request_timeout: 12000, api_version: 'v1'
 
-        Object::OpenAI::Client.new(api_version: api_version, access_token: key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout)
+        Object::OpenAI::Client.new(api_version: api_version, access_token: key, log_errors: log_errors, uri_base: url, request_timeout: request_timeout.to_i)
       end
 
       def client_options(options)
@@ -47,7 +47,7 @@ module LLM
         key ||= LLM.get_url_config(:key, url, "#{tag}_ask", :ask, tag, env: "#{tag.upcase}_KEY")
         model ||= LLM.get_url_config(:model, url, :openai_ask, :ask, :openai, env: "#{tag.upcase}_MODEL,MODEL", default: default_model)
 
-        { url: url, key: key, model: model, api_version: api_version }.reject { |_k, v| v.nil? }
+        { url: url, key: key, model: model, api_version: api_version, request_timeout: request_timeout }.reject { |_k, v| v.nil? }
       end
 
       def extra_options(options, messages = nil)
