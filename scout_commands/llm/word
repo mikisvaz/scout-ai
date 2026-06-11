@@ -15,6 +15,7 @@ $ #{cmd} [<options>] <chat> <word>
 
 -h--help Print this help
 -r--reference* Use a different reference.docx
+-l--last Format only the last interaction
 EOF
 if options[:help]
   if defined? scout_usage
@@ -25,16 +26,23 @@ if options[:help]
   exit 0
 end
 
-help, reference = IndiferentHash.process_options options, :help, :reference
+help, reference, last = IndiferentHash.process_options options, :help, :reference, :last
 
 reference ||= Scout.share.word["reference.docx"].find
 
 chat, word, _ = ARGV
 
 raise MissingParameterException, :chat if chat.nil?
-raise MissingParameterException, :word if word.nil?
+
+if word.nil?
+  word = chat.sub(/\.(txt|chat|md)$/i, '') + '.docx'
+end
 
 messages = Chat.parse Open.read(chat)
+
+if last
+  messages = messages.select{|m| %w(user assistant).include? m[:role].to_s }[-2..-1]
+end
 
 out = [] 
 messages.each do |message|
