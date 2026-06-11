@@ -65,7 +65,15 @@ module LLM
                 when Exception
                   {exception: function_response.message, stack: function_response.backtrace }.to_json
                 else
-                  function_response.to_json
+                  begin
+                    function_response.to_json
+                  rescue Exception => e
+                    begin
+                      function_response.to_s
+                    rescue
+                      {exception: e.message, stack: e.backtrace }.to_json
+                    end
+                  end
                 end
 
       content = content.to_s if Numeric === content

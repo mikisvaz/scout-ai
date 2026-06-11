@@ -23,6 +23,10 @@ module LLM
   # methods (like `query` / `format_tool_call`) and Ruby will correctly dispatch
   # to the backend override.
   module Backend
+    class BackendException
+      attr_accessor :chat
+    end
+
     module ClassMethods
       #{{{ CLIENT
 
@@ -514,6 +518,8 @@ module LLM
                          Open.write tmpfile + ".options", options.except(:messages, :tools).to_json
                          Open.write tmpfile + ".meta", current_meta.to_json
                          Log.warn "Messages and options saved in #{tmpfile}"
+                         e.extend LLM::Backend::BackendException
+                         e.chat tmpfile
                        rescue
                        end
 
@@ -532,7 +538,27 @@ module LLM
 
         reasoning = reasoning response
 
-        output = process_response messages, response, tools, options, &block
+        output = begin
+                   process_response messages, response, tools, options, &block
+                 rescue Exception => e
+
+                   Log.debug 'Processing response error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
+                   begin
+                     tmpfile = TmpFile.tmp_file 
+                     previous_response_id_error = options.delete
+                     if previous_response_id_error
+                       message.unshift IndiferentHash.setup({role: :previous_response_id, content: previous_response_id_error})
+                     end
+                     Open.write tmpfile + ".chat", Chat.print(messages)
+                     Open.write tmpfile + ".options", options.except(:messages, :tools).to_json
+                     Open.write tmpfile + ".meta", current_meta.to_json
+                     Log.warn "Messages and options saved in #{tmpfile}"
+                     e.extend LLM::Backend::BackendException
+                     e.chat tmpfile
+                   rescue
+                   end
+                   raise e
+                 end
 
         if log_response
           meta = self.update_meta response, current_meta
