@@ -64,6 +64,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   SGLang
 
+  observatory.rb
  }
  lib=lib {
   scout-ai.rb
@@ -124,8 +125,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     agent.rb
     agent=agent{
      chat.rb
-     iterate.rb
      delegate.rb
+     iterate.rb
     }
    }
    model=model{
