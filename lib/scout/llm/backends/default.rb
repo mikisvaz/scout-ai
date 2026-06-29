@@ -435,6 +435,7 @@ module LLM
               meta[session_name] += value
 
               Thread.current[session_name] = meta[session_name]
+              Log.low "Meta: #{Log.fingerprint meta}"
               meta.delete name if meta[name] == meta[session_name]
             else
               value = value.gsub(/\s+/,' ') if String === value
