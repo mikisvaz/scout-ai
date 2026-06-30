@@ -114,6 +114,13 @@ module LLM
       info['role'] = 'tool'
       info
     end
+
+    def update_meta(response, current_meta = nil)
+    end
+
+    def reasoning(response, current_meta = nil)
+    end
+
   end
 
   module OLlama

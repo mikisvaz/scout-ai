@@ -459,10 +459,13 @@ module LLM
       end
 
       def reasoning(response, current_meta = nil)
-        reasoning_content = response.dig('choices', 0, 'message', 'reasoning_content')
-        reasoning_content = reasoning_content.gsub("\n", ' ') if String === reasoning_content
-        Log.medium "Reasoning:\n" + Log.color(:cyan, reasoning_content) if reasoning_content
-        reasoning_content
+        begin
+          reasoning_content = response.dig('choices', 0, 'message', 'reasoning_content')
+          reasoning_content = reasoning_content.gsub("\n", ' ') if String === reasoning_content
+          Log.medium "Reasoning:\n" + Log.color(:cyan, reasoning_content) if reasoning_content
+          reasoning_content
+        rescue
+        end
       end
 
 
