@@ -60,6 +60,10 @@ module LLM
                   function_response
                 when String
                   function_response
+                when IO
+                  function_response.read
+                when TSV::Dumper
+                  function_response.read
                 when nil
                   "success"
                 when Exception

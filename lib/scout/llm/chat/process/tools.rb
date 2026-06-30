@@ -80,6 +80,9 @@ module Chat
 
           content = if step.done?
                       Open.read(step.path)
+                    elsif step.streamming?
+                      step.join
+                      step.load
                     elsif step.error?
                       Log.warn "Error in job #{step.path}"
                       e = step.exception
