@@ -2,9 +2,15 @@ module Chat
   def self.clear(messages, role = 'clear')
     new = []
 
+    clear_tools = false
     messages.reverse.each do |message|
       if message[:role].to_s == role.to_s
         break
+      elsif message[:role].to_s == 'clear_tools' 
+        clear_tools = message['content'].to_s != 'false'
+      elsif message[:role].to_s == 'function_call' ||
+        message[:role].to_s == 'function_call_output' 
+        new << message unless clear_tools
       else
         new << message
       end

@@ -88,6 +88,10 @@ module LLM
         end
 
         if workflow && workflow.tasks.include?(:ask)
+          other_options.each do |key,value|
+            messages.push(IndiferentHash.setup({role: :option, content: "#{key} #{value}"})) 
+          end
+
           options.each do |key,value|
             messages.push(IndiferentHash.setup({role: :option, content: "#{key} #{value}"})) 
           end
