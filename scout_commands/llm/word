@@ -68,3 +68,4 @@ end
 TmpFile.with_file out * "\n", extension: :md do |markdown|
   CMD.cmd(:pandoc, "'#{markdown}' --reference-doc=#{reference} -o #{word}")
 end
+puts word
