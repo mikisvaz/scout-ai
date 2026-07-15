@@ -1,6 +1,15 @@
 require 'scout/annotation'
+
 module Chat
   extend Annotation
+
+  def self.parse_json(text)
+    return nil if text.nil? || text.empty?
+    re = /.*\`\`\`json\n(.*)\`\`\`\n?.*/sm
+    re = Regexp.new( re.source.encode(text.encoding), re.options)
+    text = text.gsub(re, '\1') if text.include?('```json')
+    JSON.parse text
+  end
 
   def message(role, content)
     self.append({role: role.to_s, content: content})
@@ -147,10 +156,10 @@ module Chat
     messages
   end
 
-  def json(...)
+  def json(*args, only_ask: false, **kwargs)
     self.format :json
-    output = ask(...)
-    obj = JSON.parse output
+    output = only_ask ? ask(*args, **kwargs) : chat(*args, **kwargs)
+    obj = Chat.parse_json output
     if (Hash === obj) and obj.keys == ['content']
       obj['content']
     else
@@ -158,10 +167,10 @@ module Chat
     end
   end
 
-  def json_format(format, ...)
+  def json_format(fornat, *args, only_ask: false, **kwargs)
     self.format format
-    output = ask(...)
-    obj = JSON.parse output
+    output = only_ask ? ask(*args, **kwargs) : chat(*args, **kwargs)
+    obj = Chat.parse_json output
     if (Hash === obj) and obj.keys == ['content']
       obj['content']
     else

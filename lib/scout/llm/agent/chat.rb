@@ -43,12 +43,11 @@ module LLM
       current_chat.create_image(file, @other_options.merge(options))
     end
 
-
     def json(...)
       current_chat.format :json
-      output = ask(current_chat, ...)
+      output = chat(...)
       current_chat.format nil
-      obj = JSON.parse output
+      obj = Chat.parse_json output
       if (Hash === obj) and obj.keys == ['content']
         obj['content']
       else
@@ -56,21 +55,46 @@ module LLM
       end
     end
 
-    def json_format(format, options = {})
+    def json_format(format, ...)
       current_chat.format format
-      output = ask(current_chat, options.merge({return_messages: false}))
-      obj = begin
-              JSON.parse output
-            rescue JSON::ParserError
-              Log.warn "Not valid JSON:" + output
-              raise $!
-            end
+      output = chat(...)
+      current_chat.format nil
+      obj = Chat.parse_json output
       if (Hash === obj) and obj.keys == ['content']
         obj['content']
       else
         obj
       end
     end
+
+    #def json(...)
+    #  current_chat.format :json
+    #  output = ask(current_chat, ...)
+    #  current_chat.format nil
+    #  obj = Chat.parse_json output
+    #  if (Hash === obj) and obj.keys == ['content']
+    #    obj['content']
+    #  else
+    #    obj
+    #  end
+    #end
+
+    #def json_format(format, options = {})
+    #  current_chat.format format
+    #  output = ask(current_chat, options.merge({return_messages: false}))
+    #  current_chat.format nil
+    #  obj = begin
+    #          obj = Chat.parse_json output
+    #        rescue JSON::ParserError
+    #          Log.warn "Not valid JSON:" + output
+    #          raise $!
+    #        end
+    #  if (Hash === obj) and obj.keys == ['content']
+    #    obj['content']
+    #  else
+    #    obj
+    #  end
+    #end
 
     def get_previous_response_id
       msg = current_chat.reverse.find{|msg| msg[:role].to_sym == :previous_response_id }
