@@ -92,19 +92,16 @@ prompt.
 
       @other_options[:tools][task_name] = [block, definition]
     end
-    def delegate(agent, name, description, &block)
+
+    def delegate(agent, name, description, task_name = nil, &block)
       @other_options[:tools] ||= {}
-      task_name = "hand_off_to_#{name}".to_sym
+      task_name = "hand_off_to_#{name}".to_sym if task_name.nil?
 
       block ||= Proc.new do |name, parameters|
         message = parameters[:message]
         new_conversation = parameters[:new_conversation]
         Log.medium "Delegated to #{agent}: " + Log.fingerprint(message)
-        if new_conversation
-          agent.start
-        else
-          agent.purge
-        end
+        agent.start if new_conversation
         agent.user message
         agent.chat
       end
