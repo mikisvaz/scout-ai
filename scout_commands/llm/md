@@ -1,0 +1,76 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'scout'
+
+cmd = $previous_commands ?
+  "scout #{$previous_commands.any? ? "#{$previous_commands * ' '} " : ''}#{File.basename(__FILE__)}" :
+  $PROGRAM_NAME
+
+options = SOPT.setup <<~EOF
+
+Format a chat in Markdown
+
+$ #{cmd} [<options>] <chat> <markdown>
+
+-h--help Print this help
+-l--last Format only the last interaction
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+help, last = IndiferentHash.process_options options, :help, :last
+
+chat, output, _ = ARGV
+
+raise MissingParameterException, :chat if chat.nil?
+
+messages = Chat.parse Open.read(chat)
+
+if last
+  messages = messages.select{|m| %w(user assistant).include? m[:role].to_s }[-2..-1]
+end
+
+out = [] 
+messages.each do |message|
+  IndiferentHash.setup(message)
+  case message['role']
+  when 'user'
+    out.push <<-EOF
+
+---
+# 👤 User
+---
+
+#{message['content']}
+
+    EOF
+  when 'assistant'
+    out.push <<-EOF
+
+---
+# 🤖 Assistant
+---
+
+#{message['content']}
+
+    EOF
+  else
+    next
+  end
+end
+
+markdown = out * "\n"
+
+if output
+  Open.write(output, markdown)
+  puts output
+else
+  puts markdown
+end
