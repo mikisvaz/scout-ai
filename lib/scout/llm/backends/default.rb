@@ -449,7 +449,7 @@ module LLM
           if name.end_with?('_s')
             chat_name = name.sub(/_s$/,'_c')
             current_value = current_meta[chat_name] || current_meta[name] || 0
-            new[chat_name] = current_value + value
+            new[chat_name] = current_value.to_i + value.to_i
           end
         end
 

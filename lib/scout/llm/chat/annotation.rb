@@ -109,7 +109,8 @@ module Chat
   end
 
   def chat(options = {})
-    response = ask(options.merge(return_messages: true))
+    options = IndiferentHash.add_defaults options, return_messages: true
+    response = ask(options)
     if Array === response
       self.concat(response)
       final

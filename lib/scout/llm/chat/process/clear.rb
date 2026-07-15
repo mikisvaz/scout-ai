@@ -3,6 +3,7 @@ module Chat
     new = []
 
     clear_tools = false
+    clean_roles = []
     messages.reverse.each do |message|
       if message[:role].to_s == role.to_s
         break
@@ -11,12 +12,21 @@ module Chat
       elsif message[:role].to_s == 'function_call' ||
         message[:role].to_s == 'function_call_output' 
         new << message unless clear_tools
+      elsif message[:role].to_s == 'clean_role' || 
+        message[:role].to_s == 'clear_role'
+        clean_roles << message[:content].strip
       else
         new << message
       end
     end
 
-    Chat.setup new.reverse
+    new = Chat.setup new.reverse
+
+    clean_roles.each do |role|
+      new = self.clean(new, role)
+    end
+    
+    new
   end
 
   def self.clean(messages, role = ['skip', 'previous_response_id'])

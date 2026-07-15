@@ -21,6 +21,7 @@ module LLM
 
     Chat.parse question
   end
+
   def self.chat(file = [], original = nil)
     original ||= (String === file and Open.exists?(file)) ? file : Path.setup($0.dup)
     caller_lib_dir = Path.caller_lib_dir(nil, 'chats')
@@ -37,6 +38,7 @@ module LLM
     messages = Chat.clear messages
     messages = Chat.clean messages
 
+    messages = Chat.config messages
     messages = Chat.tasks messages
     messages = Chat.jobs messages
     messages = Chat.files messages, original, caller_lib_dir

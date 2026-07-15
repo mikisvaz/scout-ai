@@ -80,7 +80,7 @@ module Chat
 
           content = if step.done?
                       Open.read(step.path)
-                    elsif step.streamming?
+                    elsif step.streaming?
                       step.join
                       step.load
                     elsif step.error?
@@ -185,7 +185,13 @@ Below is the documentation of the workflow:
       elsif role == 'kb'
         knowledge_base_name, *databases = content_tokens(message)
         databases = nil if databases.empty?
+
         knowledge_base = KnowledgeBase.load knowledge_base_name
+
+        if knowledge_base.all_databases.empty?
+          agent = LLM.load_agent knowledge_base_name
+          knowledge_base = agent.knowledge_base if agent.knowledge_base && agent.knowledge_base.all_databases.any?
+        end
 
         knowledge_base_definition = LLM.knowledge_base_tool_definition(knowledge_base, databases)
         tool_definitions.merge!(knowledge_base_definition)
