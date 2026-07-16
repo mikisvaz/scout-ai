@@ -1,4 +1,12 @@
 module Chat
+  def self.parse_json(text)
+    return nil if text.nil? || text.empty?
+    re = /.*\`\`\`json\n(.*)\`\`\`\n?.*/sm
+    re = Regexp.new(re.source.encode(text.encoding), re.options)
+    text = text.gsub(re, '\1') if text.include?('```json')
+    JSON.parse text
+  end
+
   def self.parse(text, role = nil)
     default_role = "user"
 

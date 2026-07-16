@@ -412,6 +412,7 @@ module LLM
 
       def update_meta(response, current_meta = nil)
         current_meta = {} if current_meta.nil?
+        IndiferentHash.setup current_meta
 
         pattern = {
           'pt+': [['usage','prompt_tokens']],
@@ -419,7 +420,7 @@ module LLM
           'tt+': [['usage','total_tokens']],
         }
 
-        meta = {}
+        meta = IndiferentHash.setup({})
         pattern.each do |name,key_list|
           name = name.to_s
           key_list.each do |keys|
@@ -435,7 +436,6 @@ module LLM
               meta[session_name] += value
 
               Thread.current[session_name] = meta[session_name]
-              Log.low "Meta: #{Log.fingerprint meta}"
               meta.delete name if meta[name] == meta[session_name]
             else
               value = value.gsub(/\s+/,' ') if String === value
@@ -454,6 +454,8 @@ module LLM
         end
 
         meta.merge! new
+
+        Log.low "Meta: #{Log.fingerprint meta}"
 
         meta
       end

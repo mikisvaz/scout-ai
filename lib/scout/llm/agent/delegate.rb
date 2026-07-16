@@ -3,7 +3,7 @@ module LLM
 
     attr_accessor :society, :chats
 
-    def load_agent(agent_name, options)
+    def load_agent(agent_name, options = {})
       raise ParameterException, 
         "Agent name must be a single word optionally including a few puntuation characters" unless agent_name =~ /^[a-z_.-]*$/i
       @society ||= {}
@@ -30,7 +30,8 @@ module LLM
 
           res = case chat_id
                 when 'current'
-                  agent = load_chat agent_name, options, 'current'
+                  chat_id_real = "#{agent_name}-current"
+                  agent = load_chat agent_name, options, chat_id_real
                   chat = self.current_chat - self.start_chat
                   agent.concat chat
                   agent.user prompt
@@ -40,6 +41,8 @@ module LLM
                   agent.prompt prompt
                 else
                   agent = load_chat agent_name, options, chat_id
+                  chat = self.current_chat - self.start_chat
+                  agent.concat chat
                   agent.user prompt
                   agent.chat
                 end

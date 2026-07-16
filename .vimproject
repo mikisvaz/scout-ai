@@ -81,6 +81,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      annotation.rb
      parse.rb
      process.rb
+     persist.rb
      process=process{
       tools.rb
       files.rb
@@ -127,7 +128,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      chat.rb
      delegate.rb
      iterate.rb
+     workflow.rb
     }
+
    }
    model=model{
     util=util{

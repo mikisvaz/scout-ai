@@ -3,14 +3,6 @@ require 'scout/annotation'
 module Chat
   extend Annotation
 
-  def self.parse_json(text)
-    return nil if text.nil? || text.empty?
-    re = /.*\`\`\`json\n(.*)\`\`\`\n?.*/sm
-    re = Regexp.new( re.source.encode(text.encoding), re.options)
-    text = text.gsub(re, '\1') if text.include?('```json')
-    JSON.parse text
-  end
-
   def message(role, content)
     self.append({role: role.to_s, content: content})
   end
@@ -113,7 +105,7 @@ module Chat
     response = ask(options)
     if Array === response
       self.concat(response)
-      final
+      answer
     else
       self.push({role: :assistant, content: response})
       response
@@ -138,17 +130,20 @@ module Chat
     coda = [coda] if Hash === coda
     new = Chat.follow(self.dup, coda)
     self.replace new
+    self
   end
 
   def follow(coda)
     new = Chat.follow(self.dup, coda)
     self.replace new
+    self
   end
 
   def prepend(intro)
     into = [intro] if Hash === intro
     new = Chat.follow(intro, self.dup)
     self.replace new
+    self
   end
 
   def remove_role(role=:clear)

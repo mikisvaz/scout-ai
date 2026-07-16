@@ -11,6 +11,7 @@ module LLM
 
   class Agent
     attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options, :path
+
     def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
       @workflow = workflow
       @workflow = Workflow.require_workflow @workflow if String === @workflow
@@ -67,6 +68,8 @@ module LLM
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
 
+      no_ask_override = @other_options[:no_ask_override]
+
       messages.delete_if{|info| info[:role] == 'agent' }
       if (list = messages.select{|info| info[:role] == 'socialize'}).any?
         socialize = list.last[:content]
@@ -87,20 +90,21 @@ module LLM
           tools.merge!(LLM.knowledge_base_tool_definition(knowledge_base)) if knowledge_base and knowledge_base.all_databases.any?
         end
 
-        if workflow && workflow.tasks.include?(:ask)
+        if workflow && workflow.tasks.include?(:ask) && ! no_ask_override
           other_options.each do |key,value|
             messages.push(IndiferentHash.setup({role: :option, content: "#{key} #{value}"})) 
           end
 
-          options.each do |key,value|
+          options.except(:return_messages).each do |key,value|
             messages.push(IndiferentHash.setup({role: :option, content: "#{key} #{value}"})) 
           end
 
           job = workflow.job(:ask, chat: Chat.print(messages))
-          job.clean
+          job.clean if ENV['SCOUT_NO_ASK_CACHE'] == 'true'
           job.produce
           
           messages = LLM.chat job.path
+          messages.add_meta :job, job.short_path
           if options[:return_messages]
             messages
           else
@@ -108,7 +112,7 @@ module LLM
           end
         else
           options[:tools] = tools
-          LLM.ask messages, @other_options.merge(log_errors: true).merge(options).merge(agent: false)
+          LLM.ask messages, @other_options.except(:no_ask_override).merge(log_errors: true).merge(options).merge(agent: false)
         end
       rescue
         exception = $!
@@ -156,40 +160,43 @@ module LLM
         end
       end
 
-      agent_name ||= 'default'
+      if agent_name
 
-      workflow_path = Scout.workflows[agent_name]
-      agent_path = Scout.var.Agent[agent_name]
-      agent_path = Scout.chats[agent_name] unless agent_path.exists?
-      agent_path = Scout.chats.Agent[agent_name] unless agent_path.exists?
+        workflow_path = Scout.workflows[agent_name]
+        agent_path = Scout.Agent[agent_name]
+        agent_path = Scout.var.Agent[agent_name] unless agent_path.exists?
+        agent_path = Scout.chats.Agent[agent_name] unless agent_path.exists?
+        agent_path = Scout.chats[agent_name] unless agent_path.exists?
 
-      raise ScoutException, "No agent found with name #{agent_name}" unless workflow_path.exists? || agent_path.exists?
+        raise ScoutException, "No agent found with name #{agent_name}" unless workflow_path.exists? || agent_path.exists?
 
-      workflow = if workflow_path.exists?
-                   agent_path = workflow_path
-                   Workflow.require_workflow agent_name
-                 elsif agent_path.workflow.find_with_extension("rb").exists?
-                   Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
-                 elsif agent_path.python.exists? && agent_path.python.glob('*.py').any?
-                   require 'scout/workflow/python'
-                   PythonWorkflow.load_directory agent_path.python, 'ScoutAgent'
-                 end
+        @@agent_workflow ||= {}
+        workflow = @@agent_workflow[agent_name] ||= if workflow_path.exists?
+                                                      agent_path = workflow_path
+                                                      Workflow.require_workflow agent_name
+                                                    elsif agent_path.workflow.find_with_extension("rb").exists?
+                                                      Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
+                                                    elsif agent_path.python.exists? && agent_path.python.glob('*.py').any?
+                                                      require 'scout/workflow/python'
+                                                      PythonWorkflow.load_directory agent_path.python, 'ScoutAgent'
+                                                    end
 
-      knowledge_base = if agent_path.knowledge_base.exists?
-                         KnowledgeBase.load agent_path.knowledge_base.find
-                       elsif workflow_path.knowledge_base.exists?
-                         KnowledgeBase.load workflow_path.knowledge_base.find
-                       end
+        knowledge_base = if agent_path.knowledge_base.exists?
+                           KnowledgeBase.load agent_path.knowledge_base.find
+                         elsif workflow_path.knowledge_base.exists?
+                           KnowledgeBase.load workflow_path.knowledge_base.find
+                         end
 
-      chat = if agent_path.start_chat.exists?
-               Chat.setup LLM.chat(agent_path.start_chat.find)
-             elsif workflow_path.start_chat.exists?
-               Chat.setup LLM.chat(workflow_path.start_chat.find)
-             elsif agent_path.start_chat.exists?
-               Chat.setup LLM.chat(agent_path.start_chat.find)
-             elsif workflow && workflow.documentation[:description]
-               Chat.setup([ {role: 'introduce', content: workflow.name} ])
-             end
+        chat = if agent_path.start_chat.exists?
+                 Chat.setup LLM.chat(agent_path.start_chat.find)
+               elsif workflow_path.start_chat.exists?
+                 Chat.setup LLM.chat(workflow_path.start_chat.find)
+               elsif agent_path.start_chat.exists?
+                 Chat.setup LLM.chat(agent_path.start_chat.find)
+               elsif workflow && workflow.documentation[:description]
+                 Chat.setup([ {role: 'introduce', content: workflow.name} ])
+               end
+      end
 
       agent = LLM::Agent.new **options.merge(workflow: workflow, knowledge_base: knowledge_base, start_chat: chat)
       agent.path = agent_path.find if agent_path
@@ -201,3 +208,4 @@ end
 require_relative 'agent/chat'
 require_relative 'agent/iterate'
 require_relative 'agent/delegate'
+require_relative 'agent/workflow'

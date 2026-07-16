@@ -1,5 +1,15 @@
 require 'scout/workflow'
 module LLM
+  def self.scout_to_tool_input_type(type)
+    type = :text if type == :chat
+    type = :string if type == :text
+    type = :string if type == :select
+    type = :string if type == :path
+    type = :number if type == :float
+    type = :array if type.to_s.end_with?('_array')
+    type
+  end
+
   def self.task_tool_definition(workflow, task_name, inputs = nil)
     task_info = workflow.task_info(task_name)
     return nil if task_info.nil?
@@ -25,10 +35,7 @@ module LLM
       type = task_info[:input_types][input]
       description = task_info[:input_descriptions][input]
 
-      type = :string if type == :text
-      type = :string if type == :select
-      type = :string if type == :path
-      type = :number if type == :float
+      type = scout_to_tool_input_type(type) 
       type = :array if type.to_s.end_with?('_array')
 
       acc[input] = {

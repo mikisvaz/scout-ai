@@ -12,7 +12,7 @@ module Chat
 
   def self.parse_meta(str) 
     parts = str.split('=')    
-    meta = {}   
+    meta = IndiferentHash.setup({})   
     key = parts.shift 
     while next_part = parts.shift
 
@@ -44,5 +44,21 @@ module Chat
     meta_msg = pull(messages, :meta)
     return nil if meta_msg.nil?
     parse_meta meta_msg[:content] 
+  end
+
+  def add_meta(key, value)
+    meta_msg = self.select{|msg| msg[:role].to_s == 'meta' }.first
+    if meta_msg.nil?
+      meta = { }
+    else
+      meta = Chat.parse_meta meta_msg[:content] 
+    end
+    meta = {} if meta.nil?
+    meta[key] = value
+    if meta_msg
+      meta_msg[:content] = Chat.serialize_meta(meta)
+    else
+      message :meta, Chat.serialize_meta(meta)
+    end
   end
 end

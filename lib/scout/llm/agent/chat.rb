@@ -27,12 +27,15 @@ module LLM
       self.ask(current_chat, ...)
     end
 
-
     def chat(options = {})
       response = ask(current_chat, options.merge(return_messages: true))
       if Array === response
         current_chat.concat(response)
-        current_chat.answer
+        if options[:return_messages] 
+          response
+        else
+          current_chat.answer
+        end
       else
         current_chat.push({role: :assistant, content: response})
         response
@@ -56,9 +59,11 @@ module LLM
     end
 
     def json_format(format, ...)
+      old_format = current_chat.remove_role :format
       current_chat.format format
       output = chat(...)
-      current_chat.format nil
+      current_chat.remove_role :format
+      current_chat << old_format
       obj = Chat.parse_json output
       if (Hash === obj) and obj.keys == ['content']
         obj['content']

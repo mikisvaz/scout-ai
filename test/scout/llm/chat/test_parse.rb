@@ -123,4 +123,29 @@ class TestParse < Test::Unit::TestCase
     assert_equal 'user', msgs[idx + 1][:role]
     assert_equal 'Some block', msgs[idx + 1][:content]
   end
+
+  def test_parse_json
+    text = <<~TXT
+Hi
+
+
+```json
+{
+  "status": "PASS",
+  "summary": "The worker successfully created the file `tmp/number` and wrote a random number (42) into it, satisfying the request.",
+  "issues": [],
+  "next_step": "",
+  "search_needed": false
+}
+```
+    TXT
+
+    assert_nothing_raised do
+      Chat.parse_json(text)
+    end
+    assert_nothing_raised do
+      Chat.parse_json(text.chomp)
+    end
+
+  end
 end
