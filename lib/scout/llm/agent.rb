@@ -29,6 +29,7 @@ module LLM
         @workflow ||= begin
                         m = Module.new
                         m.extend Workflow
+                        m.name ||= 'ScoutAgent'
                         m.tasks = {}
                         m
                       end
