@@ -25,7 +25,7 @@ module LLM
       list.each &block
     end
 
-    def iterate_dictionary(prompt = nil, &block)
+    def iterate_dictionary(prompt = nil, **kwargs, &block)
       self.endpoint :responses
       self.user prompt if prompt
 
@@ -38,7 +38,7 @@ module LLM
 
       self.option :format, :text
 
-      dict.each &block
+      TSV.traverse dict, **kwargs, &block
     end
   end
 end
