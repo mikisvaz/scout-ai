@@ -454,6 +454,45 @@ class LLMInfoReport
     ordered_chats + ordered_jobs
   end
 
+  def job_result_chats
+    @job_result_chats ||= @chat_job_references.each_with_object(Hash.new { |hash, key| hash[key] = Set.new }) do |(chat, reference), found|
+      job = resolve_job(reference)
+      job = canonical_job(job) if job
+      found[job] << chat if job && @jobs.include?(job)
+    end
+  end
+
+  def imported_chat_ancestors(chat, found = Set.new)
+    @chat_imports.each do |imported, importing|
+      next unless importing == chat || found.include?(importing)
+      found << imported
+    end
+    # Imports may be several levels deep, so repeat until no new chats appear.
+    previous_size = -1
+    while previous_size != found.size
+      previous_size = found.size
+      @chat_imports.each do |imported, importing|
+        found << imported if found.include?(importing)
+      end
+    end
+    found
+  end
+
+  # If the called job produced an earlier chat which is imported by a chat
+  # produced by the parent job, its content reaches the parent through the
+  # chat import already. Drawing a call edge would imply an invocation that did
+  # not happen and duplicates the visible import/result path.
+  def call_implied_by_chat_import?(parent, called)
+    parent_chats = job_result_chats[parent]
+    called_chats = job_result_chats[called]
+    return false if parent_chats.empty? || called_chats.empty?
+
+    parent_chats.any? do |chat|
+      ancestors = imported_chat_ancestors(chat)
+      called_chats.any? { |called_chat| ancestors.include?(called_chat) }
+    end
+  end
+
   def flow_edges
     edges = {}
 
@@ -482,6 +521,7 @@ class LLMInfoReport
       next unless @jobs.include?(parent) && @jobs.include?(called) && parent != called
       called_info = @jobs[called][:info]
       next unless (called_info[:task_name] || called_info['task_name']).to_s == 'ask'
+      next if call_implied_by_chat_import?(parent, called)
       next if edges.include?([parent, called]) || edges.include?([called, parent])
       edges[[parent, called]] = :call
     end
@@ -505,6 +545,10 @@ class LLMInfoReport
     workflow = info[:workflow] || info['workflow'] || path.split(File::SEPARATOR)[-3]
     task = info[:task_name] || info['task_name'] || path.split(File::SEPARATOR)[-2]
     "#{workflow}/#{task}"
+  end
+
+  def job_short_id(path)
+    File.basename(path).sub(/\.chat$/, '').sub(/^Default_/, '')[0, 8]
   end
 
   def job_token_total(path)
@@ -533,7 +577,7 @@ class LLMInfoReport
       if @chat_files.include?(path)
         puts "[#{ids[path] + 1}] Chat/#{File.basename(path)}"
       else
-        puts "[#{ids[path] + 1}] #{job_name(path)}  tokens=#{short_number(job_token_total(path))}"
+        puts "[#{ids[path] + 1}] #{job_name(path)}  #{job_short_id(path)}  tokens=#{short_number(job_token_total(path))}"
       end
     end
     puts
@@ -568,7 +612,7 @@ class LLMInfoReport
     jobs.each do |path|
       name = job_name(path)
       workflow, task = name.split('/', 2)
-      basename = File.basename(path).sub(/\.chat$/, '').sub(/^Default_/, '')[0, 8]
+      basename = job_short_id(path)
       label = "#{workflow}\n#{task}\n#{short_number(job_token_total(path))} tokens\n#{basename}"
       lines << "  #{ids[path]} [label=#{JSON.generate(label)}, shape=box, style=\"rounded,filled\", fillcolor=#{JSON.generate(colors[workflow])}];"
     end
