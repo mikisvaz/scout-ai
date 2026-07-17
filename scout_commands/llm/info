@@ -4,6 +4,7 @@ require 'scout'
 require 'scout-ai'
 require 'json'
 require 'set'
+require 'tempfile'
 
 $0 = "scout-ai #{$previous_commands.any? ? $previous_commands * ' ' + ' ' : ''}#{File.basename(__FILE__)}" if defined?($previous_commands) && $previous_commands
 
@@ -19,6 +20,9 @@ deduplicated for aggregate totals.
 
 -h--help Print this help
 -c--chat* Chat file to inspect (the positional argument is used by default)
+-f--flow Print a compact text flow instead of the detailed report
+--dot* Write the flow as Graphviz DOT
+-p--plot* Render the flow as a figure; extension may be svg, png, or pdf
 EOF
 
 if options[:help]
@@ -33,6 +37,9 @@ end
 Log.severity = options.delete(:log).to_i if options.include?(:log)
 
 input = options.delete(:chat) || ARGV.shift
+flow = options.delete(:flow)
+dot_file = options.delete(:dot)
+plot_file = options.delete(:plot)
 raise ParameterException, 'No chat file given' if input.nil? || input.empty?
 
 class LLMInfoReport
@@ -42,6 +49,11 @@ class LLMInfoReport
     @input = resolve_chat(input)
     @chat_files = Set.new
     @jobs = {}
+    @job_identities = {}
+    @job_aliases = {}
+    @call_references = []
+    @chat_imports = []
+    @chat_job_references = []
     @seen_sources = Set.new
   end
 
@@ -75,6 +87,15 @@ class LLMInfoReport
     metadata(messages).flat_map do |meta|
       [meta[:job], meta['job'], meta[:usage_job], meta['usage_job']]
     end.compact.uniq
+  end
+
+  def last_task_reference(messages)
+    metadata(messages).reverse_each do |meta|
+      next unless (meta[:usage_scope] || meta['usage_scope']) == 'task'
+      reference = meta[:usage_job] || meta['usage_job'] || meta[:job] || meta['job']
+      return reference if reference
+    end
+    nil
   end
 
   def resolve_job(reference)
@@ -133,6 +154,33 @@ class LLMInfoReport
     end.select { |file| File.file?(file.to_s) }
   end
 
+  # Job paths moved between ~/.scout and ~/.rbbt in older installations.
+  # Workflow, task and result basename are the stable identity across roots.
+  def job_identity(path, info = nil)
+    info ||= job_info(path)
+    workflow = info[:workflow] || info['workflow']
+    task = info[:task_name] || info['task_name']
+    if workflow && task
+      [workflow.to_s, task.to_s, File.basename(path)]
+    else
+      path.split(File::SEPARATOR).last(3)
+    end
+  end
+
+  def log_identity(path)
+    path.partition('.files/').last
+  end
+
+  def merge_logs(first, second)
+    (Array(first) + Array(second)).sort.each_with_object({}) do |log, found|
+      found[log_identity(log)] ||= log
+    end.values
+  end
+
+  def canonical_job(path)
+    @job_aliases[path] || path
+  end
+
   def discover
     source_queue = [@input]
     job_queue = []
@@ -144,20 +192,41 @@ class LLMInfoReport
         @seen_sources << source
 
         parsed = messages(source)
-        @chat_files << source unless source.include?('.files/') && File.basename(source) == 'agent.chat'
-        imported_files(source, parsed).each { |file| source_queue << file }
-        job_references(parsed).each { |reference| job_queue << reference }
+        is_agent_log = source.include?('.files/') && File.basename(source) == 'agent.chat'
+        @chat_files << source unless is_agent_log
+        imports = imported_files(source, parsed).collect { |file| File.expand_path(file.to_s) }
+        imports.each do |file|
+          source_queue << file
+          @chat_imports << [file, source] unless is_agent_log
+        end
+        job_references(parsed).each do |reference|
+          job_queue << reference
+          @chat_job_references << [source, reference] unless is_agent_log
+        end
       end
 
       until job_queue.empty?
         reference = job_queue.shift
         path = resolve_job(reference)
-        next if path.nil? || @jobs.include?(path)
+        next if path.nil? || @job_aliases.include?(path)
 
         info = job_info(path)
-
+        identity = job_identity(path, info)
+        canonical = @job_identities[identity]
         logs = Dir.glob(path + '.files/**/agent.chat').select { |file| File.file?(file) }.sort
-        @jobs[path] = {info: info, logs: logs}
+
+        if canonical
+          @job_aliases[path] = canonical
+          @jobs[canonical][:logs] = merge_logs(@jobs[canonical][:logs], logs)
+          old_dependencies = Array(@jobs[canonical][:info][:dependencies] || @jobs[canonical][:info]['dependencies'])
+          new_dependencies = Array(info[:dependencies] || info['dependencies'])
+          @jobs[canonical][:info][:dependencies] = (old_dependencies + new_dependencies).uniq
+        else
+          canonical = path
+          @job_identities[identity] = canonical
+          @job_aliases[path] = canonical
+          @jobs[canonical] = {info: info, logs: logs}
+        end
 
         Array(info[:dependencies] || info['dependencies']).each { |dependency| job_queue << dependency }
 
@@ -171,6 +240,8 @@ class LLMInfoReport
           parsed = messages(log)
           imported_files(log, parsed).each { |file| source_queue << file }
           job_references(parsed).each { |nested| job_queue << nested }
+          called = last_task_reference(parsed)
+          @call_references << [canonical, called] if called
         end
       end
     end
@@ -310,6 +381,7 @@ class LLMInfoReport
     @jobs.each do |path, job|
       Array(job[:info][:dependencies] || job[:info]['dependencies']).each do |reference|
         dependency = resolve_job(reference)
+        dependency = canonical_job(dependency) if dependency
         predecessors[path] << dependency if dependency && @jobs.include?(dependency)
       end
 
@@ -361,6 +433,181 @@ class LLMInfoReport
     ordered
   end
 
+  def ordered_chats
+    predecessors = Hash.new { |hash, key| hash[key] = Set.new }
+    @chat_imports.each do |imported, importing|
+      predecessors[importing] << imported if @chat_files.include?(imported)
+    end
+    ordered = []
+    visited = Set.new
+    visit = lambda do |path|
+      return if visited.include?(path)
+      visited << path
+      predecessors[path].sort.each { |previous| visit.call(previous) }
+      ordered << path
+    end
+    @chat_files.to_a.sort.each { |path| visit.call(path) }
+    ordered
+  end
+
+  def flow_nodes
+    ordered_chats + ordered_jobs
+  end
+
+  def flow_edges
+    edges = {}
+
+    @chat_imports.each do |imported, importing|
+      edges[[imported, importing]] = :import if @chat_files.include?(imported) && @chat_files.include?(importing)
+    end
+
+    @chat_job_references.each do |chat, reference|
+      job = resolve_job(reference)
+      job = canonical_job(job) if job
+      edges[[job, chat]] = :result if job && @jobs.include?(job) && @chat_files.include?(chat)
+    end
+
+    @jobs.each do |path, job|
+      Array(job[:info][:dependencies] || job[:info]['dependencies']).each do |reference|
+        dependency = resolve_job(reference)
+        dependency = canonical_job(dependency) if dependency
+        edges[[dependency, path]] = :dependency if dependency && @jobs.include?(dependency)
+      end
+    end
+
+    @call_references.each do |parent, reference|
+      parent = canonical_job(parent)
+      called = resolve_job(reference)
+      called = canonical_job(called) if called
+      next unless @jobs.include?(parent) && @jobs.include?(called) && parent != called
+      called_info = @jobs[called][:info]
+      next unless (called_info[:task_name] || called_info['task_name']).to_s == 'ask'
+      next if edges.include?([parent, called]) || edges.include?([called, parent])
+      edges[[parent, called]] = :call
+    end
+
+    @job_analyses.each do |path, analyses|
+      analyses.each do |analysis|
+        session_matches(analysis).each do |matched_file|
+          previous = @log_owners[matched_file]
+          next unless previous && previous != path
+          next if edges.include?([previous, path]) || edges.include?([path, previous])
+          edges[[previous, path]] = :session
+        end
+      end
+    end
+
+    edges.collect { |(from, to), type| [from, to, type] }
+  end
+
+  def job_name(path)
+    info = @jobs[path][:info]
+    workflow = info[:workflow] || info['workflow'] || path.split(File::SEPARATOR)[-3]
+    task = info[:task_name] || info['task_name'] || path.split(File::SEPARATOR)[-2]
+    "#{workflow}/#{task}"
+  end
+
+  def job_token_total(path)
+    summary = job_summary(path)
+    summary.empty? ? 0 : summary[2].to_i
+  end
+
+  def short_number(number)
+    if number >= 1_000_000
+      format('%.2fM', number / 1_000_000.0)
+    elsif number >= 1_000
+      format('%.1fk', number / 1_000.0)
+    else
+      number.to_s
+    end
+  end
+
+  def print_flow
+    prepare
+    nodes = flow_nodes
+    ids = nodes.each_with_index.to_h
+
+    puts 'Flow nodes'
+    puts '=========='
+    nodes.each do |path|
+      if @chat_files.include?(path)
+        puts "[#{ids[path] + 1}] Chat/#{File.basename(path)}"
+      else
+        puts "[#{ids[path] + 1}] #{job_name(path)}  tokens=#{short_number(job_token_total(path))}"
+      end
+    end
+    puts
+    puts 'Flow edges'
+    puts '=========='
+    flow_edges.sort_by { |from, to, type| [ids[from] || 0, ids[to] || 0, type.to_s] }.each do |from, to, type|
+      puts "[#{ids[from] + 1}] -> [#{ids[to] + 1}]  #{type}"
+    end
+  end
+
+  def flow_dot
+    prepare
+    nodes = flow_nodes
+    ids = nodes.each_with_index.to_h { |path, index| [path, "n#{index}"] }
+    jobs = ordered_jobs
+    workflows = jobs.collect { |path| job_name(path).split('/').first }.uniq.sort
+    palette = %w(#dceeff #e8f5df #fff0d6 #f3e2f7 #fde2e2 #e2f2f2 #eeeeee)
+    colors = workflows.each_with_index.to_h { |workflow, index| [workflow, palette[index % palette.length]] }
+
+    lines = [
+      'digraph scout_ai_flow {',
+      '  graph [rankdir=LR, bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.6];',
+      '  node [fontname="Helvetica", fontsize=10];',
+      '  edge [fontname="Helvetica", fontsize=8, arrowsize=0.7];'
+    ]
+
+    ordered_chats.each do |path|
+      label = "Chat\n#{File.basename(path)}"
+      lines << "  #{ids[path]} [label=#{JSON.generate(label)}, shape=note, style=filled, fillcolor=\"#f7f7f7\"];"
+    end
+
+    jobs.each do |path|
+      name = job_name(path)
+      workflow, task = name.split('/', 2)
+      basename = File.basename(path).sub(/\.chat$/, '').sub(/^Default_/, '')[0, 8]
+      label = "#{workflow}\n#{task}\n#{short_number(job_token_total(path))} tokens\n#{basename}"
+      lines << "  #{ids[path]} [label=#{JSON.generate(label)}, shape=box, style=\"rounded,filled\", fillcolor=#{JSON.generate(colors[workflow])}];"
+    end
+
+    edge_style = {
+      dependency: 'color="#333333", label="dependency"',
+      call: 'color="#2864a5", style="dashed", label="calls"',
+      session: 'color="#888888", style="dotted", label="session"',
+      import: 'color="#7a4e9d", penwidth=1.5, label="imports"',
+      result: 'color="#39804a", penwidth=1.5, label="result"'
+    }
+    flow_edges.each do |from, to, type|
+      lines << "  #{ids[from]} -> #{ids[to]} [#{edge_style[type]}];"
+    end
+    lines << '}'
+    lines.join("\n") + "\n"
+  end
+
+  def write_flow(dot_file: nil, plot_file: nil)
+    dot = flow_dot
+    if dot_file
+      Open.write(dot_file, dot)
+      puts "DOT flow written to #{File.expand_path(dot_file)}"
+    end
+    return unless plot_file
+
+    extension = File.extname(plot_file).sub(/^\./, '').downcase
+    extension = 'svg' if extension.empty?
+    raise ParameterException, "Unsupported plot format: #{extension}" unless %w(svg png pdf).include?(extension)
+
+    Tempfile.create(['scout-ai-flow', '.dot']) do |source|
+      source.write(dot)
+      source.flush
+      success = system('dot', "-T#{extension}", source.path, '-o', plot_file.to_s)
+      raise ScoutException, 'Graphviz dot failed; install graphviz or use --dot' unless success
+    end
+    puts "Flow figure written to #{File.expand_path(plot_file)}"
+  end
+
   def print_analysis(analysis, indent = '  ')
     puts "#{indent}File: #{analysis[:path]}"
     puts "#{indent}Messages: #{analysis[:messages]}"
@@ -382,7 +629,8 @@ class LLMInfoReport
     end
   end
 
-  def print
+  def prepare
+    return self if @prepared
     discover
 
     @chat_analyses = @chat_files.to_h { |path| [path, analyze(path)] }
@@ -396,6 +644,12 @@ class LLMInfoReport
     @job_analyses.each do |job, analyses|
       analyses.each { |analysis| @log_owners[analysis[:path]] = job }
     end
+    @prepared = true
+    self
+  end
+
+  def print
+    prepare
 
     aggregate = {
       messages: 0,
@@ -457,6 +711,7 @@ class LLMInfoReport
     puts
     puts 'Notes:'
     puts '- Job token totals use each task summary delta, so dependency totals are not counted repeatedly.'
+    puts '- Jobs with the same Workflow/task/result name are merged across ~/.scout and ~/.rbbt.'
     puts '- Agent-log pt_c/ct_c/tt_c fields are running snapshots and are never summed.'
     puts '- Session-only usage is the latest *_s snapshot minus request events recorded in that file.'
     puts '- Exact matches identify an earlier reported file whose session snapshot is that prefix.'
@@ -465,4 +720,10 @@ class LLMInfoReport
   end
 end
 
-LLMInfoReport.new(input).print
+report = LLMInfoReport.new(input)
+if flow || dot_file || plot_file
+  report.print_flow if flow
+  report.write_flow(dot_file: dot_file, plot_file: plot_file) if dot_file || plot_file
+else
+  report.print
+end
