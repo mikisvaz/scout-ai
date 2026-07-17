@@ -8,31 +8,6 @@ module AgentWorkflow
     @meta_list << other
   end
 
-  helper :log_agent do |agent, agent_name=nil|
-    dir = agent_name ? file(agent_name) : files_dir
-
-    agent.chats.each do |name,other|
-      log_cost other
-      dir.chats[name].set_extension('chat').write other.current_chat.print
-      if agent_job = other.meta[:job]
-        self.dependencies << Step.load(agent_job)
-      end
-    end if agent.chats
-
-    dir['agent.chat'].write agent.current_chat.print
-
-    if agent_job = agent.meta[:job] and agent_job != self.short_path
-      self.dependencies << Step.load(agent_job)
-    end
-
-    log_cost agent
-
-    update_info :dependencies, dependencies.collect{|dep| dep.path.find }
-
-
-    agent
-  end
-
   helper :chat do |chat=nil|
     @chat ||= LLM.chat(chat || recursive_inputs[:chat].dup)
   end
@@ -61,12 +36,31 @@ module AgentWorkflow
 
   helper :agent do |name = nil, chat: nil, options: nil, tooling: nil, files: nil, **kwargs|
 
+    Thread.current['Agent-Job'] = self
+
     options = self.options if options.nil?
     tooling = self.tooling if tooling.nil?
     options = IndiferentHash.add_defaults options, kwargs
 
     agent = LLM.load_agent name, agent_options(options)
     agent.start_chat.follow tooling if tooling && ! tooling.empty?
+
+    agent.start_chat.system <<-EOF
+You have been assigned this job path #{self.path}. The files
+directory is #{self.files_dir} you have write access and you may use it
+to write files. If you need to create temporary files please do it under
+that directory.
+
+Your current directory is #{Dir.pwd}
+    EOF
+
+    if dependencies.any?
+      agent.start_chat.system <<-EOF
+This workflow job has the following depencencies:
+
+#{rec_dependencies.collect{|dep| dep.path } * "\n"}
+      EOF
+    end
 
     files.each do |path|
       target = file(path)
@@ -77,40 +71,100 @@ module AgentWorkflow
       end
     end if files
 
-    agent.start_chat.follow LLM.chat(chat) if chat && ! chat.empty?
+    if chat && ! chat.empty?
+      chat = LLM.chat(chat)
+      chat.reject!{|msg| msg[:content].start_with? 'You have been assigned' }
+      chat.reject!{|msg| msg[:content].start_with? 'This workflow job has the following' }
+      agent.start_chat.follow chat
+    end
 
     agent
   end
 
-  helper :current_meta do |list=nil|
+  # Usage created by agents logged while this task runs. Each agent may have
+  # inherited a chat from an upstream task, so retain only events absent from
+  # its start_chat. Delegated agents are included through @meta_list too.
+  helper :new_usage do |list=nil|
+    list ||= @meta_list || []
 
-    meta = {job: self.short_path}
-    list = @meta_list || []
+    list.inject({}) do |all, entry|
+      next all unless LLM::Agent === entry
 
-    list.inject(meta) do |current_meta,meta|
-      meta = meta.meta if LLM::Agent === meta
-      meta = meta.pull :meta if Chat === meta
-      new = {}
-      meta.each do |name,value|
-        if name.end_with?('_c')
-          current_value = current_meta[name]
-          new[name] = current_value.to_i + value.to_i
-        end
-        if name.end_with?('_s')
-          chat_name = name.sub(/_s$/,'_c')
-          current_value = current_meta[name] || current_meta[chat_name] || 0
-          new[name] = current_value.to_i + value.to_i
-        end
-      end
-      current_meta.merge! new
-
-      current_meta
+      before = Chat.usage_events(entry.start_chat)
+      after = Chat.usage_events(entry.current_chat)
+      all.merge(after.reject { |id, _usage| before.include?(id) })
     end
   end
+
+  # Summaries may reach an agent through self.chat or through an explicit
+  # `chat:` argument (for example, the `work` task receives the plan result).
+  helper :inherited_usage do |list=nil|
+    list ||= @meta_list || []
+    summaries = Chat.usage_summaries(self.chat)
+
+    list.each do |entry|
+      next unless LLM::Agent === entry
+      summaries.merge! Chat.usage_summaries(entry.start_chat)
+    end
+
+    summaries
+  end
+
+  helper :current_meta do |list=nil|
+    meta = {job: self.short_path, usage_job: self.short_path, usage_scope: 'task'}
+
+    # Results of dependency tasks contain one delta summary per task. Their
+    # job ids make repeated follows/imports harmless.
+    inherited = inherited_usage(list)
+    local = new_usage(list)
+
+    inherited_totals = Chat.usage_totals(inherited)
+    local_totals = Chat.usage_totals(local)
+
+    %w(pt ct tt).each do |name|
+      meta["#{name}_d"] = local_totals["#{name}_c"]
+      meta["#{name}_c"] = inherited_totals["#{name}_c"].to_i + local_totals["#{name}_c"].to_i
+    end
+
+    meta
+  end
+
+  helper :log_agent do |agent, agent_name=nil|
+    dir = agent_name ? file('log')[agent_name] : file('log')
+
+    agent.chats.each do |name,other|
+      log_cost other
+      dir.chats[name].set_extension('chat').write other.current_chat.print
+      if agent_job = other.meta[:job]
+        self.dependencies << Step.load(agent_job)
+      end
+    end if agent.chats
+
+    dir['agent.chat'].write agent.current_chat.print
+
+    if agent_job = agent.meta[:job] and agent_job != self.short_path
+      self.dependencies << Step.load(agent_job)
+    end
+
+    log_cost agent
+
+    update_info :dependencies, dependencies.collect{|dep| dep.path.find }
+
+
+    agent
+  end
+
 
   helper :meta_msg do |list=nil|
     {role: :meta, content: Chat.serialize_meta(current_meta)}
   end
+
+  # Step results expose a single task summary. Full per-request traces remain
+  # in log/agent.chat for auditing; Step results need only the task delta.
+  helper :usage_trace do
+    [{role: :meta, content: Chat.serialize_meta(current_meta)}]
+  end
+
 end
 
 module Workflow
@@ -123,15 +177,18 @@ module Workflow
         response = self.instance_exec &block
         if LLM::Agent === response
           agent = response
-          if agent.current_chat.last[:role].to_s == 'user'
+          result = if agent.current_chat.last[:role].to_s == 'user'
             reply = agent.chat return_messages: true
+            agent.add_meta :job, self.short_path
             log_agent agent
             reply
           else
+            agent.add_meta :job, self.short_path
             log_agent agent
             agent.current_chat - agent.start_chat
           end
-          agent.add_meta :job, self.short_path
+          trace = usage_trace
+          trace + result.reject { |message| message[:role].to_s == 'meta' }
         elsif Hash === response
           [meta_msg, response]
         else

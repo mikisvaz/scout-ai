@@ -1,4 +1,5 @@
 require 'scout'
+require 'securerandom'
 require_relative '../chat'
 
 module LLM
@@ -414,46 +415,33 @@ module LLM
         current_meta = {} if current_meta.nil?
         IndiferentHash.setup current_meta
 
-        pattern = {
-          'pt+': [['usage','prompt_tokens']],
-          'ct+': [['usage','completion_tokens']],
-          'tt+': [['usage','total_tokens']],
-        }
+        # Keep the provider values for this request separate from aggregate
+        # values.  In particular, do not add the running thread/session total
+        # to the chat total: doing that on every request produces the observed
+        # triangular (and, after aggregation, worse) growth.
+        tokens = {
+          'pt' => response.dig('usage', 'prompt_tokens'),
+          'ct' => response.dig('usage', 'completion_tokens'),
+          'tt' => response.dig('usage', 'total_tokens'),
+        }.reject { |_name, value| value.nil? }
 
-        meta = IndiferentHash.setup({})
-        pattern.each do |name,key_list|
-          name = name.to_s
-          key_list.each do |keys|
-            value = response.dig *keys
-            next unless value
-
-            if name.end_with?('+')
-              name = name[0..-2]
-              meta[name] = value
-              session_name = name + '_s'
-
-              meta[session_name] ||= Thread.current[session_name] || 0
-              meta[session_name] += value
-
-              Thread.current[session_name] = meta[session_name]
-              meta.delete name if meta[name] == meta[session_name]
-            else
-              value = value.gsub(/\s+/,' ') if String === value
-              meta[name] = value
-            end
-          end
+        meta = IndiferentHash.setup(tokens.dup)
+        tokens.each do |name, value|
+          session_name = name + '_s'
+          Thread.current[session_name] = Thread.current[session_name].to_i + value.to_i
+          meta[session_name] = Thread.current[session_name]
         end
 
-        new = {}
-        meta.each do |name,value|
-          if name.end_with?('_s')
-            chat_name = name.sub(/_s$/,'_c')
-            current_value = current_meta[chat_name] || current_meta[name] || 0
-            new[chat_name] = current_value.to_i + value.to_i
-          end
-        end
+        # One immutable, constant-size event per actual request. Chat.meta
+        # later unions these events by usage_id, so a shared branch prefix is
+        # counted once without copying its complete ledger into this event.
+        response_id = response['id'] || response[:id]
+        usage_id = response_id ? "r_#{Misc.digest(response_id)}" : "r_#{SecureRandom.hex(16)}"
+        meta['usage_id'] = usage_id
 
-        meta.merge! new
+        %w(pt ct tt).each do |name|
+          meta["#{name}_c"] = current_meta["#{name}_c"].to_i + tokens[name].to_i
+        end
 
         Log.low "Meta: #{Log.fingerprint meta}"
 

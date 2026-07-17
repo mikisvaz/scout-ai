@@ -27,6 +27,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
    save_reponse
 
+   tokens
+   patch
    relay
   }
   web=web{
@@ -65,6 +67,11 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   SGLang
 
   observatory.rb
+
+  token_count
+  token_count.patch
+  token_count.info
+
  }
  lib=lib {
   scout-ai.rb

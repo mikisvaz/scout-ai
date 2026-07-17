@@ -41,7 +41,11 @@ module LLM
                           when Proc
                             obj.call function_name, function_arguments
                           when String
-                            wf = Workflow.require_workflow obj
+                            if Kernel.const_defined? obj
+                              wt = Kernel.const_get obj
+                            else
+                              wf = Workflow.require_workflow obj
+                            end
                             call_workflow(wf, function_name, function_arguments)
                           when Workflow
                             call_workflow(obj, function_name, function_arguments)
