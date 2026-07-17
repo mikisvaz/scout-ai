@@ -46,9 +46,10 @@ class LLMInfoReport
   end
 
   def resolve_chat(input)
-    candidates = [input, File.expand_path(input)]
+    candidates = [input, input + '.chat', File.expand_path(input), File.expand_path(input + '.chat')]
     begin
       candidates << Scout.chats[input].find
+      candidates << Scout.chats[input].find_with_extension(:chat).find
     rescue
     end
     candidates.compact.find { |path| File.file?(path.to_s) } ||
@@ -223,6 +224,14 @@ class LLMInfoReport
       tools[id] = true
     end
 
+    request_totals = Chat.usage_totals(request_events)
+    session = session_snapshot(parsed)
+    session_unattributed = {}
+    {'pt_s' => 'pt_c', 'ct_s' => 'ct_c', 'tt_s' => 'tt_c'}.each do |session_name, request_name|
+      next unless session.include?(session_name)
+      session_unattributed[session_name] = session[session_name].to_i - request_totals[request_name].to_i
+    end
+
     {
       path: File.expand_path(path),
       messages: parsed.length,
@@ -232,11 +241,30 @@ class LLMInfoReport
       usage: events,
       usage_totals: Chat.usage_totals(events),
       request_events: request_events,
-      request_totals: Chat.usage_totals(request_events),
+      request_totals: request_totals,
       legacy: legacy,
       legacy_totals: Chat.usage_totals(legacy),
+      session: session,
+      session_unattributed: session_unattributed,
       task_summaries: Chat.usage_summaries(parsed)
     }
+  end
+
+  # Session counters are process/thread running totals. The part not explained
+  # by request events in this file can include socialized agents, but can also
+  # include requests made before the chat started in the same session.
+  def session_snapshot(messages)
+    snapshot = {}
+    metadata(messages).each do |meta|
+      %w(pt_s ct_s tt_s).each do |name|
+        snapshot[name] = meta[name] if meta.include?(name)
+      end
+    end
+    snapshot
+  end
+
+  def format_session_tokens(values)
+    "prompt=#{values['pt_s'].to_i} completion=#{values['ct_s'].to_i} total=#{values['tt_s'].to_i}"
   end
 
   def job_summary(path)
@@ -257,6 +285,82 @@ class LLMInfoReport
     "prompt=#{values['pt_c'].to_i} completion=#{values['ct_c'].to_i} total=#{values['tt_c'].to_i}"
   end
 
+  def session_values(values)
+    %w(pt_s ct_s tt_s).collect { |name| values.include?(name) ? values[name].to_i : nil }
+  end
+
+  def session_unattributed?(analysis)
+    analysis[:session_unattributed].values.any? { |value| value.to_i != 0 }
+  end
+
+  def session_matches(analysis)
+    return [] unless session_unattributed?(analysis)
+    wanted = session_values(analysis[:session_unattributed])
+
+    @all_analyses.values.select do |candidate|
+      candidate[:path] != analysis[:path] &&
+        candidate[:session].any? &&
+        session_values(candidate[:session]) == wanted
+    end.collect { |candidate| candidate[:path] }.sort
+  end
+
+  def ordered_jobs
+    predecessors = Hash.new { |hash, key| hash[key] = Set.new }
+
+    @jobs.each do |path, job|
+      Array(job[:info][:dependencies] || job[:info]['dependencies']).each do |reference|
+        dependency = resolve_job(reference)
+        predecessors[path] << dependency if dependency && @jobs.include?(dependency)
+      end
+
+      @job_analyses[path].each do |analysis|
+        session_matches(analysis).each do |matched_file|
+          owner = @log_owners[matched_file]
+          predecessors[path] << owner if owner && owner != path
+        end
+      end
+    end
+
+    ordered = []
+    visiting = Set.new
+    visited = Set.new
+    visit = lambda do |path|
+      return if visited.include?(path) || visiting.include?(path)
+      visiting << path
+      predecessors[path].sort.each { |previous| visit.call(previous) }
+      visiting.delete(path)
+      visited << path
+      ordered << path
+    end
+    @jobs.keys.sort.each { |path| visit.call(path) }
+    ordered
+  end
+
+  def ordered_log_analyses(path)
+    analyses = @job_analyses[path]
+    by_path = analyses.to_h { |analysis| [analysis[:path], analysis] }
+    predecessors = Hash.new { |hash, key| hash[key] = Set.new }
+    analyses.each do |analysis|
+      session_matches(analysis).each do |matched|
+        predecessors[analysis[:path]] << matched if by_path.include?(matched)
+      end
+    end
+
+    ordered = []
+    visiting = Set.new
+    visited = Set.new
+    visit = lambda do |file|
+      return if visited.include?(file) || visiting.include?(file)
+      visiting << file
+      predecessors[file].sort.each { |previous| visit.call(previous) }
+      visiting.delete(file)
+      visited << file
+      ordered << by_path[file]
+    end
+    by_path.keys.sort.each { |file| visit.call(file) }
+    ordered
+  end
+
   def print_analysis(analysis, indent = '  ')
     puts "#{indent}File: #{analysis[:path]}"
     puts "#{indent}Messages: #{analysis[:messages]}"
@@ -267,10 +371,31 @@ class LLMInfoReport
     if analysis[:legacy].any?
       puts "#{indent}Legacy cumulative baseline: #{format_tokens(analysis[:legacy_totals])}"
     end
+    if session_unattributed?(analysis)
+      matches = session_matches(analysis)
+      if matches.any?
+        puts "#{indent}Session prefix matches: #{matches.join(', ')}"
+      else
+        puts "#{indent}Session running snapshot: #{format_session_tokens(analysis[:session])}"
+        puts "#{indent}Session-only/unattributed: #{format_session_tokens(analysis[:session_unattributed])}"
+      end
+    end
   end
 
   def print
     discover
+
+    @chat_analyses = @chat_files.to_h { |path| [path, analyze(path)] }
+    @job_analyses = @jobs.to_h do |path, job|
+      [path, job[:logs].collect { |log| analyze(log) }]
+    end
+    @all_analyses = @chat_analyses.merge(
+      @job_analyses.values.flatten.to_h { |analysis| [analysis[:path], analysis] }
+    )
+    @log_owners = {}
+    @job_analyses.each do |job, analyses|
+      analyses.each { |analysis| @log_owners[analysis[:path]] = job }
+    end
 
     aggregate = {
       messages: 0,
@@ -283,7 +408,7 @@ class LLMInfoReport
     puts 'Chats'
     puts '====='
     @chat_files.to_a.sort.each do |path|
-      analysis = analyze(path)
+      analysis = @chat_analyses[path]
       print_analysis(analysis)
       add_analysis(aggregate, analysis)
       aggregate[:usage].merge!(analysis[:usage])
@@ -292,7 +417,7 @@ class LLMInfoReport
 
     puts 'Workflow jobs'
     puts '============='
-    @jobs.keys.sort.each do |path|
+    ordered_jobs.each do |path|
       job = @jobs[path]
       summary = job_summary(path)
       puts "Job: #{path}"
@@ -311,8 +436,7 @@ class LLMInfoReport
       end
 
       fallback = {}
-      job[:logs].each do |log|
-        analysis = analyze(log)
+      ordered_log_analyses(path).each do |analysis|
         print_analysis(analysis, '    ')
         add_analysis(aggregate, analysis)
         fallback.merge!(analysis[:usage])
@@ -334,6 +458,9 @@ class LLMInfoReport
     puts 'Notes:'
     puts '- Job token totals use each task summary delta, so dependency totals are not counted repeatedly.'
     puts '- Agent-log pt_c/ct_c/tt_c fields are running snapshots and are never summed.'
+    puts '- Session-only usage is the latest *_s snapshot minus request events recorded in that file.'
+    puts '- Exact matches identify an earlier reported file whose session snapshot is that prefix.'
+    puts '- Unmatched values may include socialized agents, earlier requests, or other unlogged work.'
     puts '- Endpoint names can only be reported when they were serialized into a chat or agent log.'
   end
 end
