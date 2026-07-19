@@ -36,22 +36,17 @@ module AgentWorkflow
 
   helper :agent do |name = nil, chat: nil, options: nil, tooling: nil, files: nil, **kwargs|
 
-    Thread.current['Agent-Job'] = self
-
     options = self.options if options.nil?
     tooling = self.tooling if tooling.nil?
     options = IndiferentHash.add_defaults options, kwargs
 
     agent = LLM.load_agent name, agent_options(options)
+    agent.job = self
     agent.start_chat.follow tooling if tooling && ! tooling.empty?
 
     agent.start_chat.system <<-EOF
-You have been assigned this job path #{self.path}. The files
-directory is #{self.files_dir} you have write access and you may use it
-to write files. If you need to create temporary files please do it under
-that directory.
-
-Your current directory is #{Dir.pwd}
+Your current working directory is #{Dir.pwd}.
+You are working through an ask job with path #{self.path} and files_dir #{self.files_dir}.
     EOF
 
     if dependencies.any?
@@ -60,6 +55,18 @@ This workflow job has the following depencencies:
 
 #{rec_dependencies.collect{|dep| dep.path } * "\n"}
       EOF
+    end
+
+    if chat && ! chat.empty?
+      chat = LLM.chat(chat)
+      other_jobs = chat.select{|msg| msg[:meta] }.collect{|msg| Chat.parse_meta(msg[:content])["job"] }.compact
+      if other_jobs.any?
+        agent.start_chat.system <<-EOF
+There are other jobs found in this chat:
+
+#{other_jobs.collect{|dep| dep.path } * "\n"}
+        EOF
+      end
     end
 
     files.each do |path|
@@ -73,8 +80,9 @@ This workflow job has the following depencencies:
 
     if chat && ! chat.empty?
       chat = LLM.chat(chat)
-      chat.reject!{|msg| msg[:content].start_with? 'You have been assigned' }
-      chat.reject!{|msg| msg[:content].start_with? 'This workflow job has the following' }
+      chat.reject!{|msg| msg[:content].to_s.start_with? 'You have been assigned' }
+      chat.reject!{|msg| msg[:content].to_s.start_with? 'This workflow job has the following' }
+      chat.reject!{|msg| msg[:content].to_s.start_with? 'There are other jobs found in this chat' }
       agent.start_chat.follow chat
     end
 
@@ -203,4 +211,23 @@ module Workflow
       end
     end
   end
+
+  class << self
+    alias require_workflow_old require_workflow
+  end
+  def self.require_workflow(name, ...)
+    begin
+      require_workflow_old(name, ...)
+    rescue => e
+      begin
+        LLM.load_agent(name).workflow
+      rescue
+        raise e
+      end
+    end
+  end
+end
+
+class LLM::Agent
+  attr_accessor :job
 end

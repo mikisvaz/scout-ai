@@ -134,6 +134,7 @@ module Chat
   end
 
   def follow(coda)
+    coda = [coda] if Hash === coda
     new = Chat.follow(self.dup, coda)
     self.replace new
     self
