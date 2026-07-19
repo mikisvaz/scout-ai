@@ -94,7 +94,7 @@ if chat
     exit 0
   end
 
-  new = agent.ask(agent.current_chat, convo_options.merge(options.merge(return_messages: true, endpoint: endpoint, model: model)))
+  new = agent.ask(agent.current_chat, convo_options.merge(options.merge(return_messages: true)))
   conversation += LLM.chat(question) if question
   conversation += new
 
