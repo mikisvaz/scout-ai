@@ -39,6 +39,8 @@ class LLMInfoReport
     @root = resolve_chat(input)
     @chats = {}
     @jobs = {}
+    @job_identities = {}
+    @job_aliases = {}
     @warnings = []
     @imports = []
     @results = []
@@ -88,10 +90,29 @@ class LLMInfoReport
     end
   end
 
+  # ~/.scout and ~/.rbbt can expose the same persisted result. Keep one
+  # canonical Step per Workflow/task/result basename so it appears once in the
+  # flow and its mirrored logs are not counted as a second object.
+  def job_identity(job, path)
+    workflow = job.info[:workflow] || job.info['workflow']
+    task = job.info[:task_name] || job.info['task_name']
+    workflow && task ? [workflow.to_s, task.to_s, File.basename(path)] : path.split(File::SEPARATOR).last(3)
+  end
+
   def discover_job(reference)
     job = Step === reference ? reference : Step.load(reference)
-    path = File.expand_path(job.path.to_s)
-    return @jobs[path] if @jobs.include?(path)
+    physical = File.expand_path(job.path.to_s)
+    return @jobs[@job_aliases[physical]] if @job_aliases.include?(physical)
+
+    identity = job_identity(job, physical)
+    if canonical = @job_identities[identity]
+      @job_aliases[physical] = canonical
+      return @jobs[canonical]
+    end
+
+    path = physical
+    @job_identities[identity] = path
+    @job_aliases[physical] = path
     @jobs[path] = job
 
     job.dependencies.each do |dependency|
@@ -194,8 +215,20 @@ class LLMInfoReport
   # Job result chats are represented by their job node. Agent logs and external
   # chats remain separate objects because they carry distinct conversation work.
   def flow_nodes
-    external = @chats.keys.reject { |path| @jobs.include?(path) }
+    external = @chats.keys.reject { |path| @jobs.include?(path) || default_answer_log?(path) }
     external.collect { |path| [flow_kind(path), path] } + ordered_jobs.collect { |path| [:job, path] }
+  end
+
+  # The standard log/agent.chat of an ask job is its answer-producing agent.
+  # Its token usage remains in the job total, so showing it as a separate
+  # visual node merely duplicates the primary job node.
+  def default_answer_log?(path)
+    suffix = '.files/log/agent.chat'
+    return false unless path.end_with?(suffix)
+    job_path = path.delete_suffix(suffix)
+    #job = @jobs[job_path]
+    #job && (job.info[:task_name] || job.info['task_name']).to_s == 'ask'
+    object_tokens(:job, job_path) == object_tokens(:chat, path)
   end
 
   def flow_kind(path)
@@ -223,7 +256,7 @@ class LLMInfoReport
     edges.concat(@imports.collect { |from, to| [:chat, from, flow_kind(to), to, :import] })
     edges.concat(@results.reject { |from, to| from == to || flow_kind(to) == :agent }.collect { |from, to| [:job, from, flow_kind(to), to, :result] })
     edges.concat(@dependencies.collect { |from, to| [:job, from, :job, to, :dependency] })
-    edges.concat(@logs.collect { |from, to| [:job, from, :agent, to, :log] })
+    edges.concat(@logs.reject { |_from, to| default_answer_log?(to) }.collect { |from, to| [:job, from, :agent, to, :log] })
     edges.select { |from_kind, from, to_kind, to, _type| flow_nodes.include?([from_kind, from]) && flow_nodes.include?([to_kind, to]) }.uniq
   end
 
@@ -239,7 +272,11 @@ class LLMInfoReport
     base = job_name(job_path)
     branch = relative.to_s.sub(%r{/agent\.chat\z}, '').sub(/\.chat\z/, '')
     branch = 'agent' if branch.empty? || branch == 'agent'
-    "#{base}/#{branch}"
+    if branch.start_with? 'chat'
+      "#{branch.sub(/^chats\//,'')}"
+    else
+      "#{base}/#{branch}"
+    end
   end
 
   def chat_name(path)
@@ -259,14 +296,18 @@ class LLMInfoReport
   end
 
   def object_tokens(kind, path)
-    case kind
-    when :job
-      logs = @logs.select { |source, _| source == path }.collect(&:last).map { |log| @chats[log] }.compact
-      token_totals(logs)[:tt]
-    else
-      chat = @chats[path]
-      chat ? token_totals([chat])[:tt] : 0
-    end
+    @object_tokens ||= {}
+    @object_tokens[path] ||= begin
+                              case kind
+                              when :job
+                                logs = @logs.select { |source, _| source == path }.
+                                  collect(&:last).map { |log| @chats[log] }.compact
+                                token_totals(logs)[:tt]
+                              else
+                                chat = @chats[path]
+                                chat ? token_totals([chat])[:tt] : 0
+                              end
+                            end
   end
 
   def flow_object_id(kind, path)
