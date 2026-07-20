@@ -3,27 +3,28 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 require 'scout/llm/chat'
 require 'scout/llm/backends/responses'
+
 class TestLLMUsageMeta < Test::Unit::TestCase
   def setup
     super
     %w(pt_s ct_s tt_s).each { |name| Thread.current[name] = 0 }
   end
 
-  def response(id, prompt: nil, completion: nil, total: nil)
+  def response(prompt: nil, completion: nil, total: nil)
     usage = {}
     usage['prompt_tokens'] = prompt unless prompt.nil?
     usage['completion_tokens'] = completion unless completion.nil?
     usage['total_tokens'] = total unless total.nil?
-    { 'id' => id, 'usage' => usage }
+    { 'usage' => usage }
   end
 
-  def meta_message(meta)
-    { role: :meta, content: Chat.serialize_meta(meta) }
+  def chat(text)
+    Chat.setup(LLM.messages(text))
   end
 
-  def test_call_session_and_chat_totals_are_not_mixed
-    first = LLM::Responses.update_meta(response('one', prompt: 2, completion: 3, total: 5))
-    second = LLM::Responses.update_meta(response('two', prompt: 7, total: 7), first)
+  def test_backend_records_direct_and_running_token_counts
+    first = LLM::Responses.update_meta(response(prompt: 2, completion: 3, total: 5))
+    second = LLM::Responses.update_meta(response(prompt: 7, total: 7), first)
 
     assert_equal 7, second['pt']
     assert_nil second['ct']
@@ -32,108 +33,140 @@ class TestLLMUsageMeta < Test::Unit::TestCase
     assert_equal 9, second['pt_c']
     assert_equal 3, second['ct_c']
     assert_equal 12, second['tt_c']
+    assert_nil second['usage_id']
   end
 
-  def test_usage_event_is_constant_size
-    first = LLM::Responses.update_meta(response('one', prompt: 2, completion: 3, total: 5))
-    second = LLM::Responses.update_meta(response('two', prompt: 7, total: 7), first)
+  def test_jobs_returns_all_projecting_jobs
+    conversation = chat <<-EOF
+user: First
+meta: job=WF/ask/first.chat
+assistant: First answer
+user: Second
+meta: job=WF/ask/second.chat
+assistant: Second answer
+    EOF
 
-    assert_not_include first.keys, 'usage'
-    assert_not_include second.keys, 'usage'
-    assert_match(/^r_/, first['usage_id'])
-    assert_match(/^r_/, second['usage_id'])
+    assert_equal %w[WF/ask/first.chat WF/ask/second.chat], conversation.jobs
+    assert_equal 'WF/ask/second.chat', conversation.meta[:job]
   end
 
-  def test_shared_branch_history_is_counted_once
-    prefix = LLM::Responses.update_meta(response('prefix', prompt: 2, completion: 3, total: 5))
-    left = LLM::Responses.update_meta(response('left', prompt: 7, total: 7), prefix)
-    right = LLM::Responses.update_meta(response('right', prompt: 11, completion: 13, total: 24), prefix)
+  def test_message_identity_includes_non_meta_history
+    first = chat <<-EOF
+user: Question
+meta: tt=5
+assistant: Answer
+    EOF
+    same = chat <<-EOF
+user: Question
+assistant: Answer
+    EOF
+    different = chat <<-EOF
+user: Different question
+assistant: Answer
+    EOF
 
-    events = Chat.usage_events([meta_message(prefix), meta_message(left), meta_message(right)])
-    totals = Chat.usage_totals(events)
-
-    assert_equal 20, totals['pt_c']
-    assert_equal 16, totals['ct_c']
-    assert_equal 36, totals['tt_c']
+    assert_equal first.message_index.last[:id], same.message_index.last[:id]
+    assert_not_equal first.message_index.last[:id], different.message_index.last[:id]
   end
 
-  def test_chat_meta_unions_events_and_removes_meta_messages
-    first = LLM::Responses.update_meta(response('one', prompt: 2, completion: 3, total: 5))
-    second = LLM::Responses.update_meta(response('two', prompt: 7, total: 7), first)
-    messages = [
-      meta_message(first),
-      { role: :assistant, content: 'answer' },
-      meta_message(second)
+  def test_consecutive_meta_leaves_the_first_segment_orphaned
+    conversation = chat <<-EOF
+user: Work
+meta: tt=2
+meta: job=WF/ask/work.chat
+assistant: Done
+    EOF
+
+    trace = Chat.trace_chats([conversation])
+    assert_equal 2, trace.length
+    assert trace.first[:orphan]
+    assert_equal 2, trace.first[:meta][:tt]
+    assert_equal 'WF/ask/work.chat', trace.last[:meta][:job]
+    assert_equal 1, trace.last[:messages].length
+  end
+
+  def test_final_meta_is_an_orphan_segment
+    conversation = chat <<-EOF
+user: Work
+meta: tt=2
+assistant: Tool call removed
+meta: tt=7
+    EOF
+
+    trace = Chat.trace_chats([conversation])
+    assert_equal 2, trace.length
+    assert_equal 7, trace.last[:meta][:tt]
+    assert trace.last[:orphan]
+    assert_empty trace.last[:messages]
+  end
+
+  def test_meta_covers_a_multi_tool_response_segment
+    conversation = chat <<-EOF
+user: Write two files
+meta: tt=1000
+function_call: {"name":"write","id":"one"}
+function_call_output: {"id":"one","content":"done one"}
+function_call: {"name":"write","id":"two"}
+function_call_output: {"id":"two","content":"done two"}
+assistant: Done
+user: Next request
+    EOF
+
+    trace = Chat.trace_chats([conversation])
+    assert_equal 1, trace.length
+    assert_equal 1000, trace.first[:meta][:tt]
+    assert_equal 5, trace.first[:messages].length
+    assert !trace.first[:orphan]
+  end
+
+  def test_project_marks_the_whole_response_with_one_job_meta
+    response = [
+      { role: :meta, content: 'tt=2' },
+      { role: :function_call, content: '{"name":"write"}' },
+      { role: :function_call_output, content: '{"content":"done"}' },
+      { role: :meta, content: 'tt=7' },
+      { role: :assistant, content: 'Done' }
     ]
 
-    meta = Chat.meta(messages)
-
-    assert_equal 9, meta['pt_c']
-    assert_equal 3, meta['ct_c']
-    assert_equal 12, meta['tt_c']
-    assert_nil meta['usage']
-    assert_equal [:assistant], messages.collect { |message| message[:role] }
+    projected = Chat.project('WF/ask/work.chat', response)
+    assert_equal %i[meta function_call function_call_output assistant], projected.collect { |m| m[:role] }
+    assert_equal 'WF/ask/work.chat', Chat.parse_meta(projected.first[:content])[:job]
+    trace = Chat.trace_chats([Chat.setup(projected)])
+    assert_equal 1, trace.length
+    assert_equal 3, trace.first[:messages].length
   end
 
-  def test_task_summaries_are_deduplicated_without_becoming_usage_events
-    request = {
-      usage_scope: 'task', usage_job: 'Planned/request/one',
-      pt_d: 2, ct_d: 3, tt_d: 5,
-      pt_c: 2, ct_c: 3, tt_c: 5
-    }
-    plan = {
-      usage_scope: 'task', usage_job: 'Planned/plan/one',
-      pt_d: 7, ct_d: 0, tt_d: 7,
-      pt_c: 7, ct_c: 0, tt_c: 7
-    }
-    messages = [meta_message(request), meta_message(plan), meta_message(request)]
+  def test_trace_keeps_distinct_segments_for_direct_and_projected_metadata
+    direct = chat <<-EOF
+user: Work
+meta: tt=7
+assistant: Done
+    EOF
+    projected = chat <<-EOF
+user: Work
+meta: job=WF/ask/work.chat
+assistant: Done
+    EOF
 
-    assert_empty Chat.usage_events(messages)
-    totals = Chat.usage_totals(Chat.usage_summaries(messages))
-    assert_equal 9, totals['pt_c']
-    assert_equal 3, totals['ct_c']
-    assert_equal 12, totals['tt_c']
-
-    meta = Chat.meta(messages)
-    assert_equal 9, meta['pt_c']
-    assert_equal 3, meta['ct_c']
-    assert_equal 12, meta['tt_c']
+    trace = Chat.trace_chats([projected, direct])
+    assert_equal 2, trace.length
+    assert_equal ['WF/ask/work.chat', nil], trace.collect { |entry| entry[:meta][:job] }
+    assert_equal [nil, 7], trace.collect { |entry| entry[:meta][:tt] }
   end
 
-  def test_following_a_task_uses_its_complete_total
-    before = [
-      meta_message(LLM::Responses.update_meta(response('one', prompt: 73, completion: 61, total: 134))),
-      meta_message(LLM::Responses.update_meta(response('two', prompt: 114, completion: 153, total: 267)))
-    ]
-    task = meta_message(
-      usage_scope: 'task', usage_job: 'Planned/ask/example',
-      pt_d: 3002, ct_d: 405, tt_d: 3407,
-      pt_c: 18_615, ct_c: 2526, tt_c: 21_141
-    )
+  def test_job_meta_does_not_reset_the_last_direct_chat_total
+    messages = LLM.messages <<-EOF
+user: Plan
+meta: pt=10 ct=2 tt=12 pt_c=10 ct_c=2 tt_c=12
+assistant: Plan complete
+meta: job=WF/ask/work.chat
+assistant: Work complete
+    EOF
 
-    current = Chat.meta(before + [task])
-    next_call = LLM::Responses.update_meta(
-      response('three', prompt: 670, completion: 423, total: 1093), current
-    )
-
-    assert_equal 19_472, next_call['pt_c']
-    assert_equal 3_163, next_call['ct_c']
-    assert_equal 22_635, next_call['tt_c']
-  end
-
-  def test_legacy_cumulative_snapshots_are_not_summed
-    snapshots = [
-      meta_message(pt_c: 10, ct_c: 1, tt_c: 11),
-      meta_message(pt_c: 30, ct_c: 3, tt_c: 33),
-      meta_message(pt_c: 60, ct_c: 6, tt_c: 66)
-    ]
-
-    assert_empty Chat.usage_events(snapshots)
-    assert_equal [60, 6, 66], Chat.legacy_usage(snapshots).values.first
-
-    meta = Chat.meta(snapshots)
-    assert_equal 60, meta['pt_c']
-    assert_equal 6, meta['ct_c']
-    assert_equal 66, meta['tt_c']
+    current = Chat.meta(messages)
+    assert_equal 'WF/ask/work.chat', current[:job]
+    assert_equal 10, current[:pt_c]
+    assert_equal 2, current[:ct_c]
+    assert_equal 12, current[:tt_c]
   end
 end

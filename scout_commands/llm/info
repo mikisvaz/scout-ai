@@ -43,22 +43,22 @@ plot_file = options.delete(:plot)
 raise ParameterException, 'No chat file given' if input.nil? || input.empty?
 
 class LLMInfoReport
-  attr_reader :chat_files, :jobs
+  attr_reader :root, :chats, :jobs, :warnings
 
   def initialize(input)
-    @input = resolve_chat(input)
-    @chat_files = Set.new
+    @root = resolve_chat(input)
+    @chats = {}
     @jobs = {}
-    @job_identities = {}
-    @job_aliases = {}
-    @call_references = []
-    @chat_imports = []
-    @chat_job_references = []
-    @seen_sources = Set.new
+    @warnings = []
+    @imports = []
+    @results = []
+    @dependencies = []
+    @logs = []
+    discover_chat(@root)
   end
 
   def resolve_chat(input)
-    candidates = [input, input + '.chat', File.expand_path(input), File.expand_path(input + '.chat')]
+    candidates = [input, "#{input}.chat", File.expand_path(input), File.expand_path("#{input}.chat")]
     begin
       candidates << Scout.chats[input].find
       candidates << Scout.chats[input].find_with_extension(:chat).find
@@ -68,699 +68,195 @@ class LLMInfoReport
       raise(ParameterException, "Chat not found: #{input}")
   end
 
-  def messages(path)
-    LLM.messages(Open.read(path.to_s))
-  rescue Exception => e
-    Log.warn "Could not parse chat #{path}: #{e.message}"
-    []
-  end
-
-  def metadata(messages)
-    messages.select { |message| message[:role].to_s == 'meta' }.collect do |message|
-      Chat.parse_meta(message[:content].to_s)
-    rescue
-      nil
-    end.compact
-  end
-
-  def job_references(messages)
-    metadata(messages).flat_map do |meta|
-      [meta[:job], meta['job'], meta[:usage_job], meta['usage_job']]
-    end.compact.uniq
-  end
-
-  def last_task_reference(messages)
-    metadata(messages).reverse_each do |meta|
-      next unless (meta[:usage_scope] || meta['usage_scope']) == 'task'
-      reference = meta[:usage_job] || meta['usage_job'] || meta[:job] || meta['job']
-      return reference if reference
-    end
+  def load_chat(path)
+    Chat.load(path)
+  rescue => e
+    @warnings << "Could not read chat #{path}: #{e.message}"
     nil
   end
 
-  def resolve_job(reference)
-    reference = reference.to_s
-    candidates = [reference, File.expand_path(reference)]
-    begin
-      candidates << Scout.var.jobs[reference].find
-    rescue
-    end
-    candidates << File.join(File.expand_path('~/.scout/var/jobs'), reference)
+  def discover_chat(path)
+    path = File.expand_path(path.to_s)
+    return if @chats.include?(path)
+    chat = load_chat(path)
+    return if chat.nil?
+    @chats[path] = chat
 
-    candidates.each do |candidate|
-      candidate = candidate.to_s.sub(/\.info$/, '')
-      return File.expand_path(candidate) if File.file?(candidate) || File.file?(candidate + '.info')
-    end
-
-    # Relocate old job paths by their Workflow/task/result suffix.
-    parts = reference.split(File::SEPARATOR)
-    if parts.length >= 3
-      suffix = File.join(*parts.last(3))
-      [File.expand_path('~/.scout/var/jobs'), File.expand_path('~/.rbbt/var/jobs')].each do |root|
-        candidate = File.join(root, suffix)
-        return candidate if File.file?(candidate) || File.file?(candidate + '.info')
+    %w[import continue last].each do |role|
+      chat.role_messages(role).each do |message|
+        imported = Chat.find_file(message[:content].to_s.strip, path)
+        next unless imported && File.file?(imported.to_s)
+        imported = File.expand_path(imported.to_s)
+        @imports << [imported, path]
+        discover_chat(imported)
       end
     end
 
-    begin
-      step = Step.load(reference)
-      candidate = File.expand_path(step.path.to_s) if step
-      return candidate if candidate && (File.file?(candidate) || File.file?(candidate + '.info'))
-    rescue
+    chat.jobs.each do |reference|
+      job = discover_job(reference)
+      @results << [job.path.to_s, path] if job
+    end
+  end
+
+  def discover_job(reference)
+    job = Step === reference ? reference : Step.load(reference)
+    path = File.expand_path(job.path.to_s)
+    return @jobs[path] if @jobs.include?(path)
+    @jobs[path] = job
+
+    job.dependencies.each do |dependency|
+      dependency_job = discover_job(dependency)
+      @dependencies << [dependency_job.path.to_s, path] if dependency_job
     end
 
+    if job.done? && job.type.to_s == 'chat'
+      @results << [path, path]
+      discover_chat(path)
+    end
+
+    log = job.file('log')
+    if log.directory?
+      log.glob('**/*.chat').sort.each do |file|
+        file = File.expand_path(file.to_s)
+        @logs << [path, file]
+        discover_chat(file)
+      end
+    end
+
+    job
+  rescue => e
+    @warnings << "Could not load job #{reference}: #{e.message}"
     nil
   end
 
-  def ask_job?(path, info = nil)
-    info ||= job_info(path)
-    info['task_name'].to_s == 'ask' || path.split(File::SEPARATOR).include?('ask')
+  def trace(chat_list = @chats.values)
+    Chat.trace_chats(chat_list)
   end
 
-  def job_info(path)
-    info_file = path + '.info'
-    File.file?(info_file) ? IndiferentHash.setup(JSON.parse(File.read(info_file))) : IndiferentHash.setup({})
-  rescue Exception => e
-    Log.warn "Could not read job info #{info_file}: #{e.message}"
-    IndiferentHash.setup({})
-  end
-
-  def imported_files(path, messages)
-    messages.filter_map do |message|
-      next unless %w(import continue last).include?(message[:role].to_s)
-      Chat.find_file(message[:content].to_s.strip, path)
-    rescue
-      nil
-    end.select { |file| File.file?(file.to_s) }
-  end
-
-  # Job paths moved between ~/.scout and ~/.rbbt in older installations.
-  # Workflow, task and result basename are the stable identity across roots.
-  def job_identity(path, info = nil)
-    info ||= job_info(path)
-    workflow = info[:workflow] || info['workflow']
-    task = info[:task_name] || info['task_name']
-    if workflow && task
-      [workflow.to_s, task.to_s, File.basename(path)]
-    else
-      path.split(File::SEPARATOR).last(3)
+  def direct_entries(chat_list = @chats.values)
+    trace(chat_list).select do |entry|
+      meta = entry[:meta]
+      next false if meta[:job]
+      %w[pt ct tt].any? { |name| meta.include?(name) }
     end
   end
 
-  def log_identity(path)
-    path.partition('.files/').last
+  def token_totals(chat_list = @chats.values)
+    direct_entries(chat_list).each_with_object({ pt: 0, ct: 0, tt: 0 }) do |entry, totals|
+      meta = entry[:meta]
+      %w[pt ct tt].each { |name| totals[name.to_sym] += meta[name].to_i }
+    end
   end
 
-  def merge_logs(first, second)
-    (Array(first) + Array(second)).sort.each_with_object({}) do |log, found|
-      found[log_identity(log)] ||= log
-    end.values
+  def short_path(path)
+    path = File.expand_path(path.to_s)
+    home = File.expand_path('~')
+    path.start_with?(home + '/') ? "~#{path[home.length..]}" : path
   end
 
-  def canonical_job(path)
-    @job_aliases[path] || path
+  def roles(chat)
+    chat.each_with_object(Hash.new(0)) { |message, counts| counts[message[:role].to_s] += 1 }
   end
 
-  def discover
-    source_queue = [@input]
-    job_queue = []
+  def print_tokens(tokens)
+    "prompt=#{tokens[:pt]} completion=#{tokens[:ct]} total=#{tokens[:tt]}"
+  end
 
-    until source_queue.empty? && job_queue.empty?
-      until source_queue.empty?
-        source = File.expand_path(source_queue.shift.to_s)
-        next if @seen_sources.include?(source)
-        @seen_sources << source
-
-        parsed = messages(source)
-        is_agent_log = source.include?('.files/') && File.basename(source) == 'agent.chat'
-        @chat_files << source unless is_agent_log
-        imports = imported_files(source, parsed).collect { |file| File.expand_path(file.to_s) }
-        imports.each do |file|
-          source_queue << file
-          @chat_imports << [file, source] unless is_agent_log
-        end
-        job_references(parsed).each do |reference|
-          job_queue << reference
-          @chat_job_references << [source, reference] unless is_agent_log
-        end
-      end
-
-      until job_queue.empty?
-        reference = job_queue.shift
-        path = resolve_job(reference)
-        next if path.nil? || @job_aliases.include?(path)
-
-        info = job_info(path)
-        identity = job_identity(path, info)
-        canonical = @job_identities[identity]
-        logs = Dir.glob(path + '.files/**/agent.chat').select { |file| File.file?(file) }.sort
-
-        if canonical
-          @job_aliases[path] = canonical
-          @jobs[canonical][:logs] = merge_logs(@jobs[canonical][:logs], logs)
-          old_dependencies = Array(@jobs[canonical][:info][:dependencies] || @jobs[canonical][:info]['dependencies'])
-          new_dependencies = Array(info[:dependencies] || info['dependencies'])
-          @jobs[canonical][:info][:dependencies] = (old_dependencies + new_dependencies).uniq
-        else
-          canonical = path
-          @job_identities[identity] = canonical
-          @job_aliases[path] = canonical
-          @jobs[canonical] = {info: info, logs: logs}
-        end
-
-        Array(info[:dependencies] || info['dependencies']).each { |dependency| job_queue << dependency }
-
-        if File.file?(path)
-          parsed = messages(path)
-          imported_files(path, parsed).each { |file| source_queue << file }
-          job_references(parsed).each { |nested| job_queue << nested }
-        end
-
-        logs.each do |log|
-          parsed = messages(log)
-          imported_files(log, parsed).each { |file| source_queue << file }
-          job_references(parsed).each { |nested| job_queue << nested }
-          called = last_task_reference(parsed)
-          @call_references << [canonical, called] if called
-        end
-      end
+  def print
+    puts 'Chats'
+    puts '====='
+    @chats.sort.each do |path, chat|
+      role_text = roles(chat).sort.collect { |role, count| "#{role}=#{count}" } * ' '
+      puts "#{short_path(path)}"
+      puts "  messages=#{chat.length} #{role_text}"
+      jobs = chat.jobs
+      puts "  jobs=#{jobs * ', '}" unless jobs.empty?
     end
 
-    self
-  end
-
-  def job_endpoints(info)
-    provided = info[:provided_inputs] || info['provided_inputs'] || {}
-    provided = IndiferentHash.setup(provided)
-    chat = provided[:chat]
-    return [] unless String === chat
-    endpoint_values(LLM.messages(chat))
-  rescue
-    []
-  end
-
-  def endpoint_values(messages)
-    messages.filter_map do |message|
-      role = message[:role].to_s
-      content = message[:content].to_s.strip
-      case role
-      when 'endpoint'
-        content
-      when 'option', 'sticky_option'
-        key, _, value = content.partition(/\s+/)
-        value.strip if key == 'endpoint'
-      end
-    end.reject(&:empty?).uniq.sort
-  end
-
-  def tool_call_id(message)
-    info = JSON.parse(message[:content].to_s)
-    info['call_id'] || info['id'] || info.dig('function', 'id')
-  rescue
-    nil
-  end
-
-  def analyze(path)
-    parsed = messages(path)
-    roles = Hash.new(0)
-    parsed.each { |message| roles[message[:role].to_s] += 1 }
-
-    request_events = Chat.usage_events(parsed)
-    legacy = Chat.legacy_usage(parsed)
-    events = legacy.merge(request_events)
-    tools = {}
-    parsed.each do |message|
-      next unless %w(function_call mcp_call).include?(message[:role].to_s)
-      id = tool_call_id(message) || Misc.digest([message[:role], message[:content]])
-      tools[id] = true
+    puts
+    puts 'Jobs'
+    puts '===='
+    @jobs.sort.each do |path, job|
+      puts "#{short_path(path)}"
+      puts "  #{job.info[:workflow]}##{job.info[:task_name]}"
+      logs = @logs.select { |source, _| source == path }.collect(&:last)
+      puts "  logs=#{logs.length} dependencies=#{job.dependencies.length}"
     end
 
-    request_totals = Chat.usage_totals(request_events)
-    session = session_snapshot(parsed)
-    session_unattributed = {}
-    {'pt_s' => 'pt_c', 'ct_s' => 'ct_c', 'tt_s' => 'tt_c'}.each do |session_name, request_name|
-      next unless session.include?(session_name)
-      session_unattributed[session_name] = session[session_name].to_i - request_totals[request_name].to_i
+    root_chat = @chats[File.expand_path(@root.to_s)]
+    puts
+    puts 'Token usage'
+    puts '-----------'
+    puts "Root chat: #{print_tokens(token_totals([root_chat]))}"
+    puts "All traced chats: #{print_tokens(token_totals)}"
+    puts "Trace records: #{trace.length}"
+
+    unless @warnings.empty?
+      puts
+      puts 'Warnings'
+      puts '========'
+      @warnings.uniq.each { |warning| puts "- #{warning}" }
     end
-
-    {
-      path: File.expand_path(path),
-      messages: parsed.length,
-      roles: roles,
-      endpoints: endpoint_values(parsed),
-      tools: tools,
-      usage: events,
-      usage_totals: Chat.usage_totals(events),
-      request_events: request_events,
-      request_totals: request_totals,
-      legacy: legacy,
-      legacy_totals: Chat.usage_totals(legacy),
-      session: session,
-      session_unattributed: session_unattributed,
-      task_summaries: Chat.usage_summaries(parsed)
-    }
-  end
-
-  # Session counters are process/thread running totals. The part not explained
-  # by request events in this file can include socialized agents, but can also
-  # include requests made before the chat started in the same session.
-  def session_snapshot(messages)
-    snapshot = {}
-    metadata(messages).each do |meta|
-      %w(pt_s ct_s tt_s).each do |name|
-        snapshot[name] = meta[name] if meta.include?(name)
-      end
-    end
-    snapshot
-  end
-
-  def format_session_tokens(values)
-    "prompt=#{values['pt_s'].to_i} completion=#{values['ct_s'].to_i} total=#{values['tt_s'].to_i}"
-  end
-
-  def job_summary(path)
-    return {} unless File.file?(path)
-    summaries = Chat.usage_summaries(messages(path))
-    summaries.values.last || []
-  end
-
-  def add_analysis(aggregate, analysis)
-    aggregate[:messages] += analysis[:messages]
-    analysis[:roles].each { |role, count| aggregate[:roles][role] += count }
-    aggregate[:endpoints].merge(analysis[:endpoints])
-    aggregate[:tools].merge!(analysis[:tools])
-  end
-
-  def format_tokens(values)
-    values ||= {}
-    "prompt=#{values['pt_c'].to_i} completion=#{values['ct_c'].to_i} total=#{values['tt_c'].to_i}"
-  end
-
-  def session_values(values)
-    %w(pt_s ct_s tt_s).collect { |name| values.include?(name) ? values[name].to_i : nil }
-  end
-
-  def session_unattributed?(analysis)
-    analysis[:session_unattributed].values.any? { |value| value.to_i != 0 }
-  end
-
-  def session_matches(analysis)
-    return [] unless session_unattributed?(analysis)
-    wanted = session_values(analysis[:session_unattributed])
-
-    @all_analyses.values.select do |candidate|
-      candidate[:path] != analysis[:path] &&
-        candidate[:session].any? &&
-        session_values(candidate[:session]) == wanted
-    end.collect { |candidate| candidate[:path] }.sort
-  end
-
-  def ordered_jobs
-    predecessors = Hash.new { |hash, key| hash[key] = Set.new }
-
-    @jobs.each do |path, job|
-      Array(job[:info][:dependencies] || job[:info]['dependencies']).each do |reference|
-        dependency = resolve_job(reference)
-        dependency = canonical_job(dependency) if dependency
-        predecessors[path] << dependency if dependency && @jobs.include?(dependency)
-      end
-
-      @job_analyses[path].each do |analysis|
-        session_matches(analysis).each do |matched_file|
-          owner = @log_owners[matched_file]
-          predecessors[path] << owner if owner && owner != path
-        end
-      end
-    end
-
-    ordered = []
-    visiting = Set.new
-    visited = Set.new
-    visit = lambda do |path|
-      return if visited.include?(path) || visiting.include?(path)
-      visiting << path
-      predecessors[path].sort.each { |previous| visit.call(previous) }
-      visiting.delete(path)
-      visited << path
-      ordered << path
-    end
-    @jobs.keys.sort.each { |path| visit.call(path) }
-    ordered
-  end
-
-  def ordered_log_analyses(path)
-    analyses = @job_analyses[path]
-    by_path = analyses.to_h { |analysis| [analysis[:path], analysis] }
-    predecessors = Hash.new { |hash, key| hash[key] = Set.new }
-    analyses.each do |analysis|
-      session_matches(analysis).each do |matched|
-        predecessors[analysis[:path]] << matched if by_path.include?(matched)
-      end
-    end
-
-    ordered = []
-    visiting = Set.new
-    visited = Set.new
-    visit = lambda do |file|
-      return if visited.include?(file) || visiting.include?(file)
-      visiting << file
-      predecessors[file].sort.each { |previous| visit.call(previous) }
-      visiting.delete(file)
-      visited << file
-      ordered << by_path[file]
-    end
-    by_path.keys.sort.each { |file| visit.call(file) }
-    ordered
-  end
-
-  def ordered_chats
-    predecessors = Hash.new { |hash, key| hash[key] = Set.new }
-    @chat_imports.each do |imported, importing|
-      predecessors[importing] << imported if @chat_files.include?(imported)
-    end
-    ordered = []
-    visited = Set.new
-    visit = lambda do |path|
-      return if visited.include?(path)
-      visited << path
-      predecessors[path].sort.each { |previous| visit.call(previous) }
-      ordered << path
-    end
-    @chat_files.to_a.sort.each { |path| visit.call(path) }
-    ordered
   end
 
   def flow_nodes
-    ordered_chats + ordered_jobs
-  end
-
-  def job_result_chats
-    @job_result_chats ||= @chat_job_references.each_with_object(Hash.new { |hash, key| hash[key] = Set.new }) do |(chat, reference), found|
-      job = resolve_job(reference)
-      job = canonical_job(job) if job
-      found[job] << chat if job && @jobs.include?(job)
-    end
-  end
-
-  def imported_chat_ancestors(chat, found = Set.new)
-    @chat_imports.each do |imported, importing|
-      next unless importing == chat || found.include?(importing)
-      found << imported
-    end
-    # Imports may be several levels deep, so repeat until no new chats appear.
-    previous_size = -1
-    while previous_size != found.size
-      previous_size = found.size
-      @chat_imports.each do |imported, importing|
-        found << imported if found.include?(importing)
-      end
-    end
-    found
-  end
-
-  # If the called job produced an earlier chat which is imported by a chat
-  # produced by the parent job, its content reaches the parent through the
-  # chat import already. Drawing a call edge would imply an invocation that did
-  # not happen and duplicates the visible import/result path.
-  def call_implied_by_chat_import?(parent, called)
-    parent_chats = job_result_chats[parent]
-    called_chats = job_result_chats[called]
-    return false if parent_chats.empty? || called_chats.empty?
-
-    parent_chats.any? do |chat|
-      ancestors = imported_chat_ancestors(chat)
-      called_chats.any? { |called_chat| ancestors.include?(called_chat) }
-    end
+    @chats.keys.collect { |path| [:chat, path] } + @jobs.keys.collect { |path| [:job, path] }
   end
 
   def flow_edges
-    edges = {}
-
-    @chat_imports.each do |imported, importing|
-      edges[[imported, importing]] = :import if @chat_files.include?(imported) && @chat_files.include?(importing)
-    end
-
-    @chat_job_references.each do |chat, reference|
-      job = resolve_job(reference)
-      job = canonical_job(job) if job
-      edges[[job, chat]] = :result if job && @jobs.include?(job) && @chat_files.include?(chat)
-    end
-
-    @jobs.each do |path, job|
-      Array(job[:info][:dependencies] || job[:info]['dependencies']).each do |reference|
-        dependency = resolve_job(reference)
-        dependency = canonical_job(dependency) if dependency
-        edges[[dependency, path]] = :dependency if dependency && @jobs.include?(dependency)
-      end
-    end
-
-    @call_references.each do |parent, reference|
-      parent = canonical_job(parent)
-      called = resolve_job(reference)
-      called = canonical_job(called) if called
-      next unless @jobs.include?(parent) && @jobs.include?(called) && parent != called
-      called_info = @jobs[called][:info]
-      next unless (called_info[:task_name] || called_info['task_name']).to_s == 'ask'
-      next if call_implied_by_chat_import?(parent, called)
-      next if edges.include?([parent, called]) || edges.include?([called, parent])
-      edges[[parent, called]] = :call
-    end
-
-    @job_analyses.each do |path, analyses|
-      analyses.each do |analysis|
-        session_matches(analysis).each do |matched_file|
-          previous = @log_owners[matched_file]
-          next unless previous && previous != path
-          next if edges.include?([previous, path]) || edges.include?([path, previous])
-          edges[[previous, path]] = :session
-        end
-      end
-    end
-
-    edges.collect { |(from, to), type| [from, to, type] }
-  end
-
-  def job_name(path)
-    info = @jobs[path][:info]
-    workflow = info[:workflow] || info['workflow'] || path.split(File::SEPARATOR)[-3]
-    task = info[:task_name] || info['task_name'] || path.split(File::SEPARATOR)[-2]
-    "#{workflow}/#{task}"
-  end
-
-  def job_short_id(path)
-    File.basename(path).sub(/\.chat$/, '').sub(/^Default_/, '')[0, 8]
-  end
-
-  def job_token_total(path)
-    summary = job_summary(path)
-    summary.empty? ? 0 : summary[2].to_i
-  end
-
-  def short_number(number)
-    if number >= 1_000_000
-      format('%.2fM', number / 1_000_000.0)
-    elsif number >= 1_000
-      format('%.1fk', number / 1_000.0)
-    else
-      number.to_s
-    end
+    edges = []
+    edges.concat(@imports.collect { |from, to| [:chat, from, :chat, to, :import] })
+    edges.concat(@results.collect { |from, to| [:job, from, :chat, to, :result] })
+    edges.concat(@dependencies.collect { |from, to| [:job, from, :job, to, :dependency] })
+    edges.concat(@logs.collect { |from, to| [:job, from, :chat, to, :log] })
+    edges.uniq
   end
 
   def print_flow
-    prepare
-    nodes = flow_nodes
-    ids = nodes.each_with_index.to_h
-
-    puts 'Flow nodes'
-    puts '=========='
-    nodes.each do |path|
-      if @chat_files.include?(path)
-        puts "[#{ids[path] + 1}] Chat/#{File.basename(path)}"
-      else
-        puts "[#{ids[path] + 1}] #{job_name(path)}  #{job_short_id(path)}  tokens=#{short_number(job_token_total(path))}"
-      end
+    puts 'Flow'
+    puts '===='
+    flow_nodes.each_with_index do |(kind, path), index|
+      label = kind == :job ? 'Job' : 'Chat'
+      puts "[#{index + 1}] #{label} #{short_path(path)}"
     end
     puts
-    puts 'Flow edges'
-    puts '=========='
-    flow_edges.sort_by { |from, to, type| [ids[from] || 0, ids[to] || 0, type.to_s] }.each do |from, to, type|
-      puts "[#{ids[from] + 1}] -> [#{ids[to] + 1}]  #{type}"
+    flow_edges.each do |from_kind, from, to_kind, to, type|
+      puts "#{from_kind}/#{short_path(from)} -> #{to_kind}/#{short_path(to)} (#{type})"
     end
   end
 
   def flow_dot
-    prepare
     nodes = flow_nodes
-    ids = nodes.each_with_index.to_h { |path, index| [path, "n#{index}"] }
-    jobs = ordered_jobs
-    workflows = jobs.collect { |path| job_name(path).split('/').first }.uniq.sort
-    palette = %w(#dceeff #e8f5df #fff0d6 #f3e2f7 #fde2e2 #e2f2f2 #eeeeee)
-    colors = workflows.each_with_index.to_h { |workflow, index| [workflow, palette[index % palette.length]] }
-
-    lines = [
-      'digraph scout_ai_flow {',
-      '  graph [rankdir=LR, bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.6];',
-      '  node [fontname="Helvetica", fontsize=10];',
-      '  edge [fontname="Helvetica", fontsize=8, arrowsize=0.7];'
-    ]
-
-    ordered_chats.each do |path|
-      label = "Chat\n#{File.basename(path)}"
-      lines << "  #{ids[path]} [label=#{JSON.generate(label)}, shape=note, style=filled, fillcolor=\"#f7f7f7\"];"
+    ids = nodes.each_with_index.to_h { |node, index| [node, "n#{index}"] }
+    lines = ['digraph scout_ai_flow {', '  rankdir=LR;']
+    nodes.each do |kind, path|
+      label = "#{kind == :job ? 'Job' : 'Chat'}\\n#{short_path(path)}"
+      shape = kind == :job ? 'box' : 'note'
+      lines << "  #{ids[[kind, path]]} [shape=#{shape}, label=#{JSON.generate(label)}];"
     end
-
-    jobs.each do |path|
-      name = job_name(path)
-      workflow, task = name.split('/', 2)
-      basename = job_short_id(path)
-      label = "#{workflow}\n#{task}\n#{short_number(job_token_total(path))} tokens\n#{basename}"
-      lines << "  #{ids[path]} [label=#{JSON.generate(label)}, shape=box, style=\"rounded,filled\", fillcolor=#{JSON.generate(colors[workflow])}];"
-    end
-
-    edge_style = {
-      dependency: 'color="#333333", label="dependency"',
-      call: 'color="#2864a5", style="dashed", label="calls"',
-      session: 'color="#888888", style="dotted", label="session"',
-      import: 'color="#7a4e9d", penwidth=1.5, label="imports"',
-      result: 'color="#39804a", penwidth=1.5, label="result"'
-    }
-    flow_edges.each do |from, to, type|
-      lines << "  #{ids[from]} -> #{ids[to]} [#{edge_style[type]}];"
+    flow_edges.each do |from_kind, from, to_kind, to, type|
+      from_id = ids[[from_kind, from]]
+      to_id = ids[[to_kind, to]]
+      next unless from_id && to_id
+      lines << "  #{from_id} -> #{to_id} [label=#{JSON.generate(type.to_s)}];"
     end
     lines << '}'
-    lines.join("\n") + "\n"
+    lines * "\n"
   end
 
   def write_flow(dot_file: nil, plot_file: nil)
     dot = flow_dot
-    if dot_file
-      Open.write(dot_file, dot)
-      puts "DOT flow written to #{File.expand_path(dot_file)}"
-    end
+    Open.write(dot_file, dot) if dot_file
     return unless plot_file
 
     extension = File.extname(plot_file).sub(/^\./, '').downcase
     extension = 'svg' if extension.empty?
-    raise ParameterException, "Unsupported plot format: #{extension}" unless %w(svg png pdf).include?(extension)
-
+    raise ParameterException, "Unsupported plot format: #{extension}" unless %w[svg png pdf].include?(extension)
     Tempfile.create(['scout-ai-flow', '.dot']) do |source|
       source.write(dot)
       source.flush
-      success = system('dot', "-T#{extension}", source.path, '-o', plot_file.to_s)
-      raise ScoutException, 'Graphviz dot failed; install graphviz or use --dot' unless success
+      raise ScoutException, 'Graphviz dot failed' unless system('dot', "-T#{extension}", source.path, '-o', plot_file.to_s)
     end
-    puts "Flow figure written to #{File.expand_path(plot_file)}"
-  end
-
-  def print_analysis(analysis, indent = '  ')
-    puts "#{indent}File: #{analysis[:path]}"
-    puts "#{indent}Messages: #{analysis[:messages]}"
-    puts "#{indent}Roles: #{analysis[:roles].sort.collect { |role, count| "#{role}=#{count}" }.join(' ')}"
-    puts "#{indent}Endpoints: #{analysis[:endpoints].empty? ? '(not recorded)' : analysis[:endpoints].join(', ')}"
-    puts "#{indent}Tool calls: #{analysis[:tools].length}"
-    puts "#{indent}Request token events: #{analysis[:request_events].length} (#{format_tokens(analysis[:request_totals])})"
-    if analysis[:legacy].any?
-      puts "#{indent}Legacy cumulative baseline: #{format_tokens(analysis[:legacy_totals])}"
-    end
-    if session_unattributed?(analysis)
-      matches = session_matches(analysis)
-      if matches.any?
-        puts "#{indent}Session prefix matches: #{matches.join(', ')}"
-      else
-        puts "#{indent}Session running snapshot: #{format_session_tokens(analysis[:session])}"
-        puts "#{indent}Session-only/unattributed: #{format_session_tokens(analysis[:session_unattributed])}"
-      end
-    end
-  end
-
-  def prepare
-    return self if @prepared
-    discover
-
-    @chat_analyses = @chat_files.to_h { |path| [path, analyze(path)] }
-    @job_analyses = @jobs.to_h do |path, job|
-      [path, job[:logs].collect { |log| analyze(log) }]
-    end
-    @all_analyses = @chat_analyses.merge(
-      @job_analyses.values.flatten.to_h { |analysis| [analysis[:path], analysis] }
-    )
-    @log_owners = {}
-    @job_analyses.each do |job, analyses|
-      analyses.each { |analysis| @log_owners[analysis[:path]] = job }
-    end
-    @prepared = true
-    self
-  end
-
-  def print
-    prepare
-
-    aggregate = {
-      messages: 0,
-      roles: Hash.new(0),
-      endpoints: Set.new,
-      tools: {},
-      usage: {}
-    }
-
-    puts 'Chats'
-    puts '====='
-    @chat_files.to_a.sort.each do |path|
-      analysis = @chat_analyses[path]
-      print_analysis(analysis)
-      add_analysis(aggregate, analysis)
-      aggregate[:usage].merge!(analysis[:usage])
-      puts
-    end
-
-    puts 'Workflow jobs'
-    puts '============='
-    ordered_jobs.each do |path|
-      job = @jobs[path]
-      summary = job_summary(path)
-      puts "Job: #{path}"
-      puts "  Task: #{job[:info][:workflow] || job[:info]['workflow']}##{job[:info][:task_name] || job[:info]['task_name']}"
-      puts "  Dependencies: #{Array(job[:info][:dependencies] || job[:info]['dependencies']).length}"
-      puts "  Agent logs: #{job[:logs].length}"
-      input_endpoints = job_endpoints(job[:info])
-      puts "  Input endpoints: #{input_endpoints.empty? ? '(not recorded)' : input_endpoints.join(', ')}"
-      aggregate[:endpoints].merge(input_endpoints)
-      if summary.empty?
-        puts '  Task token delta: (not recorded; aggregate falls back to unique log events)'
-      else
-        delta = {'pt_c' => summary[0], 'ct_c' => summary[1], 'tt_c' => summary[2]}
-        puts "  Task token delta: #{format_tokens(delta)}"
-        aggregate[:usage]["job:#{path}"] = summary
-      end
-
-      fallback = {}
-      ordered_log_analyses(path).each do |analysis|
-        print_analysis(analysis, '    ')
-        add_analysis(aggregate, analysis)
-        fallback.merge!(analysis[:usage])
-      end
-      aggregate[:usage].merge!(fallback) if summary.empty?
-      puts
-    end
-
-    totals = Chat.usage_totals(aggregate[:usage])
-    puts 'Aggregate'
-    puts '========='
-    puts "Objects: chats=#{@chat_files.length} workflow_jobs=#{@jobs.length} agent_logs=#{@jobs.values.sum { |job| job[:logs].length }}"
-    puts "Message records: #{aggregate[:messages]}"
-    puts "Roles: #{aggregate[:roles].sort.collect { |role, count| "#{role}=#{count}" }.join(' ')}"
-    puts "Endpoints: #{aggregate[:endpoints].empty? ? '(not recorded)' : aggregate[:endpoints].to_a.sort.join(', ')}"
-    puts "Unique tool calls: #{aggregate[:tools].length}"
-    puts "Token usage: #{format_tokens(totals)}"
-    puts
-    puts 'Notes:'
-    puts '- Job token totals use each task summary delta, so dependency totals are not counted repeatedly.'
-    puts '- Jobs with the same Workflow/task/result name are merged across ~/.scout and ~/.rbbt.'
-    puts '- Agent-log pt_c/ct_c/tt_c fields are running snapshots and are never summed.'
-    puts '- Session-only usage is the latest *_s snapshot minus request events recorded in that file.'
-    puts '- Exact matches identify an earlier reported file whose session snapshot is that prefix.'
-    puts '- Unmatched values may include socialized agents, earlier requests, or other unlogged work.'
-    puts '- Endpoint names can only be reported when they were serialized into a chat or agent log.'
   end
 end
 

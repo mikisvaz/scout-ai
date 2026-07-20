@@ -224,6 +224,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    process_queries
    server
    word
+   info
    md
   }
   agent=agent{

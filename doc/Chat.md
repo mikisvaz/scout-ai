@@ -469,6 +469,33 @@ Notes:
 
 ---
 
+
+## 7. Metadata, lineage, and chat-task results
+
+`meta` is local Scout-AI bookkeeping and is removed before provider input. A
+meta message starts a response segment. The segment continues until another
+meta, a new user/system turn, or the end of the chat. If another meta appears
+first, or the chat ends before any response message, the earlier meta is an
+orphan that records a removed message, commonly a stripped tool call.
+
+Backend inference metadata records direct provider usage with `pt`, `ct`, and
+`tt`. `pt_c`, `ct_c`, and `tt_c` are the running total for the linear chat
+branch, while `*_s` fields are running session checkpoints. Checkpoints are not
+independent token events and must not be summed across messages.
+
+A chat-task result is different from an inference record. Every projected
+message returned by an `ask` task is preceded by `meta: job=<job path>`. This
+means the message was projected from that job; the task's agent logs retain the
+direct inference metadata. Inspecting provenance therefore follows the job to
+its logs and dependencies instead of charging the projected message again.
+
+`Chat#message_index` assigns a lineage ID from the prior non-meta history, and
+`Chat.trace_chats` associates metadata with those lineage messages or orphan
+records. `Chat.job_chats` discovers result and logged chats recursively without
+compiling them.
+
+---
+
 ## 8. Summary
 
 Use `Chat` when you want:

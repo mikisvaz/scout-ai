@@ -432,13 +432,6 @@ module LLM
           meta[session_name] = Thread.current[session_name]
         end
 
-        # One immutable, constant-size event per actual request. Chat.meta
-        # later unions these events by usage_id, so a shared branch prefix is
-        # counted once without copying its complete ledger into this event.
-        response_id = response['id'] || response[:id]
-        usage_id = response_id ? "r_#{Misc.digest(response_id)}" : "r_#{SecureRandom.hex(16)}"
-        meta['usage_id'] = usage_id
-
         %w(pt ct tt).each do |name|
           meta["#{name}_c"] = current_meta["#{name}_c"].to_i + tokens[name].to_i
         end

@@ -252,9 +252,19 @@ module Chat
     Open.write(file, Base64.decode64(base64_image), mode: 'wb')
   end
 
-  def meta()
-    meta_msg = self.select{|info| info[:role].to_s == "meta" }.last
-    return {} if meta_msg.nil?
-    Chat.parse_meta meta_msg[:content]
+  def role_messages(role)
+    if Symbol === role
+      self.select{|msg| msg[:role].to_sym == role }
+    else
+      self.select{|msg| msg[:role].to_s == role }
+    end
+  end
+
+  # Return the last job reference from the meta messages in this chat.
+  def last_job
+    meta_msg = self.reverse.find{|info| info[:role].to_s == "meta" }
+    return nil if meta_msg.nil?
+    meta = Chat.parse_meta(meta_msg[:content])
+    meta[:job]
   end
 end

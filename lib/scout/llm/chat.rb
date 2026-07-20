@@ -67,4 +67,3 @@ module LLM
     Chat.purge(...)
   end
 end
-

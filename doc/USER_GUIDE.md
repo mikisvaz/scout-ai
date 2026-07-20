@@ -542,260 +542,82 @@ Why this example matters:
 
 That is often enough to build a useful multi-agent strategy without making the system hard to understand.
 
-## 11. Inspecting provenance, token usage, and agent flow
+## 11. Inspecting chat provenance and token usage
 
-Scout-AI conversations can span several kinds of persistent objects. Before trying to explain a run, distinguish them:
-
-- a **top-level chat file** is the user-facing conversation and may import earlier chats
-- a **Workflow job result** is the persisted result of one Scout task, usually under `~/.scout/var/jobs/<Workflow>/<task>/...`
-- a job's **`.info` file** records its Workflow identity, inputs, status, and explicit dependencies
-- a job's **`.files` directory** stores artifacts and diagnostic logs
-- an **agent log** is normally stored at `<job>.files/log/agent.chat`
-- additional agents may be stored at `<job>.files/log/<agent-or-branch>/agent.chat`
-
-These objects overlap intentionally. A later chat may import an earlier chat, an agent log may contain inherited conversation history, and a task result may summarize usage from nested jobs. Do not sum every number or every metadata line you find.
-
-### 11.1 Start with `llm info`
-
-The main inspection command is:
+A Scout-AI session can contain a top-level chat, imported chats, persisted
+Workflow jobs, job dependencies, and agent logs under `<job>.files/log/`.
+Use:
 
 ```bash
 scout-ai llm info path/to/chat
+scout-ai llm info path/to/chat --flow
 ```
 
-It first discovers the relevant object graph and then reports:
+The inspector reads persisted files; it does not compile chats or execute task
+roles again. It follows `import`, `continue`, `last`, `meta job=...`, persisted
+Workflow dependencies, and all `log/**/*.chat` files.
 
-- top-level and imported chat files
-- message counts and role counts
-- endpoints serialized in chats or saved job inputs
-- function-call counts
-- request token events
-- referenced Workflow jobs and their dependencies
-- all `agent.chat` files under each job's `.files/log` tree
-- nested `ask` jobs found while reading those logs
-- aggregate usage with request and job identities deduplicated
+### 11.1 Metadata semantics
 
-Use the compact flow when the detailed report is too large:
+A `meta` line starts a response segment. It covers the following assistant,
+function-call, and function-output messages until another `meta`, a new
+user/system turn, or the end of the chat. Consecutive meta lines mean the
+earlier segment is empty and is retained as an orphan record. This commonly
+happens when a tool call is removed but its usage metadata remains useful.
 
-```bash
-scout-ai llm info path/to/chat --flow --nocolor
-```
+There are two deliberately different metadata forms:
 
-Each Workflow node includes an eight-character job hash, which is the easiest way to correlate a text node with a job directory or a node in a figure.
+- `meta: pt=... ct=... tt=...` records a direct model inference in that chat.
+- `meta: job=<path>` says the next message was projected from an ask-job
+  result. It is a producer reference, not a second inference bill.
 
-To create a reusable graph description:
+Ask-task agent logs retain the direct inference metadata. The ask result strips
+that metadata and places one `meta job=...` at the start of the returned tool
+calls, tool outputs, and assistant response. Following the job discovers the
+actual agent logs and nested dependencies.
 
-```bash
-scout-ai llm info path/to/chat --dot flow.dot
-```
+### 11.2 Token totals
 
-To render a figure directly:
+`pt`, `ct`, and `tt` are prompt, completion, and total tokens for one direct
+inference. `pt_c`, `ct_c`, and `tt_c` are the running total of the linear chat
+branch; `*_s` fields are running session checkpoints. Do not sum `*_c` or
+`*_s` values across messages or files.
 
-```bash
-scout-ai llm info path/to/chat --plot flow.svg
-scout-ai llm info path/to/chat --plot flow.pdf
-scout-ai llm info path/to/chat --plot flow.png
-```
+The inspector totals direct metadata through `Chat.trace_chats`. A trace message
+is identified by its non-meta conversation history, so the same text after a
+different history is distinct. Exact duplicate lineage/metadata records are
+collapsed. A projected `job` record and a direct inference record can coexist
+for the same lineage message: the former triggers job traversal and the latter
+is the actual cost.
 
-SVG or PDF is generally preferable for papers. Graphviz must be installed for `--plot`; `--dot` remains useful when rendering is done elsewhere.
+A root chat can correctly report little or no direct usage while its traced
+agent logs contain substantial usage. That means the root is projecting ask-job
+results rather than performing the inference itself.
 
-### 11.2 Reading the flow graph
+### 11.3 Tool calls and workflow provenance
 
-The flow graph contains chat nodes and Workflow job nodes. Its edge types have different meanings:
+A tool invocation is represented by `function_call` plus
+`function_call_output`; count the call, not both records. Provider tokens are
+charged to model requests, not to the tool invocation itself.
 
-- `import`: one top-level chat imports another chat
-- `result`: a Workflow job produced the result recorded in a chat
-- `dependency`: a persisted Scout Workflow dependency
-- `call`: an orchestration job invoked a nested `ask` job
-- `session`: ordering inferred from matching session-token prefixes when no stronger relation was available
-
-Treat explicit `dependency`, `import`, and `result` edges as stronger evidence than inferred session edges.
-
-A job mentioned in an agent log is not automatically a new call. For example, a result from an earlier chat may be imported into a later chat and immediately presented to the later agent. `llm info` suppresses a `call` edge when the same relationship is already explained by:
-
-1. the earlier job producing an earlier chat,
-2. that chat being imported into the later chat, and
-3. the later job producing the later chat.
-
-This avoids presenting inherited context as a fresh agent invocation.
-
-### 11.3 Workflow provenance is complementary
-
-For a specific job, use Scout's normal provenance command:
+Use Scout's normal dependency view when needed:
 
 ```bash
 scout workflow prov /path/to/job.chat --nocolor
 ```
 
-This reports the persisted Workflow dependency chain. It is authoritative for Scout dependencies, but it does not by itself explain:
+`workflow prov` explains persisted task dependencies. `llm info` explains how
+those jobs, chats, projected results, and agent logs combine into a session.
 
-- imported top-level chats
-- all nested agent logs
-- session-prefix relationships
-- token events inside chats
-- apparent calls that are actually inherited through chat imports
+### 11.4 Common mistakes
 
-Use `workflow prov` to understand the task DAG and `llm info` to understand the combined chat, agent, and token flow.
+- Do not count a `meta job=...` projection as a local token event.
+- Do not sum every cumulative `*_c` or session `*_s` value.
+- Do not inspect only `log/agent.chat`; workers and branches can be stored
+  anywhere below `log/**/*.chat`.
+- Do not use `LLM.chat` to inspect provenance: it compiles a chat and may run
+  task/job roles. Use `Chat.load` for persisted evidence.
 
-### 11.4 Token metadata vocabulary
-
-Backend request metadata uses these fields:
-
-- `pt`, `ct`, `tt`: prompt, completion, and total tokens reported for one backend request
-- `usage_id`: stable identity for that request; shared history and copied chats can therefore be deduplicated
-- `pt_s`, `ct_s`, `tt_s`: running process/thread session snapshots
-- `pt_c`, `ct_c`, `tt_c`: cumulative values represented by the current chat lineage
-
-Workflow task summaries use:
-
-- `usage_scope=task`: identifies an aggregate task record rather than a backend request
-- `usage_job`: stable job identity used to deduplicate repeated imports or follows
-- `pt_d`, `ct_d`, `tt_d`: tokens local to that Workflow task
-- `pt_c`, `ct_c`, `tt_c`: inherited task usage plus the local delta
-
-The distinction between delta and cumulative values is essential:
-
-- use `*_d` when adding sibling or dependency task costs
-- use `*_c` when continuing a normal chat from one completed task result
-- never sum all `*_c` values from successive messages or logs
-
-A zero-token orchestration job can be correct. A task such as `Branched/work` may only coordinate several `InterpretData/ask` jobs. In that case the orchestration task has `tt_d=0`, while the nested `ask` jobs contain the actual model cost.
-
-### 11.5 Request usage, session usage, and unattributed usage
-
-The detailed report distinguishes:
-
-- **Request token events**: request records with a `usage_id`
-- **Legacy cumulative baseline**: an opaque final snapshot from chats created before request identities were recorded
-- **Session running snapshot**: the latest `*_s` values in that file
-- **Session-only/unattributed**: the session snapshot minus request events present in that file
-
-Session counters are not chat counters. They can include requests made earlier in the same process, socialized agents, or other work not serialized into the current file.
-
-When an unattributed prefix exactly matches the session snapshot of another discovered agent log, `llm info` reports only `Session prefix matches`. The match explains the difference and is also useful for ordering the report. If no match exists, the running and unattributed values remain visible as a warning that some session work has not been assigned to a discovered file.
-
-Do not add session snapshots from several files. They often overlap by construction.
-
-### 11.6 Finding where tokens were spent
-
-Use this sequence when answering a cost question:
-
-1. Run `scout-ai llm info <chat> --flow` to identify the top-level chats and expensive jobs.
-2. Locate the job hash in the detailed `llm info` report.
-3. Read the job's task-local `pt_d`, `ct_d`, and `tt_d`.
-4. If the task delta is zero, follow its `dependency` and `call` edges to nested `ask` jobs.
-5. Inspect `<job>.files/log/agent.chat` and every `<job>.files/log/*/agent.chat` file.
-6. Use `scout workflow prov <job>` to confirm persisted dependencies.
-7. Inspect `<job>.info` when paths, inputs, or dependency resolution are unclear.
-
-The job result is intentionally compact. Full request traces are kept in agent logs for auditing. A task result carrying one summary is not evidence that only one model request occurred.
-
-Jobs may appear under both `~/.scout` and `~/.rbbt` because older default resource paths were unstable. `llm info` merges jobs with the same Workflow, task, and result basename. Do not count the two physical paths as separate model executions.
-
-### 11.7 Understanding tool-call cost
-
-A persisted invocation normally appears as a pair:
-
-- `function_call`: the model requested a function
-- `function_call_output`: Scout recorded the function result
-
-The `id` or `call_id` links the two records. Count `function_call` messages, not both halves. A `tool` role usually declares a tool; it does not prove that the tool was invoked.
-
-To count calls by function in an agent log, parse the chat rather than relying on line-oriented `grep`, because JSON content may span lines:
-
-```ruby
-require 'scout-ai'
-require 'json'
-
-messages = LLM.messages(Open.read(ARGV.first))
-counts = Hash.new(0)
-
-messages.each do |message|
-  next unless %w(function_call mcp_call).include?(message[:role].to_s)
-  info = JSON.parse(message[:content])
-  name = info['name'] || info.dig('function', 'name') || '(unknown)'
-  counts[name] += 1
-end
-
-counts.sort.each { |name, count| puts "#{name}\t#{count}" }
-```
-
-Providers report tokens per model request, not per function call. A tool call itself therefore has no exact provider token bill. The next model request includes the tool output along with the rest of the conversation, so its prompt-token count is only an upper bound on the cost attributable to that tool output.
-
-When several functions are called before one follow-up model request, do not divide the next request's prompt tokens equally unless you explicitly label that as an estimate. A defensible report should separate:
-
-- number of calls per function
-- size or character count of each function output
-- token usage of the following model request
-- whether several outputs shared that request
-
-This is especially important for search, file-reading, and data-analysis tools: the expensive part is often the large output inserted into the next prompt, not the function invocation record itself.
-
-### 11.8 Common mistakes and how to avoid them
-
-**Summing cumulative metadata**
-
-Successive `*_c` and `*_s` values are snapshots. Summing them produces triangular or explosive totals. Sum request events by `usage_id` or task deltas by `usage_job`.
-
-**Counting shared chat history repeatedly**
-
-Branches and imported chats may share many messages. Repeated text is not necessarily repeated billing. Use request and job identities.
-
-**Treating an imported result as a new call**
-
-If an earlier job produced an imported chat, its appearance in a later agent log can be inherited context. Follow `result` and `import` edges before claiming a `call` occurred.
-
-**Charging an orchestration task for nested work**
-
-A manager or branched task may have zero local tokens while nested `ask` jobs are expensive. Report both the zero-cost coordinator and the called jobs.
-
-**Counting declarations as calls**
-
-`tool:` and the `tool` role expose capabilities. Count `function_call` or `mcp_call` records for actual invocations.
-
-**Counting both call and output**
-
-A `function_call_output` completes a call; it is not a second invocation.
-
-**Assuming prompt plus completion always equals total**
-
-Some providers or legacy records report only total tokens. Keep unknown components as unknown or zero in tabular summaries; do not manufacture a split.
-
-**Trusting session-only usage as exact attribution**
-
-An unmatched session remainder is a clue, not proof. It may include prior work in the same process. Exact session-prefix matches are stronger evidence.
-
-**Treating cached replay as a new paid request**
-
-Persisted/cached responses can carry the original metadata and `usage_id`. The request identity means it should be counted once as an actual historical model request, not once per replay.
-
-**Missing sub-agent logs**
-
-Do not inspect only `<job>.files/log/agent.chat`. Search recursively for `<job>.files/log/**/agent.chat` because branches, workers, critics, and socialized agents may each have their own log.
-
-**Confusing resource roots**
-
-The same logical job may be reachable through both `~/.scout` and `~/.rbbt`. Compare Workflow, task, and result hash before treating paths as distinct.
-
-**Using a wrong chat path**
-
-Check `chat` versus `chats`, extensionless files versus `.chat`, and symlinked chat directories. A command that reports `Chat not found` performed no provenance analysis.
-
-### 11.9 A concise provenance answer template
-
-When an Agent is asked where time or tokens went, a good answer should state:
-
-1. which top-level chat was inspected
-2. which earlier chats it imported
-3. which Workflow job produced each chat result
-4. the expensive jobs ranked by task-local `tt_d`
-5. which zero-cost jobs were only orchestrators
-6. which nested agents or tools were called
-7. whether any session usage remained unmatched
-8. whether duplicate resource-root paths or cached request identities were deduplicated
-9. any attribution that is estimated rather than provider-reported
-
-This structure is much safer than quoting the largest `tt_c` or `tt_s` value found in a log.
 
 ## 12. Where to go next
 

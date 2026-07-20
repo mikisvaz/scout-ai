@@ -90,6 +90,7 @@ module Chat
       if stripped =~ /^<(\w+)(\s+[^>]*)?>/ && (tag = $1) && text =~ %r{</#{$1}>}
         protected_stack.push(tag)
         in_protected_block = true
+        current_content << "\n" << line
         protected_block_type = :xml
         next
       end
@@ -101,7 +102,11 @@ module Chat
 
         current_content = current_content.strip if current_content
         # Save current message if any
-        messages << { role: current_role, content: current_content } if current_content && ! current_content.empty?
+        if current_content && ! current_content.empty?
+          messages << { role: current_role, content: current_content }
+        elsif messages.empty?
+          messages << { role: current_role, content: '' }
+        end
 
         if inline_content.empty?
           # Block message

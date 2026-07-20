@@ -317,36 +317,29 @@ See `doc/Agent.md`.
 
 ### 7.3 `scout-ai llm info`
 
-Inspect a persistent chat together with imported chats, Workflow jobs, nested
-agents, tool calls, and token metadata:
+Inspect a persistent chat together with imported chats, producer jobs,
+dependencies, and agent logs:
 
 ```bash
 scout-ai llm info path/to/chat
 ```
 
+The command reads persisted chats without compiling or re-running them. It
+follows `import`, `continue`, and `last` references, `meta job=...` producer
+references, Workflow dependencies, and every `.files/log/**/*.chat` log.
+
+Token totals are built from direct `pt`, `ct`, and `tt` metadata records. A
+`meta job=...` marker identifies a message projected from a chat-task result;
+it has no direct token cost. The command follows that job to the agent logs and
+dependencies where the inference metadata was recorded. `*_c` and `*_s` are
+checkpoints and are not summed.
+
 Useful output modes:
 
-- `--flow` — compact text graph with chat nodes, job hashes, token deltas, and edges
-- `--dot <file>` — write a Graphviz DOT representation
-- `--plot <file.svg|file.pdf|file.png>` — render a figure with Graphviz
-- `--nocolor` — plain text suitable for files and scripts
+- `--flow` — compact chat/job/import/dependency/log flow
+- `--dot <file>` — write Graphviz DOT
+- `--plot <file.svg|file.pdf|file.png>` — render a Graphviz figure
 
-The command follows imported chats, task metadata, Workflow dependencies, and
-all `.files/log/**/agent.chat` files. It deduplicates request events by
-`usage_id`, task summaries by job identity, and equivalent job paths under
-`~/.scout` and `~/.rbbt`.
-
-Flow edge meanings:
-
-- `import` — one top-level chat imports another
-- `result` — a job produced content recorded in a chat
-- `dependency` — persisted Scout Workflow dependency
-- `call` — an orchestration job invoked a nested `ask` job
-- `session` — ordering inferred from matching session-token prefixes
-
-For a practical guide to interpreting token fields and avoiding double
-counting, see “Inspecting provenance, token usage, and agent flow” in
-`USER_GUIDE.md`.
 
 ---
 

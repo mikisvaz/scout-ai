@@ -103,8 +103,7 @@ module LLM
           job.clean if ENV['SCOUT_NO_ASK_CACHE'] == 'true'
           job.produce
           
-          messages = LLM.chat job.path
-          messages.add_meta :job, job.short_path
+          messages = Chat.project(job.short_path, LLM.chat(job.path))
           if options[:return_messages]
             messages
           else
