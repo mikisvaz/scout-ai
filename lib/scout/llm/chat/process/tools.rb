@@ -231,4 +231,8 @@ Below is the documentation of the workflow:
     messages.replace new
     tool_definitions
   end
+
+  def tooling
+    self.select{|msg| [:introduce, :tool, :mcp, :kb].include?(msg[:role].to_sym) }
+  end
 end

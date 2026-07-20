@@ -72,6 +72,17 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   token_count.patch
   token_count.info
 
+  introduce
+
+  meta
+
+  meta.work
+  meta.revise
+  meta.info
+  meta.chat_analyst
+
+  meta.test
+  mechanisms_analysis
  }
  lib=lib {
   scout-ai.rb
@@ -199,6 +210,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   Chat.md
   LLM.md
   Model.md
+  PythonAgentTasks.md
+  RAG.md
+  USER_GUIDE.md
  }
  test=test {
   data=data filter="*"{

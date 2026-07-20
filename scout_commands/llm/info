@@ -9,33 +9,23 @@ require 'tempfile'
 $0 = "scout-ai #{$previous_commands.any? ? $previous_commands * ' ' + ' ' : ''}#{File.basename(__FILE__)}" if defined?($previous_commands) && $previous_commands
 
 options = SOPT.setup <<EOF
-Report usage and structure information for a Scout-AI chat
+Inspect the chat, jobs, agent logs, and token trace behind a Scout-AI chat
 
 $ #{$0} [<options>] <chat>
 
-The report includes the input chat, imported chat files, every referenced ask
-Workflow job, and all of its dependency jobs. For each job it reports every
-.files/**/agent.chat log. Repeated jobs, logs, token events and tool calls are
-deduplicated for aggregate totals.
-
 -h--help Print this help
 -c--chat* Chat file to inspect (the positional argument is used by default)
--f--flow Print a compact text flow instead of the detailed report
+-f--flow Print a compact provenance flow
 --dot* Write the flow as Graphviz DOT
--p--plot* Render the flow as a figure; extension may be svg, png, or pdf
+-p--plot* Render the flow as svg, png, or pdf
 EOF
 
 if options[:help]
-  if defined? scout_usage
-    scout_usage
-  else
-    puts SOPT.doc
-  end
+  defined?(scout_usage) ? scout_usage : puts(SOPT.doc)
   exit 0
 end
 
 Log.severity = options.delete(:log).to_i if options.include?(:log)
-
 input = options.delete(:chat) || ARGV.shift
 flow = options.delete(:flow)
 dot_file = options.delete(:dot)
@@ -199,46 +189,156 @@ class LLMInfoReport
     end
   end
 
+  FLOW_COLORS = %w[#dceeff #e8f5df #fff0d6 #f3e2f7 #fde2e2 #e2f2f2 #eeeeee]
+
+  # Job result chats are represented by their job node. Agent logs and external
+  # chats remain separate objects because they carry distinct conversation work.
   def flow_nodes
-    @chats.keys.collect { |path| [:chat, path] } + @jobs.keys.collect { |path| [:job, path] }
+    external = @chats.keys.reject { |path| @jobs.include?(path) }
+    external.collect { |path| [flow_kind(path), path] } + ordered_jobs.collect { |path| [:job, path] }
+  end
+
+  def flow_kind(path)
+    path.include?('.files/log/') ? :agent : :chat
+  end
+
+  def ordered_jobs
+    predecessors = Hash.new { |hash, key| hash[key] = [] }
+    @dependencies.each { |from, to| predecessors[to] << from if @jobs.include?(from) && @jobs.include?(to) }
+    ordered, visiting, visited = [], Set.new, Set.new
+    visit = lambda do |path|
+      return if visited.include?(path) || visiting.include?(path)
+      visiting << path
+      predecessors[path].uniq.sort.each { |previous| visit.call(previous) }
+      visiting.delete(path)
+      visited << path
+      ordered << path
+    end
+    @jobs.keys.sort.each { |path| visit.call(path) }
+    ordered
   end
 
   def flow_edges
     edges = []
-    edges.concat(@imports.collect { |from, to| [:chat, from, :chat, to, :import] })
-    edges.concat(@results.collect { |from, to| [:job, from, :chat, to, :result] })
+    edges.concat(@imports.collect { |from, to| [:chat, from, flow_kind(to), to, :import] })
+    edges.concat(@results.reject { |from, to| from == to || flow_kind(to) == :agent }.collect { |from, to| [:job, from, flow_kind(to), to, :result] })
     edges.concat(@dependencies.collect { |from, to| [:job, from, :job, to, :dependency] })
-    edges.concat(@logs.collect { |from, to| [:job, from, :chat, to, :log] })
-    edges.uniq
+    edges.concat(@logs.collect { |from, to| [:job, from, :agent, to, :log] })
+    edges.select { |from_kind, from, to_kind, to, _type| flow_nodes.include?([from_kind, from]) && flow_nodes.include?([to_kind, to]) }.uniq
+  end
+
+  def job_name(path)
+    job = @jobs[path]
+    workflow = job && (job.info[:workflow] || job.info['workflow'])
+    task = job && (job.info[:task_name] || job.info['task_name'])
+    workflow && task ? "#{workflow}/#{task}" : File.dirname(path).split('/').last(2) * '/'
+  end
+
+  def log_name(path)
+    job_path, relative = path.split('.files/log/', 2)
+    base = job_name(job_path)
+    branch = relative.to_s.sub(%r{/agent\.chat\z}, '').sub(/\.chat\z/, '')
+    branch = 'agent' if branch.empty? || branch == 'agent'
+    "#{base}/#{branch}"
+  end
+
+  def chat_name(path)
+    if path =~ %r{/chats/(.+)\z}
+      $1.sub(/\.chat\z/, '')
+    else
+      File.basename(path, '.chat')
+    end
+  end
+
+  def object_name(kind, path)
+    case kind
+    when :job then job_name(path)
+    when :agent then log_name(path)
+    else chat_name(path)
+    end
+  end
+
+  def object_tokens(kind, path)
+    case kind
+    when :job
+      logs = @logs.select { |source, _| source == path }.collect(&:last).map { |log| @chats[log] }.compact
+      token_totals(logs)[:tt]
+    else
+      chat = @chats[path]
+      chat ? token_totals([chat])[:tt] : 0
+    end
+  end
+
+  def flow_object_id(kind, path)
+    return File.basename(path).sub(/^Default_/, '')[0, 8] if kind == :job
+    owner = path.split('.files/', 2).first
+    return File.basename(owner).sub(/^Default_/, '')[0, 8] if kind == :agent
+    Misc.digest(path)[0, 8]
+  end
+
+  def short_number(number)
+    return format('%.1fM', number / 1_000_000.0) if number >= 1_000_000
+    return format('%.1fk', number / 1_000.0) if number >= 1_000
+    number.to_i.to_s
+  end
+
+  def style_key(kind, path)
+    case kind
+    when :job then job_name(path)
+    when :agent then job_name(path.split('.files/', 2).first)
+    else nil
+    end
+  end
+
+  def flow_colors
+    keys = flow_nodes.filter_map { |kind, path| style_key(kind, path) }.uniq.sort
+    keys.each_with_index.to_h { |key, index| [key, FLOW_COLORS[index % FLOW_COLORS.length]] }
+  end
+
+  def flow_description(kind, path)
+    [kind.to_s.capitalize, object_name(kind, path), short_number(object_tokens(kind, path)), flow_object_id(kind, path)]
   end
 
   def print_flow
+    nodes = flow_nodes
+    indexes = nodes.each_with_index.to_h { |node, index| [node, index + 1] }
     puts 'Flow'
     puts '===='
-    flow_nodes.each_with_index do |(kind, path), index|
-      label = kind == :job ? 'Job' : 'Chat'
-      puts "[#{index + 1}] #{label} #{short_path(path)}"
+    nodes.each do |kind, path|
+      type, name, tokens, id = flow_description(kind, path)
+      puts format('[%2d] %-5s %-42s %8s %s', indexes[[kind, path]], type, name, tokens, id)
     end
     puts
     flow_edges.each do |from_kind, from, to_kind, to, type|
-      puts "#{from_kind}/#{short_path(from)} -> #{to_kind}/#{short_path(to)} (#{type})"
+      puts format('[%2d] --%-10s--> [%2d]', indexes[[from_kind, from]], type, indexes[[to_kind, to]])
     end
   end
 
   def flow_dot
     nodes = flow_nodes
     ids = nodes.each_with_index.to_h { |node, index| [node, "n#{index}"] }
-    lines = ['digraph scout_ai_flow {', '  rankdir=LR;']
+    colors = flow_colors
+    lines = [
+      'digraph scout_ai_flow {',
+      '  graph [rankdir=LR, bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.6];',
+      '  node [fontname="Helvetica", fontsize=10];',
+      '  edge [fontname="Helvetica", fontsize=8, arrowsize=0.7];'
+    ]
     nodes.each do |kind, path|
-      label = "#{kind == :job ? 'Job' : 'Chat'}\\n#{short_path(path)}"
-      shape = kind == :job ? 'box' : 'note'
-      lines << "  #{ids[[kind, path]]} [shape=#{shape}, label=#{JSON.generate(label)}];"
+      type, name, tokens, id = flow_description(kind, path)
+      label = "#{type}\n#{name}\n#{tokens} tokens  #{id}"
+      shape = kind == :job ? 'box' : kind == :agent ? 'component' : 'note'
+      color = colors[style_key(kind, path)] || '#f7f7f7'
+      lines << "  #{ids[[kind, path]]} [shape=#{shape}, style=\"rounded,filled\", fillcolor=#{JSON.generate(color)}, label=#{JSON.generate(label)}];"
     end
+    edge_style = {
+      import: 'color="#7a4e9d", label="import"',
+      result: 'color="#39804a", penwidth=1.5, label="result"',
+      dependency: 'color="#333333", label="dependency"',
+      log: 'color="#2864a5", style="dashed", label="log"'
+    }
     flow_edges.each do |from_kind, from, to_kind, to, type|
-      from_id = ids[[from_kind, from]]
-      to_id = ids[[to_kind, to]]
-      next unless from_id && to_id
-      lines << "  #{from_id} -> #{to_id} [label=#{JSON.generate(type.to_s)}];"
+      lines << "  #{ids[[from_kind, from]]} -> #{ids[[to_kind, to]]} [#{edge_style[type]}];"
     end
     lines << '}'
     lines * "\n"
