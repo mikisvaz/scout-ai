@@ -59,7 +59,6 @@ module LLM
                 load_chat(agent_name, options, conversation, inherit: inherit)
               end
 
-
       agent.user(prompt)
       agent.chat
     end

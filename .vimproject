@@ -30,6 +30,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    tokens
    patch
    relay
+
+   cpus.rb
   }
   web=web{
    chat
@@ -74,15 +76,19 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   introduce
 
-  meta
-
   socialize
 
+  socialize.test
+
+  meta
+
+  meta.tool_call
 
   meta.work
   meta.revise
   meta.info
   meta.chat_analyst
+  meta.plots
 
   meta.test
   mechanisms_analysis
@@ -101,15 +107,17 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     chat=chat{
      annotation.rb
      parse.rb
-     process.rb
      persist.rb
+     process.rb
      process=process{
-      tools.rb
-      files.rb
       clear.rb
+      files.rb
       options.rb
+      tools.rb
       meta.rb
      }
+     provenance.rb
+     usage.rb
     }
     tools.rb
     tools=tools{
@@ -242,7 +250,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    server
    word
    info
-   prov
    md
   }
   agent=agent{

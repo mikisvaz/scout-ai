@@ -87,6 +87,13 @@ module Chat
 
         message[:content] = found_file
         message
+      elsif message[:role] == 'step'
+        step = message[:content].to_s.strip
+        meta = Chat.meta(messages.dup)
+        job_path = meta['job']
+        job = Step.load job_path
+        job = job.step(step) unless job.task_name == step
+        {role: 'assistant', content: job.load.answer  }
       else
         message
       end
