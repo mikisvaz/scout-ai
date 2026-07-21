@@ -461,6 +461,62 @@ That way:
 - the run is inspectable afterwards
 - follow-up work can continue from real files instead of vague chat memory
 
+### 9.4 Socialized agent chats
+
+When a Manager or supervisor agent dispatches work to a specialist agent using the
+`ask` tool with a named `conversation`, Scout-AI records the interaction as a
+**socialized chat file**. These files are distinct from the regular agent log at
+`<job>.files/log/agent.chat`.
+
+Socialized chats are persisted at:
+
+```text
+<caller_job>.files/log/chats/<AgentName>/<conversation_name>.chat
+```
+
+For example, if a Manager dispatches three parallel batches to different specialist
+conversations, you will find:
+
+```text
+<job>.files/log/chats/Specialist/batch_one.chat
+<job>.files/log/chats/Specialist/batch_two.chat
+<job>.files/log/chats/Specialist/batch_three.chat
+```
+
+#### What is inside a socialized chat
+
+A socialized chat file is a **projection** of the specialist's work, not a full
+agent log. It typically contains:
+
+- an `introduce:` line for the specialist agent
+- `option:` lines propagated from the caller — including `endpoint`, `model`,
+  `backend`, and potentially API keys or other credentials
+- the `user:` prompt that the caller sent
+- a `meta: job=<path>` marker pointing to the specialist's ask-job
+- the assistant response
+
+The actual model inferences and tool calls happen inside the referenced ask-job's
+own `agent.chat` log and its dependencies, not in the socialized chat file.
+
+#### Why this matters
+
+Socialized chats keep the Manager's context clean: each specialist batch produces
+a compact result that is returned to the Manager without polluting its
+conversation with raw tool outputs. But for inspection and provenance, you must
+follow the `meta: job=...` reference to find the real token usage and tool-call
+activity. Socialized chat files themselves report zero direct inference.
+
+This pattern is documented in detail in `Agent.md` § 8.1.
+
+#### Option propagation and credentials
+
+The caller's sticky options are copied into each socialized chat as `option:`
+lines. This is convenient for reproducibility — each socialized chat is
+self-contained — but it means that credentials such as API keys embedded in
+endpoint configurations will appear in the file. Be aware of this when sharing
+or archiving session logs.
+
+
 ## 10. A boiled-down Session-style reasoning agent
 
 A useful pattern in Scout-AI is to replace the agent’s default `ask` behavior with a workflow task that orchestrates several specialist agents.
@@ -545,7 +601,8 @@ That is often enough to build a useful multi-agent strategy without making the s
 ## 11. Inspecting chat provenance and token usage
 
 A Scout-AI session can contain a top-level chat, imported chats, persisted
-Workflow jobs, job dependencies, and agent logs under `<job>.files/log/`.
+Workflow jobs, job dependencies, agent logs under `<job>.files/log/`, and
+socialized chat projections under `<job>.files/log/chats/`.
 Use:
 
 ```bash
@@ -555,7 +612,8 @@ scout-ai llm info path/to/chat --flow
 
 The inspector reads persisted files; it does not compile chats or execute task
 roles again. It follows `import`, `continue`, `last`, `meta job=...`, persisted
-Workflow dependencies, and all `log/**/*.chat` files.
+Workflow dependencies, and all `log/**/*.chat` files, including socialized
+chats stored under `log/chats/<AgentName>/<conversation>.chat`.
 
 ### 11.1 Metadata semantics
 
@@ -614,7 +672,11 @@ those jobs, chats, projected results, and agent logs combine into a session.
 - Do not count a `meta job=...` projection as a local token event.
 - Do not sum every cumulative `*_c` or session `*_s` value.
 - Do not inspect only `log/agent.chat`; workers and branches can be stored
-  anywhere below `log/**/*.chat`.
+  anywhere below `log/**/*.chat`, including under
+  `log/chats/<AgentName>/<conversation>.chat`.
+- Do not treat a socialized chat file as the place where inference happens; it
+  carries zero direct tokens. Follow its `meta: job=...` reference to the
+  specialist's ask-job and its dependencies for the real cost.
 - Do not use `LLM.chat` to inspect provenance: it compiles a chat and may run
   task/job roles. Use `Chat.load` for persisted evidence.
 

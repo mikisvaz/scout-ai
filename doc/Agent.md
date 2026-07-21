@@ -279,6 +279,93 @@ puts supervisor.chat
 
 ---
 
+### 8.1 Socialized chats
+
+When an agent delegates work to another agent through the `ask` tool with a named
+`conversation`, the interaction is recorded as a **socialized chat file** under the
+caller's job directory.
+
+The socialized chat file is persisted at:
+
+```text
+<caller_job>.files/log/chats/<AgentName>/<conversation_name>.chat
+```
+
+This file is a **projection**, not a full agent log. It contains:
+
+- the `introduce:` message for the specialist agent
+- any `option:` lines propagated from the caller (see below)
+- the `user:` message (the prompt sent to the specialist)
+- a `meta: job=<path>` marker referencing the specialist's ask-job
+- the assistant response
+
+The actual model inference, tool calls, and their token usage happen inside the
+referenced job's own `agent.chat` log, not in the socialized chat file itself.
+
+#### What propagates into a socialized chat
+
+When `inherit: "tools"` is used (or when sticky options are active in the caller),
+the socialized chat file captures the caller's effective endpoint, backend, model,
+and other options as `option:` lines. This includes credentials such as API keys
+when they are part of the endpoint configuration. This makes each socialized chat
+self-contained for reproducibility, but it also means sensitive values may be
+present in the file.
+
+#### Reading socialized chats
+
+When inspecting a session, socialized chat files will show `inferences: 0` and
+zero direct token usage because they only carry a `meta: job=...` projection
+marker. To find the actual cost:
+
+1. Follow the `meta: job=...` reference to the specialist's ask-job.
+2. Read that job's `agent.chat` log for the direct inference metadata.
+3. Follow any further dependencies (e.g., nested gather jobs) for their logs.
+
+The `chat_overview` and `chat_report` tasks link socialized chats to their
+producer jobs through `result` edges and connect them to the caller job through
+`log` edges.
+
+#### Example
+
+A Manager agent issues:
+
+```text
+ask(agent: "Specialist", conversation: "data_batch", inherit: "tools", prompt: "...")
+```
+
+This produces:
+
+```text
+<manager_job>.files/log/chats/Specialist/data_batch.chat
+```
+
+with content like:
+
+```text
+introduce:
+
+Specialist
+
+option: endpoint my_model
+option: model some-model
+option: backend openai
+
+user:
+
+<the prompt sent by the Manager>
+
+meta: job=Specialist/ask/<hash>.chat
+
+assistant:
+
+<the specialist's response>
+```
+
+The actual inferences and tool calls are found in
+`Specialist/ask/<hash>.chat.files/log/agent.chat` and its dependencies.
+
+---
+
 ## 9. Loading an Agent (agent directories)
 
 Agents can be loaded by name or from a directory.
