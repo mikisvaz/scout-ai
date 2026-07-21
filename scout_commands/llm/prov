@@ -1,0 +1,47 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'scout-ai'
+
+cmd = $previous_commands ?
+  "scout #{$previous_commands.any? ? "#{$previous_commands * ' '} " : ''}#{File.basename(__FILE__)}" :
+  $PROGRAM_NAME
+
+options = SOPT.setup <<~EOF
+
+Examine the provenance of a chat
+
+$ #{cmd} [<options>] <filename> [<other|->]*
+
+-h--help Print this help
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+help = IndiferentHash.process_options options, :help
+
+filename, _ = ARGV
+filename = "/home/mvazque2/.rbbt/var/jobs/Planned/ask/Default_cde81d3a2fcfa9f449de35dee1311eec.chat"
+
+raise MissingParameterException, :filename if filename.nil?
+
+
+chat = LLM.chat Open.read(filename)
+require 'rbbt-util'
+
+job = Path.setup(chat.jobs.first)
+job = Step.load(job.find)
+iif job
+iii job.path
+iii job.done?
+iif job.info
+iif job.info[:dependencies]
+iif job.dependencies
+
+
