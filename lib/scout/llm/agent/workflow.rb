@@ -116,6 +116,7 @@ module Workflow
     input :chat, :text, 'Chat in Scout-AI chat-file format'
     task task_name => :chat do |chat|
       begin
+        self.options
         response = self.instance_exec(&block)
 
         result = if LLM::Agent === response

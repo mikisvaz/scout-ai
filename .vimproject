@@ -76,6 +76,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   meta
 
+  socialize
+
+
   meta.work
   meta.revise
   meta.info
@@ -239,6 +242,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    server
    word
    info
+   prov
    md
   }
   agent=agent{

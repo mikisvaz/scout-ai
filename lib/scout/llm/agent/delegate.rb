@@ -22,7 +22,7 @@ module LLM
     # Return a persistent specialist conversation. Conversation identifiers are
     # scoped by specialist, so Worker/work_A and Critic/work_A cannot collide.
     # `inherit` is only used when the conversation is first created.
-    def load_chat(agent_name, options = {}, conversation = nil, inherit: 'none')
+    def load_chat(agent_name, options = {}, conversation = nil, inherit: 'tools')
       agent_name = normalize_social_agent_name(agent_name)
       conversation = normalize_social_conversation_name(conversation)
       inherit = normalize_social_inherit(inherit)
@@ -56,6 +56,7 @@ module LLM
                 load_chat(agent_name, options, 'default', inherit: inherit)
               else
                 conversation = normalize_social_conversation_name(conversation)
+                load_chat(agent_name, options, conversation, inherit: inherit)
               end
 
 
@@ -280,7 +281,9 @@ The specialist's own start_chat is always applied first.
       when 'none'
         Chat.setup([])
       when 'tools'
-        social_chat_copy(social_caller_context.tooling)
+        #tooling = social_caller_context.tooling
+        tooling = self.current_chat.tooling
+        social_chat_copy(tooling)
       when 'conversation'
         social_caller_context
       end
