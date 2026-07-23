@@ -68,6 +68,8 @@ module LLM
                   function_response.read
                 when TSV::Dumper
                   function_response.read
+                when LLM::Agent
+                  function_response
                 when nil
                   "success"
                 when Exception
@@ -109,6 +111,16 @@ module LLM
       end
     end
 
+    agents = tool_call_content.collect{|p| p.last }.select{|c| LLM::Agent === c }
+
+    cpus = Scout::Config.get(:cpus, :agent_ask, :agents, env: 'ASK_AGENTS', default: 3)
+    agent_answers = TSV.setup({})
+    Open.traverse (0..agents.length-1).to_a, cpus: cpus, bar: 'Asking agents', type: :list, into: agent_answers do |i|
+      agent = agents[i]
+      res = agent.chat return_messages: true
+      [i, res]
+    end if agents.any?
+
     tool_call_content.collect do |function_name,function_arguments,tool_call_id,tool_call,content|
       if Step === content
         step = content
@@ -131,12 +143,16 @@ module LLM
             content = {exception: $!.message, stack: $!.backtrace }.to_json
           end
         end
+      elsif LLM::Agent === content
+        res = agent_answers[agents.index(content)]
+        content.current_chat.follow(res)
+        content.answer
       else
         step = nil
       end
 
       if (String === content) && content.length > max_content_length
-        exception_msg = "Function #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}) was executed successfully, but it returned #{content.length} characters, which is more than the maximum of #{max_content_length}. To protect the model context window this result was not returned."
+        exception_msg = "Function #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}) was executed successfully, but it returned #{content.length} characters, which is more than the maximum of #{max_content_length}. To protect the model context window this result was not returned. Here is a fingerprint of the content #{Log.fingerprint(content)}."
         exception_msg += " The results was persisted at '#{step.path}'." if step
         Log.high exception_msg
         content = {exception: exception_msg, stack: caller}.to_json

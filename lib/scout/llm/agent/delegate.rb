@@ -60,7 +60,8 @@ module LLM
               end
 
       agent.user(prompt)
-      agent.chat
+      #agent.chat
+      agent
     end
 
     # Expose a deliberately narrow `ask` tool to this agent. The model can send
@@ -97,7 +98,7 @@ module LLM
         conversation: {
           type: 'string',
           pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*$',
-          description: 'Optional conversation identifier. Omit it for a one-shot call; reuse it with the same agent to continue that conversation'
+          description: 'Optional conversation or chat identifier; reuse it with the same agent to continue that conversation across several calls'
         },
         inherit: {
           type: 'string',
@@ -250,7 +251,7 @@ The specialist's own start_chat is always applied first.
       agent = clone_social_agent(template)
       initial_chat = social_chat_copy(agent.start_chat)
       initial_chat.follow(social_inherited_context(inherit))
-      agent.start(initial_chat)
+      agent.start_chat.follow(initial_chat)
       agent
     end
 

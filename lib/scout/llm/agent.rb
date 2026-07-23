@@ -92,11 +92,11 @@ module LLM
 
         if workflow && workflow.tasks.include?(:ask) && ! no_ask_override
           other_options.each do |key,value|
-            messages.push(IndiferentHash.setup({role: :option, content: "#{key} #{value}"})) 
+            messages.push(IndiferentHash.setup({role: :sticky_option, content: "#{key} #{value}"})) 
           end
 
           options.except(:return_messages).each do |key,value|
-            messages.push(IndiferentHash.setup({role: :option, content: "#{key} #{value}"})) 
+            messages.push(IndiferentHash.setup({role: :sticky_option, content: "#{key} #{value}"})) 
           end
 
           job = workflow.job(:ask, chat: Chat.print(messages))

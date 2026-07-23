@@ -59,7 +59,7 @@ module Chat
 
         step = Step.load file
 
-        id = step.short_path[0..39]
+        id = Log.truncate_string(step.short_path, 40)
         id = id.gsub('/','-')
 
         if message[:role] == 'inline_job'
@@ -71,10 +71,8 @@ module Chat
           function_name = step.full_task_name.sub('#', '-')
           function_name = step.task_name
           tool_call = {
-            function: {
-              name: function_name,
-              arguments: step.provided_inputs
-            },
+            name: function_name,
+            arguments: step.provided_inputs,
             id: id,
           }
 

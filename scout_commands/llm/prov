@@ -27,7 +27,6 @@ end
 help = IndiferentHash.process_options options, :help
 
 filename, _ = ARGV
-filename = "/home/mvazque2/.rbbt/var/jobs/Planned/ask/Default_cde81d3a2fcfa9f449de35dee1311eec.chat"
 
 raise MissingParameterException, :filename if filename.nil?
 
@@ -37,11 +36,146 @@ require 'rbbt-util'
 
 job = Path.setup(chat.jobs.first)
 job = Step.load(job.find)
-iif job
-iii job.path
-iii job.done?
-iif job.info
-iif job.info[:dependencies]
-iif job.dependencies
+
+module Chat
+  def self.trace(chat_list = @chats.values)
+    Chat.trace_chats(chat_list)
+  end
+
+  def self.direct_entries(chat_list = @chats.values)
+    trace(chat_list).select do |entry|
+      meta = entry[:meta]
+      next false if meta[:job]
+      %w[pt ct tt].any? { |name| meta.include?(name) }
+    end
+  end
+
+  def self.token_totals(chat_list = @chats.values)
+    direct_entries(chat_list).each_with_object({ pt: 0, ct: 0, tt: 0 }) do |entry, totals|
+      meta = entry[:meta]
+      %w[pt ct tt].each { |name| totals[name.to_sym] += meta[name].to_i }
+    end
+  end
+
+  def self._format_tokens(tokens)
+  end
+
+  def self.print_tokens(tokens)
+    "prompt=#{Misc.human_number(tokens[:pt])} completion=#{Misc.human_number(tokens[:ct])} total=#{Misc.human_number(tokens[:tt])}"
+  end
+
+  def rec_chats
+    chats = [self]
+    chats + self.job_chats.inject([]){|acc,job| acc.concat job.rec_agent_chats; acc }
+  end
+  
+  def jobs
+    job_paths.collect{|path| Step.load path }
+  end
+
+  def self.provenance(chat_file, prov = {})
+    return prov if prov.include? chat_file
+    return prov unless Open.exists?(chat_file)
+    chat = Chat.load chat_file
+    chat.jobs.each do |job|
+      prov[chat_file] ||= []
+      Chat.job_agent_chat_files(job).each do |agent_chat_file|
+        prov[chat_file] << agent_chat_file
+        prov.merge(Chat.provenance(agent_chat_file, prov))
+      end
+      job.dependencies.each do |dep|
+        prov.merge(Chat.provenance(dep.path, prov))
+      end
+    end
+    prov
+  end
+
+  def self.provenance_chat_files(chat)
+    provenance(chat).values.flatten.uniq + [chat]
+  end
+
+  def self.tokens(chat)
+    chats = provenance_chat_files(chat).collect{|file| 
+      @@chat_file ||= {}
+      @@chat_file[file] ||= LLM.chat file 
+      @@chat_file[file] ||= Chat.load file 
+    }
+    Chat.token_totals(chats)
+  end
+
+end
+
+class Step
+  def agent_chats
+    Chat.job_agent_chat_files(self).collect{|file| Chat.load file }
+  end
+end
+
+def load_chat(filename)
+  @loaded_chat ||= {}
+  @loaded_chat[filename] ||= 
+    begin
+      job = Step.load filename
+      filename = job.path if job.done?
+      Chat.load filename
+    rescue
+      Chat.load filename
+    end
+end
+
+filename ||=  "~/git/workflows/SC26/chats/network_usecase/3.1.themes"
+raise MissingParameterException, :filename if filename.nil?
+
+def report_line(type, path = nil, info = {}, offset: 0)
+  parts = []
 
 
+  case type
+  when :job
+    parts << Log.color( :yellow, type.to_s)
+  when :chat
+    parts << Log.color( :green, type.to_s)
+  else
+    parts << Log.color( :red, type.to_s)
+  end
+
+  if info
+    #parts << Log.fingerprint(info) if info
+    tok_str ||= []
+    tok_str << "total=#{Misc.human_number(info[:tt].to_i)}" if info[:tt]
+    tok_str << "prompt=#{Misc.human_number(info[:pt].to_i)}" if info[:pt]
+    tok_str << "cont=#{Misc.human_number(info[:ct].to_i)}" if info[:ct]
+
+    parts << tok_str*" "
+  end
+  parts << Log.color( :blue, path.to_s) if path
+  parts.unshift ' '*offset if offset && offset > 0
+  parts * " "
+end
+
+def report(filename, seen = [], offset: 0, name: nil)
+  tokens = Chat.tokens(filename)
+  name = File.basename filename if name.nil?
+
+  puts report_line :chat, name, Chat.tokens(filename), offset: offset unless name == 'agent.chat'
+
+  chat = load_chat filename
+
+  chat = Chat.load filename
+
+  chat.jobs.each do |job|
+    next if seen.include? job.path
+    seen << job.path
+    next unless job.done?
+
+    job_tokens = Chat.tokens(job.path) 
+    puts report_line :job, job.short_path, job_tokens, offset: offset+1
+    Chat.job_agent_chat_files(job).each do |agent_chat|
+      agent_name = Misc.path_relative_to job.file('log'), agent_chat
+      agent_name.sub(/^(chats|society)\//, '')
+      report(agent_chat, seen, offset: offset+1, name: agent_name)
+    end
+  end
+end
+
+report filename

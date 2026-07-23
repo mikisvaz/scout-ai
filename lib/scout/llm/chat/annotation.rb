@@ -252,7 +252,7 @@ module Chat
     Open.write(file, Base64.decode64(base64_image), mode: 'wb')
   end
 
-  def role_messages(role)
+  def role_messages(role, &block)
     if Symbol === role
       self.select{|msg| msg[:role].to_sym == role }
     else

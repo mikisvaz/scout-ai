@@ -476,8 +476,8 @@ module LLM
       def ask(question, options = {}, &block)
         original_options = options.dup
 
-        return_messages, log_response, current_meta, relay, process = IndiferentHash.process_options options, 
-          :return_messages, :log_response, :current_meta, :relay, :process,
+        return_messages, log_response, current_meta, relay, process, prompt_strategies = IndiferentHash.process_options options, 
+          :return_messages, :log_response, :current_meta, :relay, :process, :prompt_strategies,
           return_messages: false, log_response: true
 
         messages = self.messages question, options
@@ -486,17 +486,18 @@ module LLM
           id = upload_messages(relay,  messages, options)
           response = gather_response(relay, id)
           IndiferentHash.setup(response)
-          formatted_messages = format_messages(messages)
-          tools = tools(formatted_messages, options)
+          formatted_prompt = format_messages(messages)
+          tools = tools(formatted_prompt, options)
         else
 
           client = prepare_client options, messages
-          formatted_messages = format_messages(messages)
-          tools = tools(formatted_messages, options)
+          prompt = Chat.prepare_prompt(messages, prompt_strategies)
+          formatted_prompt = format_messages(prompt)
+          tools = tools(formatted_prompt, options)
 
           response = begin
                        Log.medium "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
-                       query(client, formatted_messages, tools, options)
+                       query(client, formatted_prompt, tools, options)
                      rescue Exception => e
                        Log.debug 'Asking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
                        begin

@@ -92,6 +92,15 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   meta.test
   mechanisms_analysis
+
+  prov.test
+
+  prompt.test
+  prompt.test.clear
+  prompt.test.full
+
+  ask_agents
+
  }
  lib=lib {
   scout-ai.rb
@@ -112,12 +121,11 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      process=process{
       clear.rb
       files.rb
+      meta.rb
       options.rb
       tools.rb
-      meta.rb
      }
-     provenance.rb
-     usage.rb
+     prompt.rb
     }
     tools.rb
     tools=tools{
@@ -249,8 +257,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    process_queries
    server
    word
-   info
    md
+   info
+   prov
   }
   agent=agent{
    ask

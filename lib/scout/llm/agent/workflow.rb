@@ -4,7 +4,12 @@ module AgentWorkflow
   extend Workflow
 
   helper :chat do |chat=nil|
-    @chat ||= LLM.chat(chat || recursive_inputs[:chat].dup)
+    @chat ||= begin
+                chat = recursive_inputs[:chat]
+                chat = Chat.parse(chat) if String === chat
+                Chat.setup(chat)
+                chat
+              end
   end
 
   helper :options do
@@ -12,17 +17,17 @@ module AgentWorkflow
   end
 
   helper :agent_options do |options|
-    IndiferentHash.setup options.except(:agent, 'agent', :chat, 'chat').dup
+    IndiferentHash.setup options.except(:agent, 'agent', :chat, 'chat')
   end
 
   helper :tooling do
     @tooling ||= begin
-      chat = self.chat
-      chat.remove_role(:tool) +
-        chat.remove_role(:kb) +
-        chat.remove_role(:mcp) +
-        chat.remove_role(:introduce)
-    end
+                   chat = self.chat
+                   chat.remove_role(:tool) +
+                     chat.remove_role(:kb) +
+                     chat.remove_role(:mcp) +
+                     chat.remove_role(:introduce)
+                 end
   end
 
   helper :tooling_intro do
@@ -41,6 +46,7 @@ module AgentWorkflow
     agent.start_chat.system <<-EOF
 Your current working directory is #{Dir.pwd}.
 You are working through an ask job with path #{self.path} and files_dir #{self.files_dir}.
+Tool call content may be truncated after #{Chat.full_tool_calls}, and forgoten after #{Chat.max_tool_outputs}.
     EOF
 
     if dependencies.any?
@@ -48,11 +54,13 @@ You are working through an ask job with path #{self.path} and files_dir #{self.f
 This workflow job has the following depencencies:
 
 #{rec_dependencies.collect(&:path) * "\n"}
+
+Their input should already be incorporated, but they might have artifacts
       EOF
     end
 
     if chat && !chat.empty?
-      chat = LLM.chat(chat)
+      chat = LLM.chat(chat.dup)
       other_jobs = chat.jobs
       if other_jobs.any?
         agent.start_chat.system <<-EOF
@@ -88,8 +96,10 @@ There are other jobs found in this chat:
   helper :add_chat_dependencies do |chat|
     chat.jobs.each do |job_path|
       next if job_path.to_s == self.short_path.to_s
+      next if dependencies.find{|dep| dep.path.find == job_path.find }
       begin
-        dependencies << Step.load(job_path)
+        job = Step.load(job_path)
+        dependencies << job unless dependencies.select{|dep| dep.path}.include?(job)
       rescue
       end
     end
@@ -99,12 +109,12 @@ There are other jobs found in this chat:
     dir = agent_name ? file('log')[agent_name] : file('log')
 
     agent.chats.each do |name, other|
-      dir.chats[name].set_extension('chat').write other.current_chat.print
-      add_chat_dependencies(other.current_chat)
+      dir.society[name].set_extension('chat').write other.current_chat.print
+      #add_chat_dependencies(other.current_chat)
     end if agent.chats
 
     dir['agent.chat'].write agent.current_chat.print
-    add_chat_dependencies(agent.current_chat)
+    #add_chat_dependencies(agent.current_chat)
 
     update_info :dependencies, dependencies.collect { |dependency| dependency.path.find }
     agent
@@ -116,7 +126,6 @@ module Workflow
     input :chat, :text, 'Chat in Scout-AI chat-file format'
     task task_name => :chat do |chat|
       begin
-        self.options
         response = self.instance_exec(&block)
 
         result = if LLM::Agent === response

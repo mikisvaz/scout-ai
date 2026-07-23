@@ -73,16 +73,23 @@ module Chat
     Chat.parse_meta(meta_msg[:content])
   end
 
-  def jobs
+  def job_paths
     role_messages(:meta).collect do |message|
-      Chat.parse_meta(message[:content])[:job]
+      Path.setup(Chat.parse_meta(message[:content])[:job])
     end.compact.uniq
   end
+
+  alias jobs job_paths
 
   # Read a persisted chat without compiling it. Provenance inspection must not
   # execute task, job, file, or import roles again.
   def self.load(file)
     Chat.setup(LLM.messages(Open.read(file.to_s)))
+  end
+
+  def self.job_agent_chat_files(job)
+    job = Step.load(job) unless Step === job
+    job.file('log').glob('**/*.chat')
   end
 
   # Return the result and logged chats for a job and all its dependencies.
@@ -97,8 +104,7 @@ module Chat
     chats = []
     chats << job.path if job.done? && job.type.to_s == 'chat'
 
-    log = job.file('log')
-    chats.concat(log.glob('**/*.chat')) if log.directory?
+    chats.concat job_agent_chat_files(job)
 
     job.dependencies.each do |dependency|
       chats.concat(job_chat_files(dependency, seen))
@@ -113,8 +119,16 @@ module Chat
     jobs.flat_map { |job| Chat.job_chat_files(job) }.uniq
   end
 
+  def job_agent_chat_files
+    jobs.flat_map { |job| Chat.job_chat_files(job) }.uniq
+  end
+
   def job_chats
     job_chat_files.collect { |file| Chat.load(file) }
+  end
+
+  def job_agent_chats
+    jobs.flat_map { |job| Chat.job_agent_chat_files(job) }.uniq
   end
 
   # A lineage id identifies a message in its non-meta conversational history.

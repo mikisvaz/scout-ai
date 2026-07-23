@@ -5,6 +5,7 @@ require_relative 'chat/annotation'
 require_relative 'chat/parse'
 require_relative 'chat/process'
 require_relative 'chat/persist'
+require_relative 'chat/prompt'
 
 module LLM
   def self.messages(question, role = nil)
