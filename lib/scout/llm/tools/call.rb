@@ -146,7 +146,7 @@ module LLM
       elsif LLM::Agent === content
         res = agent_answers[agents.index(content)]
         content.current_chat.follow(res)
-        content.answer
+        content = content.answer
       else
         step = nil
       end
