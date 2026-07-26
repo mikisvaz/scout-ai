@@ -119,6 +119,12 @@ module Chat
           current_role = 'user' if role == 'agent'
           current_content = ""
         end
+      elsif line =~ /^\\([a-z0-9_]+):(.*)$/
+        if current_content.nil?
+          current_content = line[1..-1]
+        else
+          current_content += "\n" + line[1..-1]
+        end
       else
         if current_content.nil?
           current_content = line
@@ -147,7 +153,8 @@ module Chat
         if %w(option previous_response_id function_call function_call_output meta).include? message[:role].to_s
           message[:role].to_s + ": " + message[:content].to_s
         else
-          message[:role].to_s + ":\n\n" + message[:content].to_s
+          message[:role].to_s + ":\n\n" +
+            message[:content].to_s.gsub(/^([a-z]+:)(\s)/ms, '\\\\\1\2')
         end
       end
     end * "\n\n"
