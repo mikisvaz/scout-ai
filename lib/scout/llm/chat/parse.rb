@@ -153,8 +153,10 @@ module Chat
         if %w(option previous_response_id function_call function_call_output meta).include? message[:role].to_s
           message[:role].to_s + ": " + message[:content].to_s
         else
+          re = Regexp.new(/^([a-z]+:)(\s)/ms)
+		  re = Regexp.new(re.source.encode(message[:content].encoding), re.options)
           message[:role].to_s + ":\n\n" +
-            message[:content].to_s.gsub(/^([a-z]+:)(\s)/ms, '\\\\\1\2')
+            message[:content].to_s.gsub(re, '\\\\\1\2')
         end
       end
     end * "\n\n"
