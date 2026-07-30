@@ -4,7 +4,8 @@ module Chat
   DEFAULT_SHORT_STRING_LENGTH = 200
   DEFAULT_SHORT_JSON_LENGTH = 2000
 
-  DEFAULT_FULL_TOOL_CALLS = 10
+  DEFAULT_FULL_TOOL_CALLS = 0
+  DEFAULT_FULL_TOOL_OUTPUTS = 10
   DEFAULT_MAX_TOOL_CALLS = 40
   DEFAULT_MAX_TOOL_OUTPUTS = DEFAULT_MAX_TOOL_CALLS
   DEFAULT_MAX_TOOL_CHARS = 100_000
@@ -19,6 +20,10 @@ module Chat
 
   def self.full_tool_calls
     @@full_tool_calls ||= Scout::Config.get(:full_tool_calls, :prompt, :context, env: 'FULL_TOOL_CALLS')
+  end
+
+  def self.full_tool_outputs
+    @@full_tool_outputs ||= Scout::Config.get(:full_tool_outputs, :prompt, :context, env: 'FULL_TOOL_OUTPUTS')
   end
 
   def self.max_tool_calls
@@ -36,15 +41,17 @@ module Chat
   def self.shorten_tools(messages)
     tool_ids = []
     tool_chars = 0
-    user_messages = 0
+    user_messages = 1
     assistant_messages = 0
 
     full_tool_calls = self.full_tool_calls || DEFAULT_FULL_TOOL_CALLS
+    full_tool_outputs = self.full_tool_outputs || DEFAULT_FULL_TOOL_OUTPUTS
     max_tool_calls = self.max_tool_calls || DEFAULT_MAX_TOOL_CALLS
     max_tool_outputs = self.max_tool_outputs || DEFAULT_MAX_TOOL_OUTPUTS
     max_tool_chars = self.max_tool_chars || DEFAULT_MAX_TOOL_CHARS
 
     full_tool_calls = full_tool_calls.to_i
+    full_tool_outputs = full_tool_outputs.to_i
     max_tool_calls = max_tool_calls.to_i
     max_tool_outputs = max_tool_outputs.to_i
     max_tool_chars = max_tool_chars.to_i
@@ -88,7 +95,7 @@ module Chat
         name, content, id = tool_call.values_at 'name', 'content', 'id'
         tool_ids << id
 
-        if tool_ids.length < full_tool_calls || user_messages == 0 || tool_chars < max_tool_chars
+        if tool_ids.length < full_tool_outputs || user_messages == 0 || tool_chars < max_tool_chars
           tool_chars += json.length
           msg
         elsif tool_ids.length > max_tool_outputs

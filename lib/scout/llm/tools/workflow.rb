@@ -90,6 +90,8 @@ module LLM
       workflow.inject({}){|tool_definitions,wf| tool_definitions.merge(workflow_tools(wf, tasks)) }
 
     else
+      Chat.allow_read_dir(workflow.directory)
+
       tasks = workflow.all_exports if tasks.nil?
       tasks = workflow.all_tasks if tasks.empty? && workflow.all_tasks
       tasks = [] if tasks.nil?

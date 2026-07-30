@@ -10,7 +10,7 @@ module LLM
   end
 
   class Agent
-    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options, :path
+    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options, :path, :job
 
     def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
       @workflow = workflow
@@ -100,6 +100,9 @@ module LLM
           end
 
           job = workflow.job(:ask, chat: Chat.print(messages))
+          self.job = job
+          Chat.allow_dir job.files_dir
+          Chat.allow_read_dir workflow.directory
           job.clean if ENV['SCOUT_NO_ASK_CACHE'] == 'true'
           job.produce
           

@@ -1,5 +1,19 @@
 module Chat
 
+  def self.allow_dir(dir)
+    Thread.current['allowed_dirs'] ||= []
+    return if Thread.current['allowed_dirs'].include?(dir)
+    Log.medium "Allow #{dir}"
+    Thread.current['allowed_dirs'] << dir
+  end
+
+  def self.allow_read_dir(dir)
+    Thread.current['allowed_read_dirs'] ||= []
+    return if Thread.current['allowed_read_dirs'].include?(dir)
+    Log.medium "Allow read #{dir}"
+    Thread.current['allowed_read_dirs'] << dir
+  end
+
   def self.load_workflow(workflow)
     workflow = begin
                  Kernel.const_get workflow
@@ -59,7 +73,7 @@ module Chat
 
         step = Step.load file
 
-        id = Log.truncate_string(step.short_path, 40)
+        id = Log.truncate_string(step.short_path.sub('Default_', ''), 40)
         id = id.gsub('/','-')
 
         if message[:role] == 'inline_job'

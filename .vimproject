@@ -101,6 +101,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   ask_agents
 
+  test_job
+
+  test_return_path
+
  }
  lib=lib {
   scout-ai.rb

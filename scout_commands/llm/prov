@@ -31,7 +31,7 @@ filename, _ = ARGV
 raise MissingParameterException, :filename if filename.nil?
 
 
-chat = LLM.chat Open.read(filename)
+chat = LLM.chat filename
 require 'rbbt-util'
 
 job = Path.setup(chat.jobs.first)
@@ -129,7 +129,6 @@ raise MissingParameterException, :filename if filename.nil?
 def report_line(type, path = nil, info = {}, offset: 0)
   parts = []
 
-
   case type
   when :job
     parts << Log.color( :yellow, type.to_s)
@@ -153,28 +152,33 @@ def report_line(type, path = nil, info = {}, offset: 0)
   parts * " "
 end
 
-def report(filename, seen = [], offset: 0, name: nil)
-  tokens = Chat.tokens(filename)
-  name = File.basename filename if name.nil?
+def report(obj, seen = [], offset: 0, name: nil)
 
-  puts report_line :chat, name, Chat.tokens(filename), offset: offset unless name == 'agent.chat'
-
-  chat = load_chat filename
-
-  chat = Chat.load filename
-
-  chat.jobs.each do |job|
-    next if seen.include? job.path
-    seen << job.path
-    next unless job.done?
-
-    job_tokens = Chat.tokens(job.path) 
-    puts report_line :job, job.short_path, job_tokens, offset: offset+1
-    Chat.job_agent_chat_files(job).each do |agent_chat|
-      agent_name = Misc.path_relative_to job.file('log'), agent_chat
+  if Step === obj
+    return if seen.include? obj.path
+    seen << obj.path
+    tokens = Chat.tokens(obj.path)
+    name = obj.path
+    puts report_line :job, name, tokens, offset: offset
+    Chat.job_agent_chat_files(obj).each do |agent_chat|
+      agent_name = Misc.path_relative_to obj.file('log'), agent_chat
       agent_name.sub(/^(chats|society)\//, '')
       report(agent_chat, seen, offset: offset+1, name: agent_name)
     end
+    jobs = obj.dependencies
+  else
+    return if seen.include? obj
+    seen << obj
+    tokens = Chat.tokens(obj)
+    name = File.basename obj if name.nil?
+    puts report_line :chat, name, tokens, offset: offset unless name == 'agent.chat'
+    chat = Chat.load obj
+    jobs = chat.jobs
+  end
+
+  jobs.each do |job|
+    next if seen.include? job.path
+    report(job, seen, offset: offset+1 )
   end
 end
 

@@ -32,6 +32,7 @@ module LLM
       return res
     end
 
+    job_paths = messages.job_paths
     meta = Chat.meta(messages)
     options[:current_meta] = meta if meta and meta.any?
 
@@ -50,6 +51,19 @@ module LLM
     res = Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist, dir: Scout.var.cache.ask) do
       backend = IndiferentHash.process_options options, :backend
       backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :responses
+
+      job_paths.each do |job_path|
+        begin
+          job = Step.load Path.setup(job_path)
+          jobs = [job] + job.rec_dependencies.to_a
+          jobs.each do |job|
+            Chat.allow_read_dir job.files_dir if Open.exist?(job.files_dir)
+          end
+        rescue
+          Log.exception $!
+          Log.warn "Could not load #{job_path}"
+        end
+      end
 
       case backend
       when :openai, "openai"

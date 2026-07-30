@@ -63,7 +63,7 @@ module LLM
       current_chat.format format
       output = chat(...)
       current_chat.remove_role :format
-      current_chat << old_format
+      current_chat.concat old_format
       obj = Chat.parse_json output
       if (Hash === obj) and obj.keys == ['content']
         obj['content']
