@@ -1,110 +1,247 @@
 # Agent
 
-`LLM::Agent` is the stateful wrapper around `LLM.ask` + `Chat`.
-
-Use an Agent when you want **one or more ongoing conversations** (state), plus:
-
-- a consistent place to store default LLM options (`endpoint`, `model`, `backend`, `format`, …)
-- automatic tool wiring from:
-  - a **Workflow** (tasks as function tools)
-  - a **KnowledgeBase** (databases as function tools)
-- a convenient Ruby API for structured outputs (`json_format`, `iterate`, `iterate_dictionary`)
-- optional delegation to other agents (multi-agent control loops)
+An `LLM::Agent` is a **stateful wrapper** around a `Chat` (the conversation
+data model), with persistent defaults, tool wiring, optional delegation, and
+the ability to live inside a Scout `Workflow`. Agents are the primary way to
+build multi-turn programs on top of Scout-AI: they hold the conversation,
+they know which tools to expose, and they know how to talk to other agents.
 
 Related docs:
 
-- `USER_GUIDE.md` — step-by-step introduction to chats, agents, workflows, and multi-agent patterns
-- `../python/README.md` — Python SDK for Scout-AI chats and agents
-- `doc/LLM.md` — `LLM.ask`, endpoints/backends, tool calling
-- `doc/Chat.md` — chat file roles/options (including `tool`, `task`, `mcp`, `previous_response_id`)
+- [../Overview.md](../Overview.md) — how Agent fits in the stack
+- [../Chat/Chat.md](../Chat/Chat.md) — the conversation data model
+- [../Backends/Backends.md](../Backends/Backends.md) — endpoints and inference
+- [../Tools/Tools.md](../Tools/Tools.md) — tool calling overview
+- [Delegation.md](Delegation.md) — multi-agent wiring (`socialize`, `delegate`)
+- [AgentWorkflow.md](AgentWorkflow.md) — encoding strategies as Scout workflows
 
 ---
 
-## 1. Quick start
+## 1. What an Agent is
 
-### 1.1 Minimal stateful conversation
+An `Agent` is the layer above `Chat` and `Backend` that adds:
+
+- **Conversation state**: a persistent `start_chat` (seed messages) plus one
+  or more `current_chat` branches.
+- **Sticky options**: `endpoint`, `model`, `backend`, `format`, `persist`, etc.
+  stored in `other_options` and merged into every inference call.
+- **Tool wiring**: a `Workflow` exposes its tasks as tools; a `KnowledgeBase`
+  exposes its databases as tools; MCP servers can be attached too.
+- **Delegation**: a `socialize` tool that lets the model call any specialist,
+  and named `hand_off_to_*` tools created by `delegate`.
+- **Workflow integration**: when an Agent's workflow defines an `ask` task,
+  inference goes through that task and gains Scout job caching/provenance.
+
+Underneath, every Agent is a thin state holder. The conversation itself is
+just an annotated `Array` of message `Hash`es (see
+[../Chat/Chat.md](../Chat/Chat.md)).
+
+### 1.1 Composition
+
+`LLM::Agent` is defined across five files that reopen the same class:
+
+| File | Concern |
+|---|---|
+| `lib/scout/llm/agent.rb` | Core: `initialize`, `ask`, `prompt`, tool merging, exception handling |
+| `lib/scout/llm/agent/chat.rb` | Conversation lifecycle: `start`, `current_chat`, `chat`, `json`, `json_format` |
+| `lib/scout/llm/agent/iterate.rb` | Structured extraction loops: `iterate`, `iterate_dictionary` |
+| `lib/scout/llm/agent/delegate.rb` | Multi-agent: `socialize`, `delegate`, `ask_agent` |
+| `lib/scout/llm/agent/workflow.rb` | `AgentWorkflow` mixin providing `chat_task`, `helper :agent` |
+
+Two module-level convenience methods exist:
+
+```ruby
+LLM.agent(...)         # => LLM::Agent.new(...)
+LLM.load_agent(...)    # => LLM::Agent.load_agent(...)
+```
+
+### 1.2 Quick start
 
 ```ruby
 require 'scout-ai'
 
-agent = LLM::Agent.new(endpoint: :nano)
+# The factory shortcut is the shortest way to create an agent
+agent = LLM.agent(endpoint: :nano)
+
+# Put persistent messages on start_chat
 agent.start_chat.system "You are a helpful assistant"
 
-agent.start          # create a new conversation branch
-agent.user "Say hi"  # append to current_chat
-puts agent.chat      # ask + append assistant reply
+# Create a new conversation branch (a shallow copy of start_chat)
+agent.start
+
+# Build the conversation with the Chat DSL (forwarded via method_missing)
+agent.user "Say hi"
+
+# One round-trip: ask + append assistant reply + return the answer text
+puts agent.chat
 ```
 
-### 1.2 Factory shortcut
+The same agent can be loaded from a directory:
 
 ```ruby
-agent = LLM.agent(endpoint: :ollama, model: 'llama3.1')
+agent = LLM.load_agent('Baking')
+agent.start
+agent.user "Bake muffins using the tool"
+puts agent.chat
 ```
 
 ---
 
 ## 2. Conversation lifecycle
 
-Agents maintain two chats:
+Every Agent keeps two Chat objects:
+
+| Chat | Variable | Purpose |
+|---|---|---|
+| **start chat** | `@start_chat` | Immutable seed: system policy, tool intros, shared context. Prefixes every new branch. |
+| **current chat** | `@current_chat` | The live, evolving conversation. |
 
 ### `start_chat`
 
-The “base” chat.
+```ruby
+agent.start_chat.system "You are a domain expert"
+agent.start_chat.option :format, :json
+```
 
-- It is where you put messages that should always be present (system policy, examples, shared context).
-- It is **not automatically sent** unless you create a current chat from it via `start`.
+Defaults to an empty `Chat` if none was provided at construction. Messages you
+put on `start_chat` are *not* sent on their own — they become the prefix of any
+branch created by `start`.
 
-### `start(chat=nil)`
+### `start(chat = nil)`
 
-- `start()` with no argument:
-  - branches `start_chat` (non-destructive copy)
-  - stores it as `current_chat`
-- `start(chat)` with a `Chat` or `Array`:
-  - adopts that as the `current_chat`
+- `start()` (no argument): branches `start_chat` via `Chat#branch` (a
+  shallow copy) and stores the result as `current_chat`.
+- `start(chat)` with a `Chat` or `Array`: adopts that chat as the new
+  `current_chat` (annotating it if needed).
+
+```ruby
+agent.start                  # new branch from start_chat
+agent.start(some_chat)       # adopt an existing chat
+```
 
 ### `current_chat`
 
-The active conversation.
-
-### Common pitfall
-
-If you call `agent.ask(...)` directly with your own messages array, the Agent will not automatically prepend `start_chat`. The simplest “normal” pattern is:
+Lazy accessor: on first access it calls `start` so a branch always exists.
 
 ```ruby
-agent.start
-agent.user "..."
-agent.chat
+agent.current_chat.length   # => 0 on a fresh agent before any user message
 ```
+
+### The branch pattern in one picture
+
+```
+start_chat (immutable seed)
+    │
+    ├── branch → current_chat (conversation A)
+    ├── branch → current_chat (conversation B)   [via start(chat)]
+    └── ...
+```
+
+`Chat#branch` does `self.annotate(self.dup)` — a shallow copy of the Array.
+Editing `current_chat` never mutates `start_chat`.
+
+> **Common pitfall**: `agent.ask(messages)` with an explicit messages array does
+> *not* prepend `start_chat`. The normal pattern is `agent.start` → `agent.user`
+> → `agent.chat`. To prepend `start_chat` and parse chat syntax, use
+> `agent.prompt(string)`.
 
 ---
 
-## 3. Agent forwards the Chat DSL
+## 3. DSL forwarding via `method_missing`
 
-`LLM::Agent` forwards unknown methods to `current_chat` (via `method_missing`).
+`Agent` does not re-implement the Chat DSL. Instead it forwards any unknown
+method to `current_chat`:
 
-So you can use the chat builder methods directly:
+```ruby
+def method_missing(name, ...)
+  current_chat.send(name, ...)
+end
+```
+
+So you can use the full chat builder vocabulary directly on the agent:
 
 ```ruby
 agent.system "You are a domain expert"
-agent.user "Summarize this file"
-agent.file "paper.md"
-agent.image "figure.png"
-agent.pdf "supplement.pdf"
+agent.user   "Summarize this file"
+agent.file   "paper.md"
+agent.image  "figure.png"
+agent.pdf    "supplement.pdf"
+agent.option :model, "gpt-5"
 ```
 
-All the special chat-file roles described in `doc/Chat.md` work the same way from an Agent: `import`, `continue`, `tool`, `task`, `mcp`, etc. These use the `message` builder, which is a more general way to add messages to the chat. These are equivalent:
+Any role supported by Chat works the same way from an Agent. These are
+equivalent:
 
 ```ruby
 agent.pdf "supplement.pdf"
 agent.message :pdf, "supplement.pdf"
 ```
+
+This is a deliberate design choice (see
+[../Overview.md](../Overview.md#annotation-over-wrapping)). The anti-pattern is
+defining wrapper methods on `Agent` that duplicate Chat — `method_missing`
+already does the job.
+
 ---
 
-## 4. Tool wiring (Workflow + KnowledgeBase)
+## 4. Agent options
 
-### 4.1 Workflow tools
+The `**kwargs` passed to `new` (or `LLM.agent(...)`) are stored as an
+`IndiferentHash` in `other_options` and merged into every `ask`/`chat` call:
 
-If an Agent has a `workflow`, all exported tasks are exposed as callable tools when the model supports function calling.
+| Option | Type | Meaning |
+|---|---|---|
+| `endpoint:` | Symbol/String | Named endpoint (YAML in `~/.scout/etc/AI/<name>`) |
+| `model:` | String | Model id forwarded to the backend |
+| `backend:` | Symbol | Backend selector: `:responses`, `:openai`, `:anthropic`, `:ollama`, … |
+| `format:` | Symbol/Hash | Output format (JSON, JSON Schema, …) |
+| `persist:` | Boolean | Whether to cache inference (default `true`) |
+| `tools:` | Hash | Extra tool definitions merged on top of workflow/KB tools |
+| `reasoning_effort:` | String | Responses backend reasoning level |
+| `websearch:` | Boolean | Append a `websearch: true` message |
+
+`IndiferentHash` gives symbol/string-indifferent access, so `:model` and
+`'model'` behave identically.
+
+```ruby
+agent = LLM.agent(endpoint: :ollama, model: 'llama3.1')
+agent.other_options[:endpoint]  # => :ollama
+```
+
+Because the options hash is sticky, you can set options through the Chat DSL
+too:
+
+```ruby
+agent.option :model, 'gpt-5'      # forwards to current_chat.option
+```
+
+---
+
+## 5. Tool wiring
+
+### 5.1 Where tools come from
+
+`Agent#ask` merges tools from three layers (later layers override earlier
+ones by tool name):
+
+1. `options[:tools]` passed to the individual call.
+2. `@other_options[:tools]` (e.g. tools added by `socialize`, `delegate`, or
+   explicit `agent.other_options[:tools][:foo] = [...]`).
+3. Workflow tools from `LLM.workflow_tools(workflow)` and knowledge-base
+   tools from `LLM.knowledge_base_tool_definition(knowledge_base)`.
+
+The merged registry has the same shape everywhere in Scout-AI:
+
+```ruby
+{ "tool_name" => [executor, definition] }
+```
+
+See [../Tools/Tools.md](../Tools/Tools.md) for the full tool contract.
+
+### 5.2 Workflow tools
+
+If an Agent has a `workflow`, all exported tasks are exposed as callable
+tools (when the backend supports function calling):
 
 ```ruby
 agent = LLM::Agent.new(workflow: 'Baking', endpoint: :nano)
@@ -113,85 +250,122 @@ agent.user "Bake muffins using the tool"
 puts agent.chat
 ```
 
-Internally:
+Internally `LLM.workflow_tools(workflow)` produces one tool definition per
+task, and `LLM.process_calls` executes the tool via `LLM.call_workflow`.
 
-- `LLM.workflow_tools(workflow)` produces one tool definition per task.
-- When the model calls a function, `LLM.process_calls` executes it via `LLM.call_workflow`.
+### 5.3 KnowledgeBase tools
 
-### 4.2 KnowledgeBase tools
+If an Agent has a `knowledge_base`, each database becomes a tool. For a
+database named `brothers`, the model can call `brothers(entities: [...])`,
+and (if the database has fields) `brothers_association_details`.
 
-If an Agent has a `knowledge_base`, each database is exposed as a callable tool.
+### 5.4 Inline workflow definition
 
-- For a database `brothers`, the model can call `brothers(entities: [...])`.
-- If the database has fields, an additional tool `brothers_association_details` is exposed.
+If no workflow is provided, one is created lazily and can be defined inline:
 
-### 4.3 Tool merging rules (important nuance)
+```ruby
+agent.workflow do
+  task :hi => :string do |name = nil|
+    "Hi #{name}"
+  end
+end
+```
 
-Tools come from multiple places:
+### 5.5 Tools from chat roles
 
-1) tools passed to `ask(..., tools: ...)`
-2) tools stored in `agent.other_options[:tools]`
-3) tools auto-exported from `workflow` / `knowledge_base`
+Tools can also be declared through chat roles that are forwarded to the Chat
+DSL — `tool:`, `introduce:`, `task:`, `association:`, `kb:`, `mcp:`. See
+[../Chat/Chat.md](../Chat/Chat.md) for role syntax and
+[../Tools/Tools.md](../Tools/Tools.md) for how they are compiled.
 
-The Agent merges them roughly as:
+### 5.6 Workflows as toolkits (and "skills")
 
-- start with `options[:tools]` (or `{}`)
-- merge `other_options[:tools]`
-- merge workflow and knowledge base tools
+In Scout-AI a `Workflow` *is* the executable toolkit abstraction. If you come
+from systems that talk about "skills", the closest equivalents are:
 
-If the same tool name appears multiple times, later merges override earlier ones.
+- a `Workflow` for executable capabilities,
+- a `start_chat` file for instructions and examples,
+- an optional `KnowledgeBase` for retrieval tools,
+- an agent directory that bundles those pieces together.
 
-### 4.4 Workflows as toolkits (and how they relate to "skills")
-
-In Scout-AI, a `Workflow` is the main executable toolkit abstraction. When you attach a workflow to an Agent or expose it in a chat with `tool:`, its exported tasks become callable tools with typed input schemas.
-
-If you come from systems that talk about "skills", the closest Scout-AI equivalents are usually:
-
-- a `Workflow` for executable capabilities
-- a `start_chat` file for instructions, conventions, and examples
-- an optional `KnowledgeBase` for retrieval tools
-- an agent directory that bundles those pieces together
-
-So a small agent directory often plays the role of a skill package, but with stronger typing and provenance because the executable part is a real Scout Workflow.
-
----
-
-## 5. Asking vs chatting
-
-### `ask(messages, options={})`
-
-Low-level: calls `LLM.ask(...)` with Agent defaults merged.
-
-- returns a **string** by default
-- returns a **message trace** if `return_messages: true`
-
-### `chat(options={})`
-
-High-level “stateful” method:
-
-- calls `ask(current_chat, return_messages: true)`
-- appends returned messages onto `current_chat`
-- returns the assistant content (the last assistant message)
+A small agent directory plays the role of a skill package, but with stronger
+typing and provenance because the executable part is a real Scout Workflow.
 
 ---
 
-## 6. Structured outputs
+## 6. The `ask` method
 
-### `json`
+`Agent#ask(messages = nil, options = {})` is the core inference entry point.
 
-Sets chat format to JSON and parses the response:
+1. If `messages` is nil, uses `current_chat`.
+2. If any message has `role: 'socialize'` with truthy content, calls
+   `socialize` to wire up the generic `ask` tool for delegation.
+3. Merges tools from the three layers above.
+4. Picks one of two execution paths:
+   - **Workflow path**: if the workflow defines an `:ask` task and the call
+     doesn't disable it, dispatches through `workflow.job(:ask, chat: ...)`.
+     This gains Scout job caching, provenance, and dependency tracking.
+   - **Direct path**: otherwise calls `LLM.ask(messages, options)`.
+5. Wraps everything in `begin/rescue`; if `process_exception` is a `Proc`, it
+   is called with the exception and may trigger a `retry`.
+
+Return value:
+
+- **String** by default (the last assistant message content).
+- **Message trace** (array of message hashes) when
+  `options[:return_messages] == true`.
+
+### `prompt(messages, options = {})`
+
+Convenience: parses a string as chat-file syntax, prepends `start_chat`, then
+calls `ask`:
+
+```ruby
+agent.prompt "user:\n\nHello"
+# equivalent to: ask(Chat.follow(start_chat, LLM.chat("user:\n\nHello")))
+```
+
+---
+
+## 7. The `chat` method
+
+`Agent#chat(options = {})` is the high-level "stateful" call:
+
+1. Calls `ask(current_chat, return_messages: true)`.
+2. Appends the returned messages onto `current_chat`.
+3. Returns the assistant answer text (or the message list if
+   `return_messages: true` was passed).
 
 ```ruby
 agent.start
-agent.user "Return {\"content\": [\"a\",\"b\"]}"
-pp agent.json
+agent.user "Tell me a joke"
+joke = agent.chat        # appends the assistant reply to current_chat
+agent.user "Now another"
+agent.chat               # current_chat now has the full history
 ```
 
-If the returned JSON is exactly `{"content": ...}`, the helper returns the inner `content`.
+---
+
+## 8. Structured outputs
+
+### `json`
+
+Sets the chat format to JSON, calls `chat`, parses the response, and restores
+the format:
+
+```ruby
+agent.start
+agent.user 'Return {"content": ["a","b"]}'
+pp agent.json            # => {"content" => ["a", "b"]} or ["a", "b"] if unwrapped
+```
+
+If the returned JSON is exactly `{"content": ...}`, the helper returns the
+inner `content`.
 
 ### `json_format(schema_hash)`
 
-Requests a JSON response constrained by a schema (supported best by the Responses backend).
+Requests a JSON response constrained by a schema (best supported by the
+Responses backend):
 
 ```ruby
 schema = {
@@ -199,7 +373,7 @@ schema = {
   type: 'object',
   properties: {
     judgement: { type: :boolean },
-    notes: { type: :string, default: "" }
+    notes:     { type: :string, default: "" }
   },
   required: [:judgement],
   additionalProperties: false
@@ -207,21 +381,14 @@ schema = {
 
 agent.start
 agent.user "Is this funny?"
-pp agent.json_format(schema)
+pp agent.json_format(schema)   # => {"judgement" => true, "notes" => "..."}
 ```
 
----
+### `iterate(prompt = nil) { |item| ... }`
 
-## 7. Iteration helpers (programmatic control loops)
-
-These helpers are designed for “agentic scripts” where you want the model to produce a list/dictionary and then iterate in Ruby.
-
-### `iterate(prompt=nil) { |item| ... }`
-
-- forces `endpoint :responses`
-- requests JSON schema `{content: [string, ...]}`
-- yields each item
-- resets `format` back to `:text`
+A structured-extraction loop: forces `endpoint :responses`, asks the model to
+return a JSON object of shape `{ "content": [string, ...] }`, then yields each
+string to the block, and resets `format` back to `:text`.
 
 ```ruby
 agent = LLM.agent
@@ -230,9 +397,9 @@ agent.iterate("List 3 next actions") do |action|
 end
 ```
 
-### `iterate_dictionary(prompt=nil) { |k,v| ... }`
+### `iterate_dictionary(prompt = nil) { |k, v| ... }`
 
-- requests a JSON object whose values are strings (`additionalProperties: {type: :string}`)
+Same idea, but the schema is a flat object whose values are strings:
 
 ```ruby
 agent.iterate_dictionary("Return a dict of tool_name => what it does") do |name, desc|
@@ -242,192 +409,102 @@ end
 
 ---
 
-## 8. Delegation (multi-agent wiring)
+## 9. Error handling
 
-`Agent#delegate` registers another agent as a **tool**.
-
-The tool name becomes:
-
-```text
-hand_off_to_<name>
-```
-
-The default schema expects:
-
-- `message` (required)
-- `new_conversation` (optional, default false)
-
-Example:
+Set `agent.process_exception` to a `Proc` to intercept exceptions raised
+during `ask`/`chat`. If the Proc returns truthy, the call is retried:
 
 ```ruby
-joker = LLM.agent(endpoint: :nano)
-joker.start_chat.system "You only answer with knock knock jokes"
-
-judge = LLM.agent(endpoint: :nano, format: { judgement: :boolean })
-judge.start_chat.system "Judge if a joke is funny"
-
-supervisor = LLM.agent(endpoint: :nano)
-supervisor.start_chat.system "Use delegated agents to do the work"
-
-supervisor.delegate(joker, :joker, "Generate jokes")
-supervisor.delegate(judge, :judge, "Evaluate jokes")
-
-supervisor.start
-supervisor.user "Try up to 5 jokes until judged funny"
-puts supervisor.chat
+agent.process_exception = Proc.new do |exception|
+  if exception.message =~ /rate limit/i
+    sleep 5
+    true              # retry
+  else
+    false             # re-raise
+  end
+end
 ```
+
+The Proc receives the exception object. This is the main hook for custom
+retry/backoff policies on top of whatever the backend itself provides.
 
 ---
 
-### 8.1 Socialized chats
+## 10. Loading an Agent
 
-When an agent delegates work to another agent through the `ask` tool with a named
-`conversation`, the interaction is recorded as a **socialized chat file** under the
-caller's job directory.
+### `LLM::Agent.load_agent(name, options = {})`
 
-The socialized chat file is persisted at:
+Resolution order (first match wins):
 
-```text
-<caller_job>.files/log/chats/<AgentName>/<conversation_name>.chat
-```
-
-This file is a **projection**, not a full agent log. It contains:
-
-- the `introduce:` message for the specialist agent
-- any `option:` lines propagated from the caller (see below)
-- the `user:` message (the prompt sent to the specialist)
-- a `meta: job=<path>` marker referencing the specialist's ask-job
-- the assistant response
-
-The actual model inference, tool calls, and their token usage happen inside the
-referenced job's own `agent.chat` log, not in the socialized chat file itself.
-
-#### What propagates into a socialized chat
-
-When `inherit: "tools"` is used (or when sticky options are active in the caller),
-the socialized chat file captures the caller's effective endpoint, backend, model,
-and other options as `option:` lines. This includes credentials such as API keys
-when they are part of the endpoint configuration. This makes each socialized chat
-self-contained for reproducibility, but it also means sensitive values may be
-present in the file.
-
-#### Reading socialized chats
-
-When inspecting a session, socialized chat files will show `inferences: 0` and
-zero direct token usage because they only carry a `meta: job=...` projection
-marker. To find the actual cost:
-
-1. Follow the `meta: job=...` reference to the specialist's ask-job.
-2. Read that job's `agent.chat` log for the direct inference metadata.
-3. Follow any further dependencies (e.g., nested gather jobs) for their logs.
-
-The `chat_overview` and `chat_report` tasks link socialized chats to their
-producer jobs through `result` edges and connect them to the caller job through
-`log` edges.
-
-#### Example
-
-A Manager agent issues:
-
-```text
-ask(agent: "Specialist", conversation: "data_batch", inherit: "tools", prompt: "...")
-```
-
-This produces:
-
-```text
-<manager_job>.files/log/chats/Specialist/data_batch.chat
-```
-
-with content like:
-
-```text
-introduce:
-
-Specialist
-
-option: endpoint my_model
-option: model some-model
-option: backend openai
-
-user:
-
-<the prompt sent by the Manager>
-
-meta: job=Specialist/ask/<hash>.chat
-
-assistant:
-
-<the specialist's response>
-```
-
-The actual inferences and tool calls are found in
-`Specialist/ask/<hash>.chat.files/log/agent.chat` and its dependencies.
-
----
-
-## 9. Loading an Agent (agent directories)
-
-Agents can be loaded by name or from a directory.
-
-### `LLM::Agent.load_agent(name)`
-
-Resolution logic (simplified):
-
-- if `name` is a path:
-  - if it is a directory with `agent/*.rb` it loads that script
-  - otherwise it loads the directory as an agent directory
-- otherwise it looks under the standard Scout paths:
-  - workflows (`Scout.workflows[name]`)
-  - agent dirs (`Scout.var.Agent[name]`)
-  - chat dirs (`Scout.chats[name]`)
+1. **Direct file path.** If `name` is a filename:
+   - A directory containing `agent.rb` → loads that file.
+   - A `.rb` file → loads it directly.
+2. **Named agent discovery** (when `name` is a name string), checking in order:
+   - `Scout.workflows[name]`
+   - `Scout.Agent[name]`
+   - `Scout.var.Agent[name]`
+   - `Scout.chats.Agent[name]`
+   - `Scout.chats[name]`
+3. **Workflow resolution**: if a workflow directory exists, loads
+   `workflow.rb`; if `python/*.py` exists, loads them as a Python workflow.
+4. **KnowledgeBase resolution**: `knowledge_base/` subdirectory is loaded via
+   `KnowledgeBase.load`.
+5. **Start chat resolution**: `start_chat` file (Scout chat-file syntax); if
+   absent but a workflow exists, seeds with an `introduce: <workflow>` message.
 
 ### Agent directory layout
 
-If you create an agent directory, these files are detected automatically:
-
-```text
-<agent_dir>/workflow.rb        # optional
-<agent_dir>/knowledge_base/    # optional
-<agent_dir>/start_chat         # optional chat file
-<agent_dir>/python/*.py        # optional Python-backed workflow tasks
+```
+<agent_dir>/
+  agent.rb          # Ruby file defining/returning an Agent (optional)
+  workflow.rb       # Scout Workflow definition (optional)
+  knowledge_base/   # KnowledgeBase directory (optional)
+  start_chat        # Initial chat in Scout chat-file syntax (optional)
+  python/           # Python workflow tasks (*.py) (optional)
 ```
 
-If `workflow.rb` is absent but the agent directory contains `python/*.py`, Scout-AI auto-loads those files through `PythonWorkflow.load_directory(..., 'ScoutAgent')` and treats them as workflow tasks for the agent.
-
-If `start_chat` is not present but a workflow exists, the Agent will create a base chat containing an `introduce: <workflow>` message (workflow documentation injected).
-
-See `doc/PythonAgentTasks.md` for the Python-backed agent pattern.
+If `workflow.rb` is absent but `python/*.py` exists, Scout-AI auto-loads those
+files through `PythonWorkflow.load_directory(..., 'ScoutAgent')` and treats
+them as workflow tasks. See [Python.md](Python.md) for the full guide.
 
 ---
 
-## 10. Advanced: workflow-provided `ask` task
+## 11. Workflow-provided `ask` task
 
-If the Agent’s workflow defines a task named `ask`, `Agent#ask` can delegate the entire LLM interaction to that workflow task:
+If the Agent's workflow defines a task named `ask`, `Agent#ask` can delegate
+the entire LLM interaction to that workflow task:
 
-- the Agent passes `chat: Chat.print(messages)` as input
-- the workflow task can implement a custom control loop, custom tool execution, etc.
+```ruby
+# Inside a chat_task definition, the workflow owns the control loop
+chat_task :ask do
+  agent = self.agent(nil, chat: chat)
+  # ... custom multi-step control loop ...
+end
+```
 
-This is the main Scout-AI escape hatch for building agent strategies as workflows. It is especially useful when you want Ruby to control a multi-step pattern such as:
+The Agent passes `chat: Chat.print(messages)` as input; the workflow task can
+implement custom control loops, custom tool execution, and multi-agent
+patterns. This is the main Scout-AI escape hatch for strategies like
+intake → plan → execute → review, validation chains, or artifact-first
+multi-agent collaboration.
 
-- intake -> plan -> execute -> review
-- search only when blocked
-- validation chains
-- artifact-first multi-agent collaboration
-
-In that style, the workflow owns the orchestration and writes artifacts with normal Scout `Step#file` helpers, while the individual agents stay role-specialized.
-
----
-
-## 11. Error handling
-
-Set `agent.process_exception` to a Proc to intercept exceptions raised during ask/chat.
-
-If the Proc returns truthy, the call is retried.
+See [AgentWorkflow.md](AgentWorkflow.md) for the `chat_task` DSL and
+[Delegation.md](Delegation.md) for `socialize`/`delegate` semantics.
 
 ---
 
-## 12. CLI integration
+## 12. Factory shortcut
+
+`LLM.agent(...)` is a thin alias for `LLM::Agent.new(...)`:
+
+```ruby
+agent = LLM.agent(endpoint: :nano, workflow: 'Baking')
+agent = LLM.agent(endpoint: :ollama, model: 'llama3.1')
+```
+
+---
+
+## 13. CLI integration
 
 Agents are primarily used from:
 
@@ -436,6 +513,5 @@ scout-ai agent ask <agent_name> your question
 scout-ai agent ask -c my.chat <agent_name> continue this conversation
 ```
 
-Note how the question does not need to be in quotes.
-
-See `doc/Chat.md` for chat file roles and `doc/LLM.md` for endpoint configuration.
+The question does not need to be in quotes. See
+[../Commands/Commands.md](../Commands/Commands.md) for the full CLI reference.

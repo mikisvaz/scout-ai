@@ -105,6 +105,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   test_return_path
 
+  documentation
+
  }
  lib=lib {
   scout-ai.rb
@@ -230,12 +232,46 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  }
  doc=doc filter="*"{
   Agent.md
+  Agent=Agent{
+   AgentWorkflow.md
+   Delegation.md
+   MultiAgentPatterns.md
+   Python.md
+  }
+  Backends.md
   Chat.md
-  LLM.md
+  Chat=Chat{
+   Persistence.md
+   PromptStrategies.md
+  }
+  Commands.md
+  Improvements.md
   Model.md
-  PythonAgentTasks.md
-  RAG.md
-  USER_GUIDE.md
+  Overview.md
+  Provenance.md
+  StartHere.md
+  Tools.md
+  Tools=Tools{
+   KnowledgeBase.md
+   MCP.md
+   WorkflowTools.md
+  }
+ }
+ SHARED=SHARED filter="*"{
+  00_scope_and_themes.md
+  01_chat_core.md
+  02_prompt_strategies.md
+  03_agent_and_delegation.md
+  04_agent_workflow.md
+  05_backends.md
+  06_tools_system.md
+  07_provenance.md
+  08_multi_agent_patterns.md
+  09_coding_philosophy.md
+  10_commands.md
+  11_synthesis_report.md
+  16_validation_report.md
+  search_brief.md
  }
  test=test {
   data=data filter="*"{
@@ -252,7 +288,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai
  }
  scout_commands=scout_commands filter="*"{
-  documenter
   llm=llm{
    ask
    json
