@@ -1,5 +1,6 @@
 module Chat
 
+  REGISTERED_STRATEGIES = {}
   DEFAULT_CONTEXT_STRATEGY = %w(shorten_tools)
   DEFAULT_SHORT_STRING_LENGTH = 200
   DEFAULT_SHORT_JSON_LENGTH = 2000
@@ -11,7 +12,7 @@ module Chat
   DEFAULT_MAX_TOOL_CHARS = 100_000
 
   def self.shorten_string(string, size = DEFAULT_SHORT_STRING_LENGTH, warning = 'Truncated')
-    new = Log.truncate_string(string, DEFAULT_SHORT_STRING_LENGTH)
+    new = Log.truncate_string(string, size)
     if new.length < string.length
       new = "#{warning} (#{string.length}): " + new
     end

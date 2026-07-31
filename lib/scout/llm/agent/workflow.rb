@@ -31,7 +31,7 @@ module AgentWorkflow
   end
 
   helper :tooling_intro do
-    self.tooling.select { |msg| msg[:role] == 'introduce ' }
+    self.tooling.select { |msg| msg[:role] == 'introduce' }
   end
 
   helper :agent do |name = nil, chat: nil, options: nil, tooling: nil, files: nil, **kwargs|
@@ -91,30 +91,14 @@ There are other jobs found in this chat:
     agent
   end
 
-  # Logged conversations and their own job markers are the evidence for work
-  # performed by this task. The task result itself only projects those messages.
-  helper :add_chat_dependencies do |chat|
-    chat.jobs.each do |job_path|
-      next if job_path.to_s == self.short_path.to_s
-      next if dependencies.find{|dep| dep.path.find == job_path.find }
-      begin
-        job = Step.load(job_path)
-        dependencies << job unless dependencies.select{|dep| dep.path}.include?(job)
-      rescue
-      end
-    end
-  end
-
   helper :log_agent do |agent, agent_name=nil|
     dir = agent_name ? file('log')[agent_name] : file('log')
 
     agent.chats.each do |name, other|
       dir.society[name].set_extension('chat').write other.current_chat.print
-      #add_chat_dependencies(other.current_chat)
     end if agent.chats
 
     dir['agent.chat'].write agent.current_chat.print
-    #add_chat_dependencies(agent.current_chat)
 
     update_info :dependencies, dependencies.collect { |dependency| dependency.path.find }
     agent

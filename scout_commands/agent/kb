@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 
+require 'scout-ai'
+
 agent = ARGV.shift
 
 agent_dir = Scout.var.Agent[agent]
