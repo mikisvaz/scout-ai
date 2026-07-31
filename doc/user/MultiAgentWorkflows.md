@@ -30,7 +30,8 @@ The core building block is `chat_task` — a Scout workflow task that runs an
 agent:
 
 ```ruby
-class MyWorkflow < Workflow
+module MyWorkflow 
+  extend Workflow
   chat_task :analyze do
     agent = self.agent('Analyst', chat: chat)
     agent.start
@@ -57,7 +58,8 @@ that includes the `AgentWorkflow` mixin.
 Here's a three-step pipeline: Plan → Execute → Review.
 
 ```ruby
-class Pipeline < Workflow
+module Pipeline 
+  extend Workflow
   include AgentWorkflow
 
   chat_task :plan do |objective|

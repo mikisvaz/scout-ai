@@ -107,6 +107,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   documentation
 
+  promot_strategies
+
  }
  lib=lib {
   scout-ai.rb
@@ -231,47 +233,44 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   }
  }
  doc=doc filter="*"{
-  Agent.md
-  Agent=Agent{
-   AgentWorkflow.md
-   Delegation.md
-   MultiAgentPatterns.md
-   Python.md
-  }
-  Backends.md
-  Chat.md
-  Chat=Chat{
-   Persistence.md
-   PromptStrategies.md
-  }
-  Commands.md
-  Improvements.md
   Model.md
-  Overview.md
-  Provenance.md
+  Improvements.md
   StartHere.md
-  Tools.md
-  Tools=Tools{
-   KnowledgeBase.md
-   MCP.md
-   WorkflowTools.md
+  user=user{
+   BuildingAgents.md
+   Cookbook.md
+   CoreConcepts.md
+   Delegation.md
+   GettingStarted.md
+   ManagingContext.md
+   MultiAgentWorkflows.md
+   Python.md
+   RunningInference.md
+   ToolCalling.md
+   WritingChats.md
+  }
+  developer=developer{
+   Architecture.md
+   Backends.md
+   ChatLifecycle.md
+   DelegationInternals.md
+   DesignPrinciples.md
+   PromptProcessing.md
+   Provenance.md
   }
  }
- SHARED=SHARED filter="*"{
-  00_scope_and_themes.md
-  01_chat_core.md
-  02_prompt_strategies.md
-  03_agent_and_delegation.md
-  04_agent_workflow.md
-  05_backends.md
-  06_tools_system.md
-  07_provenance.md
-  08_multi_agent_patterns.md
-  09_coding_philosophy.md
-  10_commands.md
-  11_synthesis_report.md
-  16_validation_report.md
-  search_brief.md
+ research=research filter="*"{
+  agent-delegation-analysis.md
+  agent-workflow-analysis.md
+  backends-analysis.md
+  chat-core-analysis.md
+  coding-philosophy-analysis.md
+  commands-analysis.md
+  multi-agent-patterns-analysis.md
+  prompt-strategies-analysis.md
+  provenance-analysis.md
+  synthesis-report.md
+  tools-system-analysis.md
  }
  test=test {
   data=data filter="*"{

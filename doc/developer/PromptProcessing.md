@@ -25,6 +25,24 @@ strategy is a function that takes an Array of message hashes and returns a
 
 ---
 
+## File layout
+
+Strategy implementations live in `lib/scout/llm/prompt/`:
+
+```
+lib/scout/llm/
+├── chat/
+│   └── prompt.rb              # Dispatcher: prepare_prompt, shared constants
+└── prompt/
+    ├── shorten_tools.rb       # Default strategy (recomputes each turn)
+    └── shorten_tools_epoch.rb # Cache-friendly epoch variant
+```
+
+The dispatcher in `prompt.rb` requires both strategy files and delegates to
+them via a `case` statement inside `prepare_prompt`.
+
+---
+
 ## The ephemeral design
 
 **Prompt strategies never mutate the stored chat.** The transformation happens
@@ -36,7 +54,7 @@ prompt = Chat.prepare_prompt(messages, prompt_strategies)
 ```
 
 The variable `prompt` is a local derived from `messages`. The original messages
-and the underlying Chat object are untouched. This means:
+and the underlying Chat Object are untouched. This means:
 
 - The chat history retains full-fidelity tool outputs for later inspection.
 - The agent's persisted memory is not degraded by truncation.
@@ -68,7 +86,7 @@ The string `"none"` is a recognized no-op that returns the prompt unchanged.
 
 ---
 
-## The `shorten_tools` strategy
+## The `shorten_tools` strategy (default)
 
 This is the **default strategy** — it runs on every backend `ask` call unless
 explicitly disabled.
@@ -105,7 +123,96 @@ until context pressure is real.
 
 ---
 
-## Configuration thresholds
+## The `shorten_tools_epoch` strategy (cache-friendly)
+
+### Motivation
+
+The default `shorten_tools` strategy recomputes the truncation boundary on
+**every single inference**. When a new tool call is added, the boundary shifts
+by one position, causing every previously-truncated message to be re-evaluated
+with a different offset. This means the prompt prefix changes on every turn,
+**defeating KV-cache and prompt-cache mechanisms** offered by LLM providers.
+
+`shorten_tools_epoch` solves this by **freezing the compaction boundary** for
+windows of N tool calls called *epochs*. Within an epoch, the compacted prefix
+is byte-for-byte identical across consecutive inferences, maximizing cache hit
+rates.
+
+### Algorithm
+
+The conversation is divided into four regions (newest at the bottom):
+
+```
+[ dropped ]      tool calls older than (compacted + full) → removed entirely
+[ compacted ]    up to epoch_compacted_tool_calls tool calls, truncated
+[ full-recent ]  epoch_full_tool_calls tool calls at full fidelity
+[ full-new ]     any tool calls that arrived after the epoch boundary (full fidelity)
+```
+
+The `compacted` and `full-recent` regions are **pinned** relative to the epoch
+boundary, not the live tool-call count. Their content stays stable until the
+boundary advances.
+
+### Epoch boundary calculation
+
+```
+overflow  = total_tool_calls - threshold        # how many beyond threshold
+epoch_idx = overflow > 0 ? (overflow - 1) / epoch_size : 0
+pinned_total = threshold + (epoch_idx * epoch_size)
+new_calls = total_tool_calls - pinned_total     # tool calls that arrived this epoch
+```
+
+The `pinned_total` determines where the `full-recent` region starts. Any tool
+calls beyond `pinned_total` are treated as "new" and kept at full fidelity.
+
+### Worked example (threshold=100, full=10, compacted=40, epoch_size=10)
+
+| Tool calls | pinned_total | new_calls | keep_full | compacted | dropped |
+|---|---|---|---|---|---|
+| 100 | 100 | 0 | 10 | 40 | 50 |
+| 101 | 100 | 1 | 11 | 40 | 50 |
+| 105 | 100 | 5 | 15 | 40 | 50 |
+| 110 | 100 | 10 | 20 | 40 | 50 |
+| 111 | 110 | 1 | 11 | 40 | 60 |
+
+From tool calls 101–110 the compacted region (calls 11–50 from the pinned
+boundary) is **identical**, so the prompt prefix is cache-stable for 10
+consecutive inferences. At call 111 the boundary advances and the compacted
+region shifts.
+
+### Configuration
+
+| Config key | ENV var | Default | Description |
+|---|---|---|---|
+| `epoch_tool_call_threshold` | `EPOCH_TOOL_CALL_THRESHOLD` | 50 | Total tool calls at or below which no compaction happens |
+| `epoch_full_tool_calls` | `EPOCH_FULL_TOOL_CALLS` | 10 | Most-recent tool calls kept at full fidelity |
+| `epoch_compacted_tool_calls` | `EPOCH_COMPACTED_TOOL_CALLS` | 40 | Tool calls (before full-recent) to truncate |
+| `epoch_size` | `EPOCH_SIZE` | 10 | New tool calls allowed before boundary advances |
+
+All thresholds are read via `Scout::Config.get` and memoized in class variables,
+following the same pattern as `shorten_tools`.
+
+### Enabling the epoch strategy
+
+To use it instead of the default, pass the strategy name:
+
+```ruby
+# In options
+options[:prompt_strategies] = 'shorten_tools_epoch'
+
+# Or directly
+Chat.prepare_prompt(messages, 'shorten_tools_epoch')
+```
+
+To switch the default system-wide, set:
+
+```ruby
+Chat::DEFAULT_CONTEXT_STRATEGY.replace(['shorten_tools_epoch'])
+```
+
+---
+
+## Configuration thresholds (`shorten_tools`)
 
 All thresholds are read via `Scout::Config.get` and **memoized** in class
 variables on first access:
@@ -167,24 +274,14 @@ Key points:
 
 Two mechanisms coexist:
 
-1. **Hard-coded `case` dispatch** for built-in strategies (`shorten_tools`, `none`).
+1. **Hard-coded `case` dispatch** for built-in strategies (`shorten_tools`,
+   `shorten_tools_epoch`, `none`).
 2. **`REGISTERED_STRATEGIES` hash** for user/plugin-registered strategies.
 
 > **Note:** `REGISTERED_STRATEGIES` is referenced in the code but not yet
-> defined anywhere in the codebase. Passing an unknown strategy name will raise
-> a `NameError`. This is a planned but unimplemented extension point. For now,
-> use a `Proc` to supply custom strategies.
-
----
-
-## Known issues
-
-- **`shorten_string` ignores its `size` parameter** — always uses
-  `DEFAULT_SHORT_STRING_LENGTH` (200) regardless of the argument passed.
-- **`REGISTERED_STRATEGIES` is undefined** — will raise `NameError` if an
-  unknown strategy name is passed.
-
-See [../Improvements.md](../Improvements.md) for the full advisory.
+> populated with entries. Passing an unknown strategy name will result in
+> `nil.call(prompt)`, raising a `NoMethodError`. For now, use a `Proc` to
+> supply custom strategies.
 
 ---
 

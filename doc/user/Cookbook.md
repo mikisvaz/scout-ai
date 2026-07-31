@@ -196,7 +196,8 @@ orchestrator.chat
 ## Multi-agent pipeline in a workflow
 
 ```ruby
-class AnalysisPipeline < Workflow
+module AnalysisPipeline 
+  extend Workflow
   include AgentWorkflow
 
   chat_task :plan do |objective|
