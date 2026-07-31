@@ -4,141 +4,107 @@ Scout-AI is an agent and LLM layer built on top of
 [Scout](https://github.com/mikisvaz/scout-gear). It provides a reproducible
 conversation format (`Chat`), tool calling backed by real Scout workflows,
 knowledge bases, and MCP servers, and multi-agent orchestration encoded as
-typed, inspectable workflow jobs. These docs are for anyone who wants to use
-Scout-AI to build LLM-powered workflows or to extend the framework itself.
-
-> **Before you write any code: read the design philosophy section in
-> [Overview.md](Overview.md).** Scout-AI emphasizes the right abstractions
-> (plain Arrays annotated with DSL methods, module composition over
-> inheritance, convention over configuration). Code that ignores these
-> conventions will fight the library.
+typed, inspectable workflow jobs.
 
 ---
 
 ## Choose your path
 
-### I want to use Scout-AI
+### I want to build applications with Scout-AI
 
-Start with the high-level overview, then follow the tutorial-oriented reading
-sequence:
+→ Go to **[user/](user/)** documentation.
 
-1. [Overview.md](Overview.md) — what Scout-AI is, how to install it, how to
-   configure your first endpoint, and the core abstractions.
-2. [Chat/Chat.md](Chat/Chat.md) — the conversation format and the `Chat` DSL.
-3. [Agent/Agent.md](Agent/Agent.md) — building stateful agents.
-4. [Commands/Commands.md](Commands/Commands.md) — CLI commands for everyday
-   use.
+The user documentation explains how to use Scout-AI to build agents, define
+tools, configure inference, and orchestrate multi-agent workflows. It is
+organized around concepts and tasks, not internal classes.
 
-### I want to develop or extend Scout-AI
+**Start here:**
+1. [user/GettingStarted.md](user/GettingStarted.md) — install, configure, first conversation.
+2. [user/CoreConcepts.md](user/CoreConcepts.md) — the four building blocks.
+3. Then follow the topic guides as needed.
 
-Start with the overview, then go deep on the three foundational systems before
-specializing:
+### I want to extend or modify Scout-AI
 
-1. [Overview.md](Overview.md) — architecture, abstractions, and design
-   philosophy (read the philosophy section carefully).
-2. [Chat/Chat.md](Chat/Chat.md) — the data model everything else builds on.
-3. [Agent/Agent.md](Agent/Agent.md) — the `LLM::Agent` class and lifecycle.
-4. [Backends/Backends.md](Backends/Backends.md) — backend abstraction and
-   provider dispatch.
+→ Go to **[developer/](developer/)** documentation.
 
-After these four, branch into whichever subsystem you need:
-[Tools/](Tools/), [Provenance/](Provenance/Provenance.md),
-[Agent/AgentWorkflow.md](Agent/AgentWorkflow.md),
-[Agent/Delegation.md](Agent/Delegation.md), etc.
+The developer documentation explains how Scout-AI is implemented: the
+architecture, the compilation pipeline, the backend abstraction, the
+delegation internals, and the provenance system. It is concise and links to
+[research/](../research/) for deep code investigations.
 
----
+**Start here:**
+1. [developer/Architecture.md](developer/Architecture.md) — subsystem map and data flow.
+2. [developer/DesignPrinciples.md](developer/DesignPrinciples.md) — coding philosophy and idioms.
+3. Then follow the topic guides as needed.
 
-## Reading sequences for common tasks
+### I need to understand how a subsystem works in detail
 
-| Task | Reading sequence |
-|---|---|
-| **Building my first agent** | Overview → Chat/Chat → Agent/Agent → Agent/AgentWorkflow |
-| **Understanding multi-agent systems** | Overview → Agent/Agent → Agent/Delegation → Agent/MultiAgentPatterns → Provenance/Provenance |
-| **Adding tool support** | Overview → Chat/Chat → Tools/Tools → (Tools/WorkflowTools · Tools/KnowledgeBase · Tools/MCP) |
-| **Understanding inference and backends** | Overview → Chat/Chat → Backends/Backends → Chat/PromptStrategies |
-| **Writing idiomatic Scout-AI code** | Overview (read the design philosophy section carefully) → Chat/Chat → Agent/Agent |
-| **Tracking and inspecting provenance** | Overview → Chat/Persistence → Provenance/Provenance → Commands/Commands |
-| **Using the CLI effectively** | Overview → Commands/Commands |
+→ Go to **[../research/](../research/)** investigation documents.
+
+These are architectural reports produced during code investigations. They are
+not maintained documentation and may be outdated, but they contain detailed
+call graphs, implementation discoveries, and design rationale.
 
 ---
 
-## Table of contents
+## Reading paths for common tasks
 
-### Getting started
-
-| Document | Description |
+| Task | Reading path |
 |---|---|
-| [Overview.md](Overview.md) | What Scout-AI is, installation, endpoint setup, core abstractions, and design philosophy. The entry point for all readers. |
-
-### Chat
-
-| Document | Description |
-|---|---|
-| [Chat/Chat.md](Chat/Chat.md) | The `Chat` data model: message roles, the builder DSL, file format, and the processing pipeline. |
-| [Chat/PromptStrategies.md](Chat/PromptStrategies.md) | How `prepare_prompt` and `shorten_tools` manage context windows by pruning old tool calls before inference. |
-| [Chat/Persistence.md](Chat/Persistence.md) | The `.chat` file format, provenance annotations (`meta:` roles), caching, and load/save drivers. |
-
-### Agent
-
-| Document | Description |
-|---|---|
-| [Agent/Agent.md](Agent/Agent.md) | The `LLM::Agent` class: lifecycle, `start_chat`/`current_chat`, DSL forwarding, tool wiring, structured outputs, and error handling. |
-| [Agent/AgentWorkflow.md](Agent/AgentWorkflow.md) | The `AgentWorkflow` mixin: `chat_task` DSL, `helper :agent`, `log_agent`, and how agents integrate with Scout workflows. |
-| [Agent/Delegation.md](Agent/Delegation.md) | Multi-agent delegation mechanics: `socialize`, `delegate`, `ask` tool, `hand_off_to_<name>`, and social inheritance modes. |
-| [Agent/MultiAgentPatterns.md](Agent/MultiAgentPatterns.md) | Concrete orchestration patterns: Planned, Manager, Branched, Refined, and InterpretData. Budget management and branch-specific chats. |
-| [Agent/Python.md](Agent/Python.md) | How to write Python-backed workflow tasks for Ruby-side agents: auto-loading `python/*.py`, `scout.task(...)`, type mapping, and CLI usage. |
-
-### Backends
-
-| Document | Description |
-|---|---|
-| [Backends/Backends.md](Backends/Backends.md) | Backend abstraction, the `chain_tools` inference loop, provider table (OpenAI, Anthropic, Ollama, etc.), endpoint YAML configuration, caching, and session continuation. |
-
-### Tools
-
-| Document | Description |
-|---|---|
-| [Tools/Tools.md](Tools/Tools.md) | Tool definition format (`{name => [handler, definition]}`), the calling protocol, `process_calls`, and output limits. |
-| [Tools/WorkflowTools.md](Tools/WorkflowTools.md) | Exposing Scout workflows as agent tools: `LLM.workflow_tools`, `LLM.workflow_ask`, `tool:`/`task:`/`exec_task:` chat roles. |
-| [Tools/KnowledgeBase.md](Tools/KnowledgeBase.md) | Knowledge bases as tools, `association:`/`kb:` chat roles, `LLM.knowledge_base_ask`, and RAG with embeddings. |
-| [Tools/MCP.md](Tools/MCP.md) | Model Context Protocol integration: `mcp:` chat role, `workflow.mcp_stdio`, and wrapping MCP servers as agent tools. |
-
-### Provenance
-
-| Document | Description |
-|---|---|
-| [Provenance/Provenance.md](Provenance/Provenance.md) | The provenance data model, `Chat.provenance`, `trace_chats`, recursive job traversal, token accounting, `info` vs `prov` commands, and ChatAnalyst. |
-
-### Commands
-
-| Document | Description |
-|---|---|
-| [Commands/Commands.md](Commands/Commands.md) | Concise reference for every CLI command: `llm ask`, `llm info`, `agent ask`, `workflow mcp`, and more. Links to detail docs for deeper topics. |
-
-### Improvements
-
-| Document | Description |
-|---|---|
-| [Improvements.md](Improvements.md) | Known code issues, documentation gaps, architectural suggestions, and anti-patterns to avoid when contributing to Scout-AI. |
+| **Build my first agent** | user/GettingStarted → user/CoreConcepts → user/BuildingAgents |
+| **Understand multi-agent systems** | user/Delegation → user/MultiAgentWorkflows → developer/DelegationInternals |
+| **Add tool support** | user/ToolCalling → (user/Python if needed) |
+| **Configure inference** | user/RunningInference → user/ManagingContext |
+| **Understand the internals** | developer/Architecture → developer/ChatLifecycle → developer/Backends |
+| **Track and inspect provenance** | developer/Provenance → research/provenance-analysis |
+| **Write idiomatic code** | developer/DesignPrinciples → research/coding-philosophy-analysis |
+| **Use the CLI** | user/Cookbook (quick reference) → research/commands-analysis (full detail) |
 
 ---
 
-## About the legacy documentation
+## Documentation structure
 
-The old flat documentation files (`Agent.md`, `Chat.md`, `LLM.md`,
-`USER_GUIDE.md`, `RAG.md`, `PythonAgentTasks.md`) have been removed. Their
-content is now distributed across the new structured documentation:
+```
+doc/
+├── StartHere.md          ← you are here
+├── Improvements.md       ← known issues and improvement advisory
+├── Model.md              ← ML model subsystem (separate from harness)
+├── user/                 ← building applications with Scout-AI
+│   ├── GettingStarted.md
+│   ├── CoreConcepts.md
+│   ├── WritingChats.md
+│   ├── BuildingAgents.md
+│   ├── ToolCalling.md
+│   ├── RunningInference.md
+│   ├── ManagingContext.md
+│   ├── Delegation.md
+│   ├── MultiAgentWorkflows.md
+│   ├── Python.md
+│   └── Cookbook.md
+├── developer/            ← extending and modifying Scout-AI
+│   ├── Architecture.md
+│   ├── ChatLifecycle.md
+│   ├── DesignPrinciples.md
+│   ├── PromptProcessing.md
+│   ├── Backends.md
+│   ├── DelegationInternals.md
+│   └── Provenance.md
+└── ../research/          ← architectural investigation reports
+    ├── chat-core-analysis.md
+    ├── prompt-strategies-analysis.md
+    ├── agent-delegation-analysis.md
+    ├── agent-workflow-analysis.md
+    ├── backends-analysis.md
+    ├── tools-system-analysis.md
+    ├── provenance-analysis.md
+    ├── multi-agent-patterns-analysis.md
+    ├── coding-philosophy-analysis.md
+    ├── commands-analysis.md
+    └── synthesis-report.md
+```
 
-- `Agent.md` → [Agent/Agent.md](Agent/Agent.md)
-- `Chat.md` → [Chat/Chat.md](Chat/Chat.md)
-- `LLM.md` → distributed across [Backends/Backends.md](Backends/Backends.md),
-  [Chat/Persistence.md](Chat/Persistence.md), and [Tools/](Tools/) docs
-- `USER_GUIDE.md` → folded into [Overview.md](Overview.md) and the
-  topic-specific docs
-- `RAG.md` → merged into [Tools/KnowledgeBase.md](Tools/KnowledgeBase.md)
-- `PythonAgentTasks.md` → incorporated into [Agent/Python.md](Agent/Python.md)
+Each layer becomes progressively more detailed and less stable:
 
-**`Model.md`** remains as a standalone reference for the `ScoutModel` /
-`PythonModel` / `TorchModel` / `HuggingfaceModel` subsystem. That subsystem
-(wrapping ML models for evaluation and training) is tangential to the
-agent/LLM layer and is intentionally kept separate.
+```
+Code → Investigation (research/) → Developer docs (doc/developer/) → User docs (doc/user/)
+```

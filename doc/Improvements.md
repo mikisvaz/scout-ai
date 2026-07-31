@@ -2,8 +2,7 @@
 
 This document catalogs known code issues, documentation gaps, architectural
 suggestions, and anti-patterns to avoid when contributing to Scout-AI. It is
-derived from the research artifacts that informed this documentation set
-(SHARED/02, SHARED/04, SHARED/07, SHARED/09, SHARED/10, SHARED/11) and is
+derived from the research artifacts in [../research/](../research/) and is
 intended as a living reference for maintainers and contributors.
 
 Each entry includes a priority to help triage effort:
@@ -47,7 +46,7 @@ Deprecate `prov` in favor of `info`. Consider removing `prov` entirely once
 `info` is confirmed to cover all use cases. If `prov` is kept temporarily,
 document it clearly as superseded.
 
-**Sources:** SHARED/10 §3, §Issues 2; SHARED/07.
+**Sources:** [../research/commands-analysis.md](../research/commands-analysis.md), [../research/provenance-analysis.md](../research/provenance-analysis.md).
 
 ---
 
@@ -71,27 +70,19 @@ error rather than a clear usage message.
 Remove the hardcoded fallback. If no argument is provided, print usage
 instructions and exit. The `info` command has no such hardcoded path.
 
-**Sources:** SHARED/10 §Issue 1.
+**Sources:** [../research/commands-analysis.md](../research/commands-analysis.md).
 
 ---
 
 ## Documentation Gaps
 
-### D1. Python integration not integrated into the new documentation structure
+### D1. ~~Python integration not integrated into the new documentation structure~~
 
 **Priority:** Medium
 
-**Problem:**
-The `doc/PythonAgentTasks.md` file documents how Python files under an agent
-directory (`python/*.py`) are auto-loaded and exposed as agent tasks, and the
-Python SDK (`../python/README.md`). This content is not covered by any of the
-new structured documents and is not linked from the new table of contents.
+> **Status: Resolved.** See [user/Python.md](user/Python.md).
 
-**Recommended action:**
-Either fold a Python section into [Agent/Agent.md](Agent/Agent.md) or create a
-dedicated `doc/Agent/Python.md`. Update [README.md](README.md) to include it.
-
-**Sources:** SHARED/11 §2.2.
+**Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
 
 ---
 
@@ -106,32 +97,29 @@ This is tangential to the agent/LLM layer and is intentionally kept separate,
 but it is not linked from the new documentation structure.
 
 **Recommended action:**
-Keep `Model.md` as a standalone reference. Add a note in [README.md](README.md)
-(under "About the legacy documentation") pointing to it. Optionally move it to
-`doc/Model/Model.md` for structural consistency. Do not merge into the LLM
-docs unless explicitly requested.
+Keep `Model.md` as a standalone reference. Add a note in [StartHere.md](StartHere.md)
+pointing to it. Optionally move it to `doc/developer/Model.md` for structural
+consistency. Do not merge into the LLM docs unless explicitly requested.
 
-**Sources:** SHARED/11 §2.3.
+**Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
 
 ---
 
-### D3. No dedicated getting-started / installation guide beyond Overview.md
+### D3. No dedicated getting-started / installation guide
 
 **Priority:** Low
 
 **Problem:**
 Installation, Gemfile setup, and first-endpoint configuration are covered in
-[Overview.md](Overview.md), but there is no separate step-by-step tutorial
-document (the old `USER_GUIDE.md` has been folded into Overview). Users who
-want a guided walkthrough may find the Overview too dense.
+[user/GettingStarted.md](user/GettingStarted.md), but it may be too terse for
+users who want a guided walkthrough.
 
 **Recommended action:**
-Consider adding a `doc/GettingStarted.md` with a linear tutorial (install →
+Consider expanding the Getting Started guide with a more linear tutorial (install →
 configure endpoint → first `ask` → first chat file → first agent → first
-workflow). Link it from [README.md](README.md). Low priority since Overview.md
-covers the essentials.
+workflow). Low priority since the current guide covers the essentials.
 
-**Sources:** SHARED/11 §2.1.
+**Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
 
 ---
 
@@ -154,7 +142,7 @@ graph edges) into the core library (e.g., `lib/scout/llm/chat/provenance/`).
 Both `info` and `ChatAnalyst` should consume the same core implementation.
 This would also make the traversal available to third-party tools.
 
-**Sources:** SHARED/07 §ChatAnalyst; SHARED/11 §1.6.
+**Sources:** [../research/provenance-analysis.md](../research/provenance-analysis.md), [../research/multi-agent-patterns-analysis.md](../research/multi-agent-patterns-analysis.md).
 
 ---
 
@@ -164,16 +152,15 @@ This would also make the traversal available to third-party tools.
 
 **Problem:**
 The prompt strategy system has a designed extension point
-(`REGISTERED_STRATEGIES`) that is not implemented (see Code Issue #8 above).
-This prevents plugins or users from registering custom named strategies
-without modifying the source.
+(`REGISTERED_STRATEGIES`) that is not implemented. This prevents plugins or
+users from registering custom named strategies without modifying the source.
 
 **Recommended action:**
 Implement the registry: define `REGISTERED_STRATEGIES = {}` and add a
 `Chat.register_prompt_strategy(name, &block)` class method. Document the
-extension point in [Chat/PromptStrategies.md](Chat/PromptStrategies.md).
+extension point in [developer/PromptProcessing.md](developer/PromptProcessing.md).
 
-**Sources:** SHARED/02 §8, §extension points.
+**Sources:** [../research/prompt-strategies-analysis.md](../research/prompt-strategies-analysis.md).
 
 ---
 
@@ -189,9 +176,9 @@ hardcoded paths). Maintaining both commands is unnecessary.
 **Recommended action:**
 After confirming that `info` covers all `prov` use cases, deprecate `prov`
 with a deprecation warning, then remove it in a future release. Update
-[Commands.md](Commands/Commands.md) to remove the `prov` entry once removed.
+[../research/commands-analysis.md](../research/commands-analysis.md) to remove the `prov` entry once removed.
 
-**Sources:** SHARED/10 §info vs prov; SHARED/07.
+**Sources:** [../research/commands-analysis.md](../research/commands-analysis.md), [../research/provenance-analysis.md](../research/provenance-analysis.md).
 
 ---
 
@@ -202,7 +189,7 @@ with a deprecation warning, then remove it in a future release. Update
 **Problem:**
 Endpoint configuration (YAML keys, `~/.scout/etc/AI/<name>` format, config
 defaults via `~/.scout/etc/config`, environment variables) is documented in
-[Overview.md](Overview.md) and [Backends/Backends.md](Backends/Backends.md),
+[user/GettingStarted.md](user/GettingStarted.md) and [developer/Backends.md](developer/Backends.md),
 but the two should be checked for consistency. The research artifacts noted
 that endpoint configuration was a HIGH-priority gap in the original docs.
 
@@ -211,15 +198,16 @@ Review both documents to ensure the endpoint YAML examples, key names, and
 configuration precedence are identical. Cross-link them so readers can find
 the canonical reference.
 
-**Sources:** SHARED/11 §2.4.
+**Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
 
 ---
 
 ## Anti-patterns to Watch For
 
 These anti-patterns are drawn from the Scout-AI coding philosophy
-(SHARED/09 §5.5). They are the most common ways that well-intentioned code
-fights the library instead of composing with it.
+([../research/coding-philosophy-analysis.md](../research/coding-philosophy-analysis.md)).
+They are the most common ways that well-intentioned code fights the library
+instead of composing with it.
 
 ---
 
