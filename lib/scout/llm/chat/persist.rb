@@ -1,4 +1,5 @@
 require 'scout/persist'
+require 'scout/workflow'
 
 Persist.save_drivers[:chat] = proc do |file,content|
   case content

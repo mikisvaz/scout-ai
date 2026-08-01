@@ -109,6 +109,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   promot_strategies
 
+  provenance_and_accounting
+
  }
  lib=lib {
   scout-ai.rb

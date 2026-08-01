@@ -415,16 +415,16 @@ module LLM
         current_meta = {} if current_meta.nil?
         IndiferentHash.setup current_meta
 
+        # Extract normalised token fields from the provider usage hash.
+        # Chat.normalize_usage handles all known backend response formats
+        # (OpenAI Chat, Responses API, GLM, Anthropic) and returns a flat
+        # hash keyed by the short names defined in Chat::TOKEN_KEYS.
+        tokens = Chat.normalize_usage(response.dig('usage')).reject { |_name, value| value.nil? }
+
         # Keep the provider values for this request separate from aggregate
         # values.  In particular, do not add the running thread/session total
         # to the chat total: doing that on every request produces the observed
         # triangular (and, after aggregation, worse) growth.
-        tokens = {
-          'pt' => response.dig('usage', 'prompt_tokens'),
-          'ct' => response.dig('usage', 'completion_tokens'),
-          'tt' => response.dig('usage', 'total_tokens'),
-        }.reject { |_name, value| value.nil? }
-
         meta = IndiferentHash.setup(tokens.dup)
         tokens.each do |name, value|
           session_name = name + '_s'
@@ -432,7 +432,7 @@ module LLM
           meta[session_name] = Thread.current[session_name]
         end
 
-        %w(pt ct tt).each do |name|
+        Chat::TOKEN_KEYS.each do |name|
           meta["#{name}_c"] = current_meta["#{name}_c"].to_i + tokens[name].to_i
         end
 

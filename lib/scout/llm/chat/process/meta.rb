@@ -1,6 +1,75 @@
 require 'set'
 
 module Chat
+  # Canonical short keys for per-inference token fields written into meta
+  # messages.  Every key has implicit <key>_s (session) and <key>_c (chat)
+  # cumulative variants computed by update_meta.
+  #
+  #   pt  - prompt / input tokens
+  #   ct  - completion / output tokens
+  #   tt  - total tokens
+  #   cct - cached (cache-hit) input tokens
+  #   cwt - cache-write input tokens
+  #   rt  - reasoning tokens
+  TOKEN_KEYS = %w[pt ct tt cct cwt rt].freeze
+
+  # Keys that carry cumulative totals across chat requests.  Used by
+  # Chat.meta to restore the last checkpoint.
+  CUMULATIVE_KEYS = TOKEN_KEYS.map { |k| "#{k}_c" }.freeze
+
+  # Map known provider field names to the canonical short keys.
+  # Each entry is [field_path, short_key] where field_path is an array
+  # of keys suitable for IndiferentHash.dig.
+  USAGE_FIELD_MAP = {
+    # prompt / input
+    %w[prompt_tokens]                  => 'pt',
+    %w[input_tokens]                   => 'pt',
+    # completion / output
+    %w[completion_tokens]              => 'ct',
+    %w[output_tokens]                  => 'ct',
+    # total
+    %w[total_tokens]                   => 'tt',
+    # cache-hit (GLM prompt_tokens_details, OpenAI input_tokens_details)
+    %w[prompt_tokens_details cached_tokens]   => 'cct',
+    %w[input_tokens_details cached_tokens]    => 'cct',
+    # cache-write (OpenAI input_tokens_details)
+    %w[input_tokens_details cache_write_tokens] => 'cwt',
+    # reasoning (GLM completion_tokens_details, OpenAI output_tokens_details)
+    %w[completion_tokens_details reasoning_tokens] => 'rt',
+    %w[output_tokens_details reasoning_tokens]    => 'rt',
+    # Anthropic flat fields
+    %w[cache_read_input_tokens]        => 'cct',
+    %w[cache_creation_input_tokens]    => 'cwt',
+  }.freeze
+
+  # Normalise a provider usage hash into a flat hash keyed by TOKEN_KEYS.
+  # Handles OpenAI Chat API (prompt_tokens/completion_tokens), Responses API
+  # (input_tokens/output_tokens), GLM (prompt_tokens/completion_tokens), and
+  # Anthropic (cache_read_input_tokens/cache_creation_input_tokens).
+  #
+  # Missing fields are simply omitted from the result.
+  def self.normalize_usage(usage)
+    return {} if usage.nil? || usage.empty?
+
+    IndiferentHash.setup(usage) unless usage.respond_to?(:dig)
+
+    result = {}
+    USAGE_FIELD_MAP.each do |path, short_key|
+      next if result.include?(short_key) # first match wins
+      value = IndiferentHash.dig(usage, *path)
+      result[short_key] = value.to_i if value
+    end
+
+    # Compute total if not provided but both prompt and completion are present
+    if !result.include?('tt')
+      pt = result['pt']
+      ct = result['ct']
+      result['tt'] = pt.to_i + ct.to_i if pt && ct
+    end
+
+    result
+  end
+
   def self.serialize_meta(meta)
     keys = meta.keys.sort_by { |key| String === meta[key] ? meta[key].length : 0 }
     keys.collect { |key| [key, meta[key]] * '=' } * ' '
@@ -46,10 +115,10 @@ module Chat
     metas = meta_messages.collect { |message| parse_meta(message[:content]) }
     current = IndiferentHash.setup(metas.last.dup)
     checkpoint = metas.reverse.find do |meta|
-      %w[pt_c ct_c tt_c].any? { |name| meta.include?(name) }
+      CUMULATIVE_KEYS.any? { |name| meta.include?(name) }
     end
     if checkpoint
-      %w[pt_c ct_c tt_c].each do |name|
+      CUMULATIVE_KEYS.each do |name|
         current[name] = checkpoint[name] if checkpoint.include?(name)
       end
     end
@@ -194,6 +263,45 @@ module Chat
 
   def self.trace_chats(chats)
     trace_indices(chats.collect(&:message_index))
+  end
+
+  # Select trace entries that carry direct token counts (not job projections).
+  def self.direct_entries(chat_list)
+    trace_chats(chat_list).select do |entry|
+      meta = entry[:meta]
+      next false if meta[:job]
+      TOKEN_KEYS.any? { |name| meta.include?(name) }
+    end
+  end
+
+  # Sum direct token fields across a set of chats.  Returns a hash keyed
+  # by symbol for every key in TOKEN_KEYS.
+  def self.token_totals(chat_list)
+    totals = TOKEN_KEYS.each_with_object({}) { |k, h| h[k.to_sym] = 0 }
+    direct_entries(chat_list).each do |entry|
+      meta = entry[:meta]
+      TOKEN_KEYS.each { |name| totals[name.to_sym] += meta[name].to_i }
+    end
+    totals
+  end
+
+  # Human-readable token summary suitable for one-line CLI output.
+  def self.print_tokens(tokens)
+    tokens = tokens.transform_keys(&:to_sym) if Hash === tokens
+    parts = []
+    parts << "prompt=#{Misc.human_number(tokens[:pt])}" if tokens[:pt]
+    parts << "completion=#{Misc.human_number(tokens[:ct])}" if tokens[:ct]
+    parts << "total=#{Misc.human_number(tokens[:tt])}" if tokens[:tt]
+    if tokens[:cct] && tokens[:cct].to_i > 0
+      parts << "cached=#{Misc.human_number(tokens[:cct])}"
+    end
+    if tokens[:cwt] && tokens[:cwt].to_i > 0
+      parts << "cache_write=#{Misc.human_number(tokens[:cwt])}"
+    end
+    if tokens[:rt] && tokens[:rt].to_i > 0
+      parts << "reasoning=#{Misc.human_number(tokens[:rt])}"
+    end
+    parts * ' '
   end
 
   # A chat-task response is one segment projected from a job. The original
