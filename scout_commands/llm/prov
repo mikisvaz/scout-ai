@@ -31,85 +31,8 @@ filename, _ = ARGV
 raise MissingParameterException, :filename if filename.nil?
 
 
-chat = LLM.chat filename
+chat = Chat.parse filename
 require 'rbbt-util'
-
-job = Path.setup(chat.jobs.first)
-job = Step.load(job.find)
-
-module Chat
-  def self.trace(chat_list = @chats.values)
-    Chat.trace_chats(chat_list)
-  end
-
-  def self.direct_entries(chat_list = @chats.values)
-    trace(chat_list).select do |entry|
-      meta = entry[:meta]
-      next false if meta[:job]
-      %w[pt ct tt].any? { |name| meta.include?(name) }
-    end
-  end
-
-  def self.token_totals(chat_list = @chats.values)
-    direct_entries(chat_list).each_with_object({ pt: 0, ct: 0, tt: 0 }) do |entry, totals|
-      meta = entry[:meta]
-      %w[pt ct tt].each { |name| totals[name.to_sym] += meta[name].to_i }
-    end
-  end
-
-  def self._format_tokens(tokens)
-  end
-
-  def self.print_tokens(tokens)
-    "prompt=#{Misc.human_number(tokens[:pt])} completion=#{Misc.human_number(tokens[:ct])} total=#{Misc.human_number(tokens[:tt])}"
-  end
-
-  def rec_chats
-    chats = [self]
-    chats + self.job_chats.inject([]){|acc,job| acc.concat job.rec_agent_chats; acc }
-  end
-  
-  def jobs
-    job_paths.collect{|path| Step.load path }
-  end
-
-  def self.provenance(chat_file, prov = {})
-    return prov if prov.include? chat_file
-    return prov unless Open.exists?(chat_file)
-    chat = Chat.load chat_file
-    chat.jobs.each do |job|
-      prov[chat_file] ||= []
-      Chat.job_agent_chat_files(job).each do |agent_chat_file|
-        prov[chat_file] << agent_chat_file
-        prov.merge(Chat.provenance(agent_chat_file, prov))
-      end
-      job.dependencies.each do |dep|
-        prov.merge(Chat.provenance(dep.path, prov))
-      end
-    end
-    prov
-  end
-
-  def self.provenance_chat_files(chat)
-    provenance(chat).values.flatten.uniq + [chat]
-  end
-
-  def self.tokens(chat)
-    chats = provenance_chat_files(chat).collect{|file| 
-      @@chat_file ||= {}
-      @@chat_file[file] ||= LLM.chat file 
-      @@chat_file[file] ||= Chat.load file 
-    }
-    Chat.token_totals(chats)
-  end
-
-end
-
-class Step
-  def agent_chats
-    Chat.job_agent_chat_files(self).collect{|file| Chat.load file }
-  end
-end
 
 def load_chat(filename)
   @loaded_chat ||= {}
@@ -123,7 +46,6 @@ def load_chat(filename)
     end
 end
 
-filename ||=  "~/git/workflows/SC26/chats/network_usecase/3.1.themes"
 raise MissingParameterException, :filename if filename.nil?
 
 def report_line(type, path = nil, info = {}, offset: 0)
@@ -139,11 +61,13 @@ def report_line(type, path = nil, info = {}, offset: 0)
   end
 
   if info
-    #parts << Log.fingerprint(info) if info
     tok_str ||= []
     tok_str << "total=#{Misc.human_number(info[:tt].to_i)}" if info[:tt]
     tok_str << "prompt=#{Misc.human_number(info[:pt].to_i)}" if info[:pt]
     tok_str << "cont=#{Misc.human_number(info[:ct].to_i)}" if info[:ct]
+    tok_str << "cache=#{Misc.human_number(info[:cct].to_i)}" if info[:cct] && info[:cct].to_i > 0
+    tok_str << "cache_write=#{Misc.human_number(info[:cwt].to_i)}" if info[:cwt] && info[:cwt].to_i > 0
+    tok_str << "reas=#{Misc.human_number(info[:rt].to_i)}" if info[:rt] && info[:rt].to_i > 0
 
     parts << tok_str*" "
   end
@@ -173,7 +97,7 @@ def report(obj, seen = [], offset: 0, name: nil)
     name = File.basename obj if name.nil?
     puts report_line :chat, name, tokens, offset: offset unless name == 'agent.chat'
     chat = Chat.load obj
-    jobs = chat.jobs
+    jobs = chat.jobs.collect{|job_path| Step.load job_path }
   end
 
   jobs.each do |job|
@@ -182,4 +106,8 @@ def report(obj, seen = [], offset: 0, name: nil)
   end
 end
 
-report filename
+if Open.exists?(filename +  '.files')
+  report Step.load(filename)
+else
+  report filename
+end

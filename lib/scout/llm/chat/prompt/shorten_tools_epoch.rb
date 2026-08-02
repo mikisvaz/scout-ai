@@ -6,15 +6,15 @@ module Chat
   DEFAULT_EPOCH_TOOL_CALL_THRESHOLD = 50
 
   # Number of most-recent tool calls to keep at full fidelity.
-  DEFAULT_EPOCH_FULL_TOOL_CALLS = 10
+  DEFAULT_EPOCH_FULL_TOOL_CALLS = 20
 
   # Number of tool calls (before the full window) to compact (truncate).
-  DEFAULT_EPOCH_COMPACTED_TOOL_CALLS = 40
+  DEFAULT_EPOCH_COMPACTED_TOOL_CALLS = 80
 
   # How many new tool calls are allowed before the compaction boundary
   # advances.  Within a single epoch window the compacted prefix is frozen,
   # maximising KV-cache / prompt-cache hits for consecutive inferences.
-  DEFAULT_EPOCH_SIZE = 10
+  DEFAULT_EPOCH_SIZE = 20
 
   # --- shorten_tools_epoch strategy configuration accessors ---
 
@@ -89,7 +89,7 @@ module Chat
     # ---- count tool outputs in the message array ----
     total_tool_outputs = messages.count { |m| m[:role].to_sym == :function_call_output }
 
-    return messages if total_tool_outputs < threshold
+    return messages if total_tool_outputs <= threshold
     return messages if full == 0 && compacted == 0
     return messages if epoch_sz <= 0
 

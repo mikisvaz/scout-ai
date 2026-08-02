@@ -145,18 +145,11 @@ class LLMInfoReport
   end
 
   def direct_entries(chat_list = @chats.values)
-    trace(chat_list).select do |entry|
-      meta = entry[:meta]
-      next false if meta[:job]
-      %w[pt ct tt].any? { |name| meta.include?(name) }
-    end
+    Chat.direct_entries(chat_list)
   end
 
   def token_totals(chat_list = @chats.values)
-    direct_entries(chat_list).each_with_object({ pt: 0, ct: 0, tt: 0 }) do |entry, totals|
-      meta = entry[:meta]
-      %w[pt ct tt].each { |name| totals[name.to_sym] += meta[name].to_i }
-    end
+    Chat.token_totals(chat_list)
   end
 
   def short_path(path)
@@ -170,7 +163,7 @@ class LLMInfoReport
   end
 
   def print_tokens(tokens)
-    "prompt=#{tokens[:pt]} completion=#{tokens[:ct]} total=#{tokens[:tt]}"
+    Chat.print_tokens(tokens)
   end
 
   def print
