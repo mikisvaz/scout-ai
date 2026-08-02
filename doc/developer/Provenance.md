@@ -72,7 +72,7 @@ compact comparison.
 
 ### Response segments
 
-`Chat.trace_indices(indices)` groups messages into response segments:
+`Chat.traceIndices(indices)` groups messages into response segments:
 - Each `meta:` message **opens** a new segment, seeded with the parsed metadata.
 - `user` and `system` messages **close** any pending segment.
 - Segments are the unit of provenance traversal.
@@ -110,23 +110,41 @@ chat alone.
 
 ## CLI commands
 
-### `scout-ai llm info` (recommended)
-
-The **current, recommended** command for inspecting provenance. It provides:
-- Hierarchical provenance tree with token totals.
-- Job references and their dependencies.
-- Flow visualization.
-- Agent log file listing.
-
 ### `scout-ai llm prov`
 
-An older command that prints a hierarchical provenance tree with token totals.
-It has been **superseded by `info`** and may not reflect the latest provenance
-data model. New code and users should prefer `info`.
+The sole command for inspecting provenance. It provides:
 
-> **Known issue:** The `info` command may be outdated in some areas. See
-> [../Improvements.md](../Improvements.md) for the current status of
-> provenance commands.
+- Hierarchical provenance tree with token totals (default mode).
+- Job references and their dependencies.
+- Compact flow report (`-f` / `--flow`).
+- Graphviz DOT output (`--dot FILE`).
+- SVG / PNG / PDF rendering (`-p FILE` / `--plot FILE`).
+
+The default text-tree mode uses `report()` to traverse the entire provenance
+graph (chats, jobs, agent logs, dependencies), accumulating a nested hash of
+the full tree as it goes. When flow/DOT/SVG output is requested, the flow
+rendering code consumes that same accumulated hash (produced by a single
+`report()` call) to extract nodes and edges — no separate traversal is
+performed.
+
+Usage:
+
+```bash
+# Text-tree report (default)
+scout-ai llm prov <chat>
+
+# Compact numbered flow
+scout-ai llm prov <chat> -f
+
+# Write Graphviz DOT to a file
+scout-ai llm prov <chat> --dot out.dot
+
+# Render an SVG (also supports .png and .pdf)
+scout-ai llm prov <chat> -p out.svg
+```
+
+> The former `scout-ai llm info` command has been removed. Its SVG
+> dependency-graph functionality is now fully available through `prov`.
 
 ---
 
@@ -153,8 +171,8 @@ this inference workload?" and get a grounded, provenance-backed answer.
 | `lib/scout/llm/chat/process/meta.rb` | Meta serialization, `message_index`, `trace_indices`, job traversal |
 | `lib/scout/llm/backends/default.rb` | `update_meta` — writes token fields after inference |
 | `lib/scout/llm/agent/workflow.rb` | `Chat.project` — wraps job results with `meta job=` |
-| `scout_commands/llm/info` | CLI provenance inspection |
-| `scout_commands/llm/prov` | CLI provenance tree (superseded) |
+| `lib/scout/llm/chat/provenance.rb` | `Chat.provenance`, `Chat.tokens` — provenance traversal and token totals |
+| `scout_commands/llm/prov` | CLI provenance inspection (text tree + flow/DOT/SVG, all from a single `report()` traversal) |
 
 ---
 

@@ -14,6 +14,9 @@ Examine the provenance of a chat
 $ #{cmd} [<options>] <filename> [<other|->]*
 
 -h--help Print this help
+-f--flow Print a compact provenance flow
+--dot* Write the flow as Graphviz DOT
+-p--plot* Render the flow as svg, png, or pdf
 EOF
 if options[:help]
   if defined? scout_usage
@@ -26,11 +29,17 @@ end
 
 help = IndiferentHash.process_options options, :help
 
+flow = options.delete(:flow)
+dot_file = options.delete(:dot)
+plot_file = options.delete(:plot)
+
 filename, _ = ARGV
 
 raise MissingParameterException, :filename if filename.nil?
 
-
+# -------------------------------------------------------------------
+# Default text-tree mode (unchanged behavior)
+# -------------------------------------------------------------------
 chat = Chat.parse filename
 require 'rbbt-util'
 
@@ -64,10 +73,10 @@ def report_line(type, path = nil, info = {}, offset: 0)
     tok_str ||= []
     tok_str << "total=#{Misc.human_number(info[:tt].to_i)}" if info[:tt]
     tok_str << "prompt=#{Misc.human_number(info[:pt].to_i)}" if info[:pt]
-    tok_str << "cont=#{Misc.human_number(info[:ct].to_i)}" if info[:ct]
+    tok_str << "continue=#{Misc.human_number(info[:ct].to_i)}" if info[:ct]
     tok_str << "cache=#{Misc.human_number(info[:cct].to_i)}" if info[:cct] && info[:cct].to_i > 0
     tok_str << "cache_write=#{Misc.human_number(info[:cwt].to_i)}" if info[:cwt] && info[:cwt].to_i > 0
-    tok_str << "reas=#{Misc.human_number(info[:rt].to_i)}" if info[:rt] && info[:rt].to_i > 0
+    tok_str << "reason=#{Misc.human_number(info[:rt].to_i)}" if info[:rt] && info[:rt].to_i > 0
 
     parts << tok_str*" "
   end
@@ -77,7 +86,8 @@ def report_line(type, path = nil, info = {}, offset: 0)
 end
 
 def report(obj, seen = [], offset: 0, name: nil)
-
+  graph = {}
+  graph[obj] = {}
   if Step === obj
     return if seen.include? obj.path
     seen << obj.path
@@ -87,7 +97,7 @@ def report(obj, seen = [], offset: 0, name: nil)
     Chat.job_agent_chat_files(obj).each do |agent_chat|
       agent_name = Misc.path_relative_to obj.file('log'), agent_chat
       agent_name.sub(/^(chats|society)\//, '')
-      report(agent_chat, seen, offset: offset+1, name: agent_name)
+      graph[obj].merge! report(agent_chat, seen, offset: offset+1, name: agent_name)
     end
     jobs = obj.dependencies
   else
@@ -102,12 +112,264 @@ def report(obj, seen = [], offset: 0, name: nil)
 
   jobs.each do |job|
     next if seen.include? job.path
-    report(job, seen, offset: offset+1 )
+    graph[obj].merge! report(job, seen, offset: offset+1 )
   end
+
+  graph
 end
 
 if Open.exists?(filename +  '.files')
-  report Step.load(filename)
+  graph = report Step.load(filename)
 else
-  report filename
+  graph = report filename
+end
+
+# -------------------------------------------------------------------
+# Flow / DOT / SVG mode — consumes the graph hash built by report()
+# -------------------------------------------------------------------
+if flow || dot_file || plot_file
+
+  # --- Flatten the graph hash into nodes and edges ---
+
+  def flow_node_path(obj)
+    Step === obj ? obj.path.to_s : obj.to_s
+  end
+
+  def flow_node_type(obj)
+    Step === obj ? :job : (obj.to_s.include?('.files/log/') ? :agent : :chat)
+  end
+
+  def extract_flow(graph, nodes = {}, edges = [])
+    graph.each do |parent, children|
+      pid = flow_node_path(parent)
+      nodes[pid] = { type: flow_node_type(parent), obj: parent } unless nodes.key?(pid)
+
+      children.each do |child, grandchildren|
+        cid = flow_node_path(child)
+        nodes[cid] = { type: flow_node_type(child), obj: child } unless nodes.key?(cid)
+
+        # Determine edge type and direction.
+        # In the graph hash the parent-child relationship is:
+        #   chat(String)  -> job(Step)   : the chat references the job
+        #   job(Step)     -> agent_chat  : the job's agent log
+        #   job(Step)     -> dep(Step)   : the job depends on dep
+        #
+        # Flow edges express dependencies in the natural direction:
+        #   result     : job  -> chat  (job produces result for chat)
+        #   log        : job  -> agent (job spawned agent chat)
+        #   dependency : dep  -> job   (dep feeds into dependent job)
+        if Step === parent
+          if Step === child
+            edge = [cid, pid, :dependency]
+          else
+            edge = [pid, cid, :log]
+          end
+        else
+          edge = [cid, pid, :result]
+        end
+        edges << edge unless edges.include?(edge)
+
+        extract_flow(children, nodes, edges)
+      end
+    end
+    [nodes, edges]
+  end
+
+  @flow_nodes, @flow_edges = extract_flow(graph)
+
+  # --- Token computation ---
+
+  def flow_chat(path)
+    @flow_chats ||= {}
+    @flow_chats[path] ||= (Chat.load(path) rescue nil)
+  end
+
+  def flow_object_tokens(type, path)
+    @flow_tok_cache ||= {}
+    key = [type, path]
+    return @flow_tok_cache[key] if @flow_tok_cache.key?(key)
+
+    @flow_tok_cache[key] =
+      case type
+      when :job
+        log_paths = @flow_edges.select { |f, _, e| f == path && e == :log }
+                               .map { |_, t, _| t }
+        log_paths.sum do |lp|
+          c = flow_chat(lp)
+          c ? Chat.token_totals([c])[:tt].to_i : 0
+        end
+      else
+        c = flow_chat(path)
+        c ? Chat.token_totals([c])[:tt].to_i : 0
+      end
+  end
+
+  # --- Filtering: suppress default agent.chat logs that duplicate the job node ---
+
+  def default_answer_log?(path)
+    return false unless path.end_with?('.files/log/agent.chat')
+    job_path = path.sub(/\.files\/log\/agent\.chat$/, '')
+    return false unless @flow_nodes.dig(job_path, :type) == :job
+    flow_object_tokens(:job, job_path) == flow_object_tokens(:agent, path)
+  end
+
+  def visible_flow_nodes
+    @flow_nodes.reject do |path, info|
+      info[:type] == :agent && default_answer_log?(path)
+    end
+  end
+
+  def visible_flow_edges
+    vis = visible_flow_nodes.keys
+    @flow_edges.select { |from, to, _| vis.include?(from) && vis.include?(to) }
+  end
+
+  # --- Naming helpers ---
+
+  def flow_job_name(path)
+    info = @flow_nodes[path]
+    return File.basename(path).sub(/^Default_/, '')[0, 12] unless info && Step === info[:obj]
+    job = info[:obj]
+    wf = job.info[:workflow] || job.info['workflow']
+    tk = job.info[:task_name] || job.info['task_name']
+    wf && tk ? "#{wf}/#{tk}" : File.basename(path).sub(/^Default_/, '')[0, 12]
+  end
+
+  def flow_agent_name(path)
+    job_path, relative = path.split('.files/log/', 2)
+    base = flow_job_name(job_path)
+    branch = relative.to_s.sub(%r{/agent\.chat\z}, '').sub(/\.chat\z/, '')
+    branch = 'agent' if branch.empty? || branch == 'agent'
+    branch.start_with?('chat') ? branch.sub(/^chats\//, '') : "#{base}/#{branch}"
+  end
+
+  def flow_chat_name(path)
+    path =~ %r{/chats/(.+)\z} ? $1.sub(/\.chat\z/, '') : File.basename(path, '.chat')
+  end
+
+  def flow_object_name(type, path)
+    case type
+    when :job   then flow_job_name(path)
+    when :agent then flow_agent_name(path)
+    else             flow_chat_name(path)
+    end
+  end
+
+  def flow_object_id(type, path)
+    return File.basename(path).sub(/^Default_/, '')[0, 8] if type == :job
+    return File.basename(path.split('.files/', 2).first).sub(/^Default_/, '')[0, 8] if type == :agent
+    Misc.digest(path)[0, 8]
+  end
+
+  def short_number(n)
+    return format('%.1fM', n / 1_000_000.0) if n >= 1_000_000
+    return format('%.1fk', n / 1_000.0)     if n >= 1_000
+    n.to_i.to_s
+  end
+
+  # --- Sorted node list (jobs first by topological order, then chats/agents) ---
+
+  def ordered_flow_nodes
+    vis = visible_flow_nodes
+    # Build dependency predecessor map for topological sort of jobs
+    preds = Hash.new { |h, k| h[k] = [] }
+    @flow_edges.each do |from, to, etype|
+      next unless etype == :dependency
+      preds[to] << from if vis.key?(to) && vis.key?(from)
+    end
+    ordered = []
+    visited = Set.new
+    visit = lambda do |path|
+      next if visited.include?(path)
+      visited << path
+      preds[path].uniq.sort.each { |p| visit.call(p) }
+      ordered << path
+    end
+    vis.select { |_, info| info[:type] == :job }.keys.sort.each { |p| visit.call(p) }
+
+    job_list = ordered
+    other_list = vis.reject { |_, info| info[:type] == :job }.keys.sort
+    job_list + other_list
+  end
+
+  # --- Text flow output ---
+
+  def print_flow
+    nodes = ordered_flow_nodes
+    vis = visible_flow_nodes
+    indexes = nodes.each_with_index.to_h { |p, i| [p, i + 1] }
+
+    puts 'Flow'
+    puts '===='
+    nodes.each do |path|
+      info = vis[path]
+      type = info[:type]
+      name = flow_object_name(type, path)
+      tok  = short_number(flow_object_tokens(type, path))
+      id   = flow_object_id(type, path)
+      puts format('[%2d] %-5s %-42s %8s %s', indexes[path], type.to_s.capitalize, name, tok, id)
+    end
+    puts
+    visible_flow_edges.each do |from, to, etype|
+      puts format('[%2d] --%-10s--> [%2d]', indexes[from], etype, indexes[to])
+    end
+  end
+
+  # --- DOT output ---
+
+  def flow_dot
+    require 'json'
+    nodes = ordered_flow_nodes
+    vis = visible_flow_nodes
+    ids = nodes.each_with_index.to_h { |p, i| [p, "n#{i}"] }
+
+    lines = [
+      'digraph scout_ai_flow {',
+      '  graph [rankdir=LR, bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.6];',
+      '  node [fontname="Helvetica", fontsize=10];',
+      '  edge [fontname="Helvetica", fontsize=8, arrowsize=0.7];'
+    ]
+    nodes.each do |path|
+      info = vis[path]
+      type = info[:type]
+      name = flow_object_name(type, path)
+      tok  = short_number(flow_object_tokens(type, path))
+      id   = flow_object_id(type, path)
+      label = "#{type.capitalize}\n#{name}\n#{tok} tokens  #{id}"
+      shape = type == :job ? 'box' : type == :agent ? 'component' : 'note'
+      lines << %(  #{ids[path]} [shape=#{shape}, style="rounded,filled", fillcolor="#f7f7f7", label=#{JSON.generate(label)}];)
+    end
+    edge_style = {
+      result:     'color="#39804a", penwidth=1.5, label="result"',
+      dependency: 'color="#333333", label="dependency"',
+      log:        'color="#2864a5", style="dashed", label="log"'
+    }
+    visible_flow_edges.each do |from, to, etype|
+      lines << %(  #{ids[from]} -> #{ids[to]} [#{edge_style[etype]}];)
+    end
+    lines << '}'
+    lines * "\n"
+  end
+
+  # --- SVG / PNG / PDF output via Graphviz ---
+
+  def write_flow(dot_file: nil, plot_file: nil)
+    dot = flow_dot
+    Open.write(dot_file, dot) if dot_file
+    return unless plot_file
+
+    ext = File.extname(plot_file).sub(/^\./, '').downcase
+    ext = 'svg' if ext.empty?
+    raise ParameterException, "Unsupported plot format: #{ext}" unless %w[svg png pdf].include?(ext)
+
+    require 'tempfile'
+    Tempfile.create(['scout-ai-flow', '.dot']) do |f|
+      f.write(dot)
+      f.flush
+      raise ScoutException, 'Graphviz dot failed' unless system('dot', "-T#{ext}", f.path, '-o', plot_file.to_s)
+    end
+  end
+
+  print_flow if flow
+  write_flow(dot_file: dot_file, plot_file: plot_file) if dot_file || plot_file
 end

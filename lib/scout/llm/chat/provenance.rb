@@ -26,11 +26,10 @@ module Chat
   end
 
   def self.tokens(chat)
-    chats = provenance_chat_files(chat).collect{|file| 
+    chats = provenance_chat_files(chat).collect{|file|
       @@chat_file ||= {}
-      @@chat_file[file] ||= Chat.load file 
+      @@chat_file[file] ||= Chat.load file
     }
     Chat.token_totals(chats)
   end
-
 end

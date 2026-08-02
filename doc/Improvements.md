@@ -17,58 +17,30 @@ Each entry includes a priority to help triage effort:
 
 ## Code Issues
 
-### 1. `prov` command monkey-patches the `Chat` class
+### 1. ~~`prov` command monkey-patches the `Chat` class~~
 
 **Priority:** High
 
-**File:** `scout_commands/llm/prov`
-
-**Problem:**
-The `prov` command redefines existing library methods at runtime by
-monkey-patching the `Chat` class and `Step`:
-
-| Method | Status |
-|---|---|
-| `Chat.trace_chats` | Redefined (overrides library version in `lib/scout/llm/chat/process/meta.rb`) |
-| `Chat.token_totals` | Redefined |
-| `Chat.job_agent_chat_files` | Redefined |
-| `Chat.provenance` | New monkey-patch (not in library) |
-| `Chat.provenance_chat_files` | New monkey-patch |
-| `Chat.tokens` | New monkey-patch |
-| `Step#agent_chats` | New monkey-patch |
-
-This means running `prov` mutates global class behavior for the duration of
-the process. The newer `info` command achieves the same provenance inspection
-**without any monkey-patching**, using library APIs directly.
-
-**Recommended action:**
-Deprecate `prov` in favor of `info`. Consider removing `prov` entirely once
-`info` is confirmed to cover all use cases. If `prov` is kept temporarily,
-document it clearly as superseded.
+> **Status: Resolved.** The `info` command has been removed entirely. Its
+> provenance-traversal and flow-graph logic (`LLMInfoReport`) has been promoted
+> to `Chat::ProvenanceFlow` in `lib/scout/llm/chat/provenance/flow.rb`. The
+> `prov` command now uses this library class for flow/DOT/SVG output, while
+> retaining its original text-tree mode (which uses the existing `Chat`
+> library methods, not monkey-patches). The flow-graph capabilities of `info`
+> (imports, job deduplication, DOT, SVG/PNG/PDF) are now available via
+> `scout-ai llm prov -f`, `--dot`, and `-p`/`--plot`.
 
 **Sources:** [../research/commands-analysis.md](../research/commands-analysis.md), [../research/provenance-analysis.md](../research/provenance-analysis.md).
 
 ---
 
-### 2. `prov` command has a hardcoded fallback path
+### 2. ~~`prov` command has a hardcoded fallback path~~
 
 **Priority:** High
 
-**File:** `scout_commands/llm/prov`, near the end of the script
-
-**Problem:**
-When no argument is provided, `prov` falls back to a developer-specific path:
-
-```
-~/git/workflows/SC26/chats/network_usecase/3.1.themes
-```
-
-This path will be missing or broken on any other machine, producing a confusing
-error rather than a clear usage message.
-
-**Recommended action:**
-Remove the hardcoded fallback. If no argument is provided, print usage
-instructions and exit. The `info` command has no such hardcoded path.
+> **Status: Resolved.** The hardcoded fallback path has been removed. The
+> `prov` command now raises `MissingParameterException` if no filename is
+> provided, matching the behavior of other CLI commands.
 
 **Sources:** [../research/commands-analysis.md](../research/commands-analysis.md).
 
@@ -133,14 +105,18 @@ workflow). Low priority since the current guide covers the essentials.
 The `ChatAnalyst` agent (currently in `~/git/workflows/SC26/Agent/ChatAnalyst/`)
 implements a `Session` class with BFS-based provenance discovery, token
 accounting, and edge-graph construction. The `info` CLI command independently
-implements similar logic (`LLMInfoReport`). Having two implementations of the
+implemented similar logic (`LLMInfoReport`). Having two implementations of the
 same traversal algorithm is a maintenance burden.
 
+> **Partial progress:** The `LLMInfoReport` logic has been promoted to
+> `Chat::ProvenanceFlow` in `lib/scout/llm/chat/provenance/flow.rb`, and the
+> `info` command has been removed. The `prov` command now consumes this shared
+> implementation. ChatAnalyst should be updated to consume
+> `Chat::ProvenanceFlow` as well.
+
 **Recommended action:**
-Promote the shared provenance traversal logic (discovery, token accounting,
-graph edges) into the core library (e.g., `lib/scout/llm/chat/provenance/`).
-Both `info` and `ChatAnalyst` should consume the same core implementation.
-This would also make the traversal available to third-party tools.
+Update ChatAnalyst's `Session` class to delegate to `Chat::ProvenanceFlow`
+instead of maintaining its own BFS traversal.
 
 **Sources:** [../research/provenance-analysis.md](../research/provenance-analysis.md), [../research/multi-agent-patterns-analysis.md](../research/multi-agent-patterns-analysis.md).
 
@@ -164,19 +140,17 @@ extension point in [developer/PromptProcessing.md](developer/PromptProcessing.md
 
 ---
 
-### A3. Remove `prov` command; let `info` subsume it entirely
+### A3. ~~Remove `prov` command; let `info` subsume it entirely~~
 
 **Priority:** Medium
 
-**Problem:**
-The `info` command is strictly more capable than `prov` (import discovery, job
-deduplication, flow visualization, Graphviz output, no monkey-patching, no
-hardcoded paths). Maintaining both commands is unnecessary.
-
-**Recommended action:**
-After confirming that `info` covers all `prov` use cases, deprecate `prov`
-with a deprecation warning, then remove it in a future release. Update
-[../research/commands-analysis.md](../research/commands-analysis.md) to remove the `prov` entry once removed.
+> **Status: Resolved (inverted).** The `info` command has been removed instead.
+> Its provenance-traversal and flow-graph logic (`LLMInfoReport`) has been
+> promoted to `Chat::ProvenanceFlow` in the core library
+> (`lib/scout/llm/chat/provenance/flow.rb`). The `prov` command now provides
+> both the text-tree report and the flow/DOT/SVG capabilities that were
+> formerly in `info`, using the shared library class. `prov` is the sole
+> provenance CLI command.
 
 **Sources:** [../research/commands-analysis.md](../research/commands-analysis.md), [../research/provenance-analysis.md](../research/provenance-analysis.md).
 

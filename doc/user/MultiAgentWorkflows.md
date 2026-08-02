@@ -191,7 +191,6 @@ When agents run inside workflow tasks, their conversations are automatically
 saved as provenance. You can inspect them:
 
 ```bash
-scout-ai llm info /path/to/job
 scout-ai llm prov /path/to/job
 ```
 
