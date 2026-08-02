@@ -329,4 +329,86 @@ assistant: Done again
     assert output.include?('cache_write=10')
     assert output.include?('reasoning=20')
   end
+
+  # === Quoted-value serialization/parsing tests ===
+
+  def test_serialize_meta_quotes_value_containing_equals
+    serialized = Chat.serialize_meta('reas' => 'thinking about a=b')
+    assert_equal 'reas="thinking about a=b"', serialized
+  end
+
+  def test_serialize_meta_does_not_quote_simple_values
+    serialized = Chat.serialize_meta('pt' => 10, 'job' => 'WF/ask/test.chat')
+    assert_equal 'pt=10 job=WF/ask/test.chat', serialized
+  end
+
+  def test_parse_meta_handles_quoted_value_with_equals
+    parsed = Chat.parse_meta('pt=10 reas="thinking about a=b"')
+    assert_equal 10, parsed[:pt]
+    assert_equal 'thinking about a=b', parsed[:reas]
+  end
+
+  def test_roundtrip_value_with_equals
+    meta = { 'pt' => 10, 'reas' => 'thinking about a=b and c=d', 'job' => 'WF/ask/test.chat' }
+    parsed = Chat.parse_meta(Chat.serialize_meta(meta))
+    assert_equal meta, parsed
+  end
+
+  def test_roundtrip_value_with_quotes_and_backslashes
+    meta = { 'reas' => 'He said "hello" and a=b\c', 'pt' => 5 }
+    parsed = Chat.parse_meta(Chat.serialize_meta(meta))
+    assert_equal meta, parsed
+  end
+
+  def test_backward_compat_unquoted_value_with_spaces
+    parsed = Chat.parse_meta('pt=10 ct=5 tt=15 reas=some text here')
+    assert_equal 10, parsed[:pt]
+    assert_equal 5, parsed[:ct]
+    assert_equal 15, parsed[:tt]
+    assert_equal 'some text here', parsed[:reas]
+  end
+
+  def test_backward_compat_job_and_reas_without_equals
+    parsed = Chat.parse_meta('job=WF/ask/test.chat reas=thinking about stuff')
+    assert_equal 'WF/ask/test.chat', parsed[:job]
+    assert_equal 'thinking about stuff', parsed[:reas]
+  end
+
+  def test_multiple_quoted_values_roundtrip
+    meta = { 'reas' => 'a=b', 'note' => 'c=d', 'pt' => 5 }
+    parsed = Chat.parse_meta(Chat.serialize_meta(meta))
+    assert_equal meta, parsed
+  end
+
+  def test_realistic_roundtrip
+    meta = { 'pt' => 100, 'ct' => 50, 'tt' => 150,
+             'reas' => 'The user asked for x=y, so I computed z=2',
+             'job' => 'WF/ask/test.chat' }
+    parsed = Chat.parse_meta(Chat.serialize_meta(meta))
+    assert_equal meta, parsed
+  end
+
+  # === Unescaped inner quotes in quoted values ===
+
+  def test_parse_meta_unescaped_quotes_inside_quoted_value
+    parsed = Chat.parse_meta(%q{pt=100 reas="Some text with ["/path/to/file"] inside."})
+    assert_equal 100, parsed[:pt]
+    assert_equal 'Some text with ["/path/to/file"] inside.', parsed[:reas]
+  end
+
+  def test_parse_meta_unescaped_quotes_and_keyval_patterns_inside_quoted
+    parsed = Chat.parse_meta(%q{pt=100 rt_c=10 reas="text total=48M prompt=47M end. accurate."})
+    assert_equal 100, parsed[:pt]
+    assert_equal 10, parsed[:rt_c]
+    assert_nil parsed[:total]
+    assert_nil parsed[:prompt]
+    assert_equal 'text total=48M prompt=47M end. accurate.', parsed[:reas]
+  end
+
+  def test_parse_meta_quoted_value_then_following_keys
+    parsed = Chat.parse_meta(%q{pt=100 reas="a=b" ct=200})
+    assert_equal 100, parsed[:pt]
+    assert_equal 'a=b', parsed[:reas]
+    assert_equal 200, parsed[:ct]
+  end
 end

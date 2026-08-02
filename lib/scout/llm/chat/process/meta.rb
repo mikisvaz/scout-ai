@@ -70,23 +70,56 @@ module Chat
     result
   end
 
+  # Serialize a meta hash into a single space-separated string of key=value
+  # pairs.  Values that contain '=' are wrapped in double quotes so that the
+  # '=' inside them is not mistaken for a key/value delimiter during parsing.
+  # Backslashes and double quotes inside quoted values are escaped.
+  #
+  # Keys are sorted by value string length (ascending) so that the longest
+  # free-text value appears last; this preserves backward compatibility with
+  # the unquoted parser path where the final value extends to end-of-string.
   def self.serialize_meta(meta)
     keys = meta.keys.sort_by { |key| String === meta[key] ? meta[key].length : 0 }
-    keys.collect { |key| [key, meta[key]] * '=' } * ' '
+    keys.collect do |key|
+      value     = meta[key]
+      str_value = value.to_s
+      if str_value.include?('=')
+        escaped = str_value.gsub('\\') { '\\\\' }.gsub('"') { '\\"' }
+        %Q(#{key}="#{escaped}")
+      else
+        "#{key}=#{str_value}"
+      end
+    end * ' '
   end
 
+  # Parse a serialized meta string back into an IndiferentHash.
+  #
+  # Each token is key=value where value may be:
+  #   * A double-quoted string (used when the value contains '='):
+  #       key="some text with = inside"
+  #     Backslash escapes inside quotes are unescaped.
+  #   * An unquoted bare value that may contain spaces but not '=':
+  #       key=some text here
+  #     The value boundary is detected by a lookahead for the next
+  #     ' key=' pattern or end-of-string.
+  #
+  # ScoutCoder: when the quoted value contains inner double quotes that were
+  # not escaped during serialization (e.g. reasoning text that embeds file
+  # paths like ["/path"]), the quoted-value alternative must not terminate at
+  # the first inner quote.  The inner quote is only treated as the closing
+  # quote when it is followed by a new key= boundary or end-of-string.  This
+  # is achieved with a negative lookahead inside the character class:
+  # "(?!\s+[^\s=]+=|\s*\z)
   def self.parse_meta(str)
-    parts = str.to_s.split('=')
+    str = str.to_s
     meta = IndiferentHash.setup({})
-    key = parts.shift
-    while next_part = parts.shift
-      if parts.any?
-        rnext_part = next_part.reverse
-        rkey, _, rvalue = rnext_part.partition(/\s+/)
-        next_key = rkey.reverse
-        value = rvalue.reverse
+    return meta if str.empty?
+
+    str.scan(/([^\s=]+)=("(?:[^"\\]|\\.|"(?!\s+[^\s=]+=|\s*\z))*"|.*?)(?=\s+[^\s=]+=|\s*\z)/m).each do |key, raw|
+      value = if raw.start_with?('"') && raw.end_with?('"')
+        raw[1..-2].gsub(/\\(.)/) { $1 }
       else
-        value = next_part
+        raw
       end
 
       meta[key] = case value
@@ -94,7 +127,6 @@ module Chat
                   when /^-?\d+\.\d+$/ then value.to_f
                   else value
                   end
-      key = next_key
     end
 
     meta
@@ -189,7 +221,7 @@ module Chat
   end
 
   def job_agent_chat_files
-    jobs.flat_map { |job| Chat.job_chat_files(job) }.uniq
+    jobs.flat_map { |job| Chat.job_agent_chat_files(job) }.uniq
   end
 
   def job_chats

@@ -112,6 +112,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   provenance_and_accounting
 
   test.meta
+
+  parse_meta
  }
  lib=lib {
   scout-ai.rb
@@ -283,6 +285,37 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     brothers
     marriages
     parents
+   }
+  }
+  scout=scout{
+   llm=llm{
+    test_agent.rb
+    test_ask.rb
+    test_chat.rb
+    test_embed.rb
+    test_mcp.rb
+    test_parse.rb
+    test_rag.rb
+    test_tools.rb
+    test_utils.rb
+    chat=chat{
+     test_parse.rb
+     test_process.rb
+     process=process{
+      test_meta.rb
+      test_normalize_usage.rb
+     }
+    }
+    backends=backends{
+     test_anthropic.rb
+     test_bedrock.rb
+     test_huggingface.rb
+     test_ollama.rb
+     test_openai.rb
+     test_openwebui.rb
+     test_relay.rb
+     test_responses.rb
+    }
    }
   }
   test_helper.rb
