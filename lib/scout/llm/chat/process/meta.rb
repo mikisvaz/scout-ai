@@ -189,8 +189,7 @@ module Chat
   end
 
   def self.job_agent_chat_files(job)
-    job = Step.load(job) unless Step === job
-    job.file('log').glob('**/*.chat')
+    direct_job_chat_files(job)
   end
 
   # Return the result and logged chats for a job and all its dependencies.
@@ -221,7 +220,11 @@ module Chat
   end
 
   def job_agent_chat_files
-    jobs.flat_map { |job| Chat.job_agent_chat_files(job) }.uniq
+    jobs.flat_map do |job|
+      Chat.provenance_chat_files(job, root_type: :job).select do |file|
+        file.include?('.files/log/')
+      end
+    end.uniq
   end
 
   def job_chats
@@ -229,15 +232,15 @@ module Chat
   end
 
   def job_agent_chats
-    jobs.flat_map { |job| Chat.job_agent_chat_files(job) }.uniq
+    job_agent_chat_files.collect { |file| Chat.load(file) }
   end
 
   # A lineage id identifies a message in its non-meta conversational history.
   # Meta is deliberately excluded from that history: it starts a response
   # segment but is not provider input.
-  def message_index
+  def message_index(source: nil)
     previous = nil
-    collect do |message|
+    each_with_index.collect do |message, position|
       role = message[:role].to_s
       content = message[:content].to_s
       id = Misc.digest([previous, role, content])
@@ -247,6 +250,7 @@ module Chat
         prev: previous,
         fingerprint: Log.truncate_string(content)
       }
+      info[:address] = [source.to_s, position] if source
       if role == 'meta'
         info[:meta] = Chat.parse_meta(content)
       else
@@ -263,12 +267,21 @@ module Chat
     seen = Set.new
     trace = []
     add = lambda do |pending|
-      return if pending.nil? || seen.include?(pending[:id])
-      seen << pending[:id]
+      return if pending.nil?
+      inference_id = pending[:meta][:inference_id]
+      deduplication = inference_id ? :inference_id : :legacy_lineage
+      dedup_key = inference_id ? [:inference_id, inference_id] : [:lineage, pending[:id]]
+      return if seen.include?(dedup_key)
+      seen << dedup_key
       trace << {
         id: pending[:id],
+        lineage_id: pending[:id],
+        inference_id: inference_id,
+        deduplication: deduplication,
+        meta_address: pending[:address],
         meta: IndiferentHash.setup(pending[:meta].except(:reas)),
         messages: pending[:messages],
+        message_addresses: pending[:message_addresses],
         orphan: pending[:messages].empty?
       }
     end
@@ -279,12 +292,18 @@ module Chat
         case info[:role]
         when :meta
           add.call(pending)
-          pending = { id: info[:id], meta: info[:meta], messages: [] }
+          pending = {
+            id: info[:id], meta: info[:meta], address: info[:address],
+            messages: [], message_addresses: []
+          }
         when :user, :system
           add.call(pending)
           pending = nil
         else
-          pending[:messages] << info[:id] if pending
+          if pending
+            pending[:messages] << info[:id]
+            pending[:message_addresses] << info[:address] if info[:address]
+          end
         end
       end
       add.call(pending)
@@ -295,6 +314,14 @@ module Chat
 
   def self.trace_chats(chats)
     trace_indices(chats.collect(&:message_index))
+  end
+
+  # Trace chats while preserving the persisted address of every meta and
+  # covered message. Sources may be a Hash of path => Chat or an Array of
+  # [path, Chat] pairs.
+  def self.trace_chat_sources(sources)
+    pairs = sources.to_a
+    trace_indices(pairs.collect { |source, chat| chat.message_index(source: source) })
   end
 
   # Select trace entries that carry direct token counts (not job projections).

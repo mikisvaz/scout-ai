@@ -411,4 +411,40 @@ assistant: Done again
     assert_equal 'a=b', parsed[:reas]
     assert_equal 200, parsed[:ct]
   end
+  def test_backend_assigns_distinct_inference_ids
+    first = LLM::Responses.update_meta(response(prompt: 2, completion: 3, total: 5))
+    second = LLM::Responses.update_meta(response(prompt: 2, completion: 3, total: 5))
+    assert_not_nil first['inference_id']
+    assert_not_equal first['inference_id'], second['inference_id']
+  end
+
+  def test_inference_id_controls_trace_deduplication
+    copied = chat <<-EOF
+user: Work
+meta: inference_id=request-one pt=2 ct=3 tt=5
+assistant: Done
+    EOF
+    repeated = chat <<-EOF
+user: Work
+meta: inference_id=request-two pt=2 ct=3 tt=5
+assistant: Done
+    EOF
+
+    assert_equal 1, Chat.trace_chats([copied, copied]).length
+    trace = Chat.trace_chats([copied, repeated])
+    assert_equal 2, trace.length
+    assert_equal [:inference_id, :inference_id], trace.collect { |entry| entry[:deduplication] }
+  end
+
+  def test_source_aware_trace_preserves_addresses
+    conversation = chat <<-EOF
+user: Work
+meta: inference_id=request-one tt=5
+assistant: Done
+    EOF
+    entry = Chat.trace_chat_sources('/tmp/work.chat' => conversation).first
+    assert_equal ['/tmp/work.chat', 2], entry[:meta_address]
+    assert_equal [['/tmp/work.chat', 3]], entry[:message_addresses]
+  end
+
 end

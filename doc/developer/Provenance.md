@@ -1,183 +1,210 @@
-# Provenance
+# Navigating inference provenance
 
-This document explains how Scout-AI records, traverses, and reports the
-lineage of every inference — across imported chats, ask-job results, nested
-agent logs, and dependency chains. It is intended for framework contributors.
+This document explains how Scout-AI links persisted chats, Workflow jobs, agent logs, inference segments, and tool calls. It is intended for framework contributors and developers building provenance-aware tools.
 
-> For deep code investigation, see
-> [../../research/provenance-analysis.md](../../research/provenance-analysis.md).
+For the detailed investigation and design rationale, see [../../research/provenance-navigation-design.md](../../research/provenance-navigation-design.md).
 
----
+## Core model
 
-## What provenance is
+Scout-AI provenance combines two native Scout data models:
 
-Scout-AI does not have a standalone provenance database. Instead, provenance
-information is **embedded inline in the chat transcript** as special `meta:`
-messages. Every inference leaves a trace that can be followed to reconstruct
-the full chain of model calls, tool executions, and delegated agent work.
+- a **Chat file** is a persisted Array of messages;
+- a **Workflow Step** is a persisted task execution with dependencies, status, result, and artifacts.
 
-Provenance serves three purposes:
-1. **Cost tracking** — Token counts for each inference.
-2. **Lineage reconstruction** — Which job produced which response segment.
-3. **Multi-agent audit** — What did each delegated agent see and produce.
+These are the only structural node kinds. Agents, inference segments, tool calls, and token records are observations inside chats or jobs rather than separate runtime wrapper objects.
 
----
+The structural relations are:
 
-## The meta message
+| Parent | Relation | Child | Meaning |
+|---|---|---|---|
+| chat | `job` | job | A projected response was produced by a Workflow job. |
+| job | `dependency` | job | A normal Scout Workflow dependency. |
+| job | `log` | chat | A persisted agent conversation under `.files/log/**/*.chat`. |
+| job | `result` | chat | The job result is itself a chat file. |
 
-A meta message has `role: meta` and a content string in `key=value` format:
+Relations describe root-outward discovery. A renderer may reverse `job` or `dependency` when drawing natural data flow.
 
-```
-meta: pt=1234 ct=567 tt=1801 pt_s=5000 ct_s=2000 tt_s=7000 pt_c=15000 reas=...
-```
+Imported and continued chats are **not** provenance relations. They are a chat-compilation concern resolved during `Chat.parse` and `LLM.chat`. The persisted `.chat` file already contains the full inlined conversation. Provenance traversal therefore never follows `import`, `continue`, or `last` chat references.
+
+## Safe persisted-chat loading
+
+Provenance inspection uses `Chat.load(file)`. It parses the persisted messages without compiling the chat. It therefore does not execute `task`, `job`, `file`, `import`, tool, or other control roles.
+
+Do not use `LLM.chat` to inspect historical evidence: that method compiles control roles for inference.
+
+## Structural traversal
+
+`Chat.traverse_provenance` is the authoritative traversal primitive. It accepts a chat file or Step and yields native `Path` and `Step` values:
+
+    Chat.traverse_provenance(root, root_type: :chat) do |
+      kind, object, parent_kind, parent, relation, first_visit
+    |
+      # kind is :chat or :job
+    end
+
+Without a block it returns an Enumerator.
+
+The root has nil parent and relation. Every structural edge is yielded. When a shared dependency or cycle reaches an already visited node, `first_visit` is false and the node is not expanded again. Node identity includes both kind and path, because a chat-producing Step and its result chat can share a filesystem path.
+
+By default, loading and resolution errors are raised. Analytical callers that need partial results can supply `on_error`:
+
+    warnings = []
+    records = Chat.traverse_provenance(
+      root,
+      on_error: ->(error, kind, object, relation, reference) {
+        warnings << [error, kind, object, relation, reference]
+      }
+    ).to_a
+
+This distinguishes absent evidence from evidence that could not be read.
+
+The `follow` option can restrict traversal to selected relations. The supported values are `job`, `dependency`, `log`, and `result`.
+
+### Collectors
+
+Thin collectors use the same traversal:
+
+- `Chat.provenance_chat_files(root)` returns every discovered chat path;
+- `Chat.provenance_jobs(root)` returns every discovered Step;
+- `Chat.provenance_edges(root)` returns typed structural edges;
+- `Chat.tokens(root)` sums direct inference usage from discovered chats.
+
+`Chat.provenance` remains as a compatibility collector. New code should use the traversal or typed edges because the compatibility Hash does not represent job nodes and relation types fully.
+
+### Direct-neighbour helpers
+
+Direct readers do not recurse:
+
+- `Chat.direct_job_chat_files(job)` returns chat logs owned directly by a job;
+- `Chat.job_result_chat_file(job)` returns a chat result when present.
+
+Recursion belongs only to `traverse_provenance`.
+
+## Meta messages and inference segments
+
+A meta message has role `meta` and content serialized as key/value pairs. Two important forms are:
+
+1. **Direct inference metadata**, containing fields such as `pt`, `ct`, and `tt`.
+2. **Job projection metadata**, containing `job=<path>` and no direct inference cost.
+
+`Chat.project(job, messages)` removes direct inference metadata from projected output and adds one producer marker. The original agent log retains actual inference usage.
 
 ### Token fields
 
 | Field | Meaning |
 |---|---|
-| `pt` | Prompt tokens (this inference) |
-| `ct` | Completion tokens (this inference) |
-| `tt` | Total tokens (this inference) |
-| `pt_s`, `ct_s`, `tt_s` | Session cumulative (per-thread running totals) |
-| `pt_c`, `ct_c`, `tt_c` | Chat cumulative (persisted across requests) |
-| `reas` | Reasoning summary (truncated) |
+| `pt`, `ct`, `tt` | Prompt, completion, and total tokens for one request. |
+| `cct`, `cwt`, `rt` | Cache-hit, cache-write, and reasoning tokens for one request. |
+| `*_c` | Running total represented by this chat. It is a checkpoint, not an additive event. |
+| `*_s` | Process/thread session snapshot. It is not attributable by itself. |
+| `inference_id` | Scout-generated identity for one actual backend request. |
+| `provider_response_id` | Provider response identity when available. |
+| `job` | Producer Step for a projected response segment. |
+| `reas` | Optional reasoning summary. |
 
-### Job-reference field
+Every new direct inference receives a locally generated `inference_id`. This distinguishes genuinely repeated requests even when their conversation, response, and token counts are identical. Copied chat history retains the original ID and is counted once.
 
-| Field | Meaning |
-|---|---|
-| `job` | Canonical path of the Scout workflow job that produced this segment |
+Legacy chats without an inference ID fall back to conversational lineage deduplication. Reports that require precision should expose whether an entry used `inference_id` or `legacy_lineage` deduplication.
 
-### Two kinds of meta messages
+Never sum `*_c` or `*_s` snapshots. Sum direct fields from deduplicated direct inference segments.
 
-1. **Direct inference meta** — Contains `pt`/`ct`/`tt`. Records one actual model call.
-2. **Job projection meta** — Contains only `job=<path>`. Marks a response projected from an ask-workflow job. Has zero direct token cost — the actual tokens are in the job's own agent logs and dependency chain.
+## Message identity and location
 
----
+Scout-AI distinguishes two concepts:
 
-## Lineage IDs and message_index
+- a **lineage ID** identifies equivalent conversational content;
+- a **message address** identifies one persisted location as `[chat_path, index]`.
 
-`Chat#message_index` computes a lineage ID for each message:
+`chat.message_index(source: path)` includes both. Meta messages do not advance conversational lineage because providers do not receive them.
 
-```ruby
-id = Misc.digest([previous_id, role, content])
-```
+Use lineage IDs for detecting copied history. Use addresses to retrieve exact persisted messages.
 
-Each message's lineage ID incorporates the **previous conversational message's
-ID** (meta messages are excluded from the lineage chain). This creates a
-hash-chain where `prev` links each message to its predecessor.
+## Response tracing
 
-Each message also gets a `fingerprint` — a truncated head/tail digest for
-compact comparison.
+`Chat.trace_chats(chats)` groups messages into response segments. A meta message opens a segment; another meta or a user/system turn closes it.
 
-### Response segments
+`Chat.trace_chat_sources(path_to_chat)` is the source-aware form. Its records include:
 
-`Chat.traceIndices(indices)` groups messages into response segments:
-- Each `meta:` message **opens** a new segment, seeded with the parsed metadata.
-- `user` and `system` messages **close** any pending segment.
-- Segments are the unit of provenance traversal.
+- `lineage_id`;
+- `inference_id` when present;
+- `deduplication`, either `inference_id` or `legacy_lineage`;
+- `meta_address`;
+- covered message lineage IDs;
+- covered `message_addresses`;
+- parsed metadata;
+- orphan status.
 
----
+`Chat.direct_entries(chats)` selects direct inference segments. `Chat.token_totals(chats)` sums all canonical direct token fields.
 
-## Job traversal
+## Tool-call analysis
 
-Chat tasks in AgentWorkflow project their results via `Chat.project(job, messages)`,
-which wraps the messages with a `meta job=<path>` marker. This creates a chain:
+`Chat.tool_calls(chat, source: path)` pairs `function_call` and `mcp_call` messages with `function_call_output` messages by call ID. It returns plain Hash records containing call/output addresses, parsed records, arguments, and output content.
 
-```
-Top-level chat
-  → meta: job=Planned/work/Default_abc
-      → Planned/work chat
-          → meta: job=Worker/ask/Default_def
-              → Worker's internal chat (in log/ directory)
-```
+Pairing is structural. Success interpretation is separate:
 
-### Key traversal methods
+    call = Chat.tool_calls(chat, source: path).first
+    status = Chat.tool_call_status(call)
 
-| Method | Returns |
-|---|---|
-| `chat.job_paths` / `chat.jobs` | Array of `Path` objects from `meta job=...` messages |
-| `chat.job_chat_files` | All chat files reachable from this chat's jobs and their dependencies |
-| `chat.job_agent_chat_files` | All `log/**/*.chat` files (delegated agent logs) |
-| `chat.job_chats` | All Chat objects loaded from job_chat_files |
-| `chat.job_agent_chats` | All Chat objects from agent log files |
+The common status policy treats:
 
-These methods traverse the Scout job dependency graph recursively, so a
-multi-agent pipeline's full inference chain is recoverable from the top-level
-chat alone.
+- missing output as unknown;
+- JSON containing `exception` as failure;
+- JSON containing non-zero `exit_status` as failure;
+- any other persisted output as success.
 
----
+Provider call IDs are scoped to a chat; do not assume they are globally unique across files.
 
-## CLI commands
+Calls named `ask` or `hand_off_to_*` provide semantic evidence of delegation. Workflow-backed calls have structural job/log links. A socialized call's association with a society log may still be inferred from naming conventions, so reports should label that association as inferred rather than authoritative.
 
-### `scout-ai llm prov`
+## Workflow failures and partial provenance
 
-The sole command for inspecting provenance. It provides:
+Traversal visits jobs regardless of `done?`. Error and aborted Steps may still have dependencies, Step info, results, or partial agent logs. Status and exception details remain authoritative in Step info.
 
-- Hierarchical provenance tree with token totals (default mode).
-- Job references and their dependencies.
-- Compact flow report (`-f` / `--flow`).
-- Graphviz DOT output (`--dot FILE`).
-- SVG / PNG / PDF rendering (`-p FILE` / `--plot FILE`).
+Backend request failures currently preserve emergency chat/options/meta snapshots through the backend exception mechanism. If these snapshots are later moved under an owning Step's files directory or linked from Step info, normal provenance traversal can expose them without introducing a separate Session abstraction.
 
-The default text-tree mode uses `report()` to traverse the entire provenance
-graph (chats, jobs, agent logs, dependencies), accumulating a nested hash of
-the full tree as it goes. When flow/DOT/SVG output is requested, the flow
-rendering code consumes that same accumulated hash (produced by a single
-`report()` call) to extract nodes and edges — no separate traversal is
-performed.
+## `scout-ai llm prov`
+
+The `prov` command consumes `Chat.traverse_provenance` once and then separates:
+
+1. discovery of nodes and typed edges;
+2. direct token analysis;
+3. tree, compact flow, DOT, and plot rendering.
 
 Usage:
 
-```bash
-# Text-tree report (default)
-scout-ai llm prov <chat>
+    scout-ai llm prov path/to/chat
+    scout-ai llm prov path/to/chat --flow
+    scout-ai llm prov path/to/chat --dot flow.dot
+    scout-ai llm prov path/to/chat --plot flow.svg
 
-# Compact numbered flow
-scout-ai llm prov <chat> -f
+The default tree is a spanning-tree presentation of a DAG. Repeated nodes are displayed as seen references rather than recursively expanded. Compact and graphical flows choose natural data-flow arrow direction during rendering without changing traversal semantics.
 
-# Write Graphviz DOT to a file
-scout-ai llm prov <chat> --dot out.dot
+Job token values describe direct chat logs owned by that job. They do not silently include the complete dependency subtree.
 
-# Render an SVG (also supports .png and .pdf)
-scout-ai llm prov <chat> -p out.svg
-```
+## ChatAnalyst
 
-> The former `scout-ai llm info` command has been removed. Its SVG
-> dependency-graph functionality is now fully available through `prov`.
+ChatAnalyst uses the same core traversal. It does not define Session, ChatGraph, ProvenanceContext, or node wrapper classes. Each Workflow task collects temporary report state in ordinary Hashes and Arrays and applies shared Chat operations for message indexing, tracing, tool-call pairing, and token accounting.
 
----
+This keeps responsibilities separate:
 
-## ChatAnalyst integration
-
-The `ChatAnalyst` agent (from `~/git/workflows/SC26/Agent/`) is a specialist
-agent designed to inspect persisted chat sessions, agent logs, tool calls, and
-token usage. It uses the provenance traversal methods to:
-
-1. Load a top-level chat.
-2. Follow the job dependency chain.
-3. Load delegated agent chats from `log/` directories.
-4. Produce structured summaries of inference workloads.
-
-This makes it possible to ask an agent: "How did this multi-agent system handle
-this inference workload?" and get a grounded, provenance-backed answer.
-
----
+- Scout-AI owns persisted structural navigation and Chat analysis primitives;
+- ChatAnalyst owns agent-oriented JSON reports;
+- `prov` owns human and Graphviz rendering;
+- Workflow Step info owns execution lifecycle and failure provenance.
 
 ## Key source files
 
 | File | Responsibility |
 |---|---|
-| `lib/scout/llm/chat/process/meta.rb` | Meta serialization, `message_index`, `trace_indices`, job traversal |
-| `lib/scout/llm/backends/default.rb` | `update_meta` — writes token fields after inference |
-| `lib/scout/llm/agent/workflow.rb` | `Chat.project` — wraps job results with `meta job=` |
-| `lib/scout/llm/chat/provenance.rb` | `Chat.provenance`, `Chat.tokens` — provenance traversal and token totals |
-| `scout_commands/llm/prov` | CLI provenance inspection (text tree + flow/DOT/SVG, all from a single `report()` traversal) |
-
----
+| `lib/scout/llm/chat/provenance.rb` | Structural traversal, direct neighbours, and collectors. |
+| `lib/scout/llm/chat/process/meta.rb` | Meta parsing, lineage, source-aware tracing, projections, and token totals. |
+| `lib/scout/llm/chat/tool_calls.rb` | Tool-call pairing and common status interpretation. |
+| `lib/scout/llm/backends/default.rb` | Direct token metadata and inference identities. |
+| `lib/scout/llm/agent/workflow.rb` | Agent log persistence and chat-task projection. |
+| `scout_commands/llm/prov` | Tree, flow, DOT, and plot rendering. |
 
 ## Cross-references
 
-- [ChatLifecycle.md](ChatLifecycle.md) — How meta messages fit in the chat structure.
-- [../../research/provenance-analysis.md](../../research/provenance-analysis.md) — Deep investigation.
-- [../../research/multi-agent-patterns-analysis.md](../../research/multi-agent-patterns-analysis.md) — ChatAnalyst agent.
+- [ChatLifecycle.md](ChatLifecycle.md) — Chat data and compilation.
+- [DelegationInternals.md](DelegationInternals.md) — Socialized and delegated agents.
+- [../../research/provenance-navigation-design.md](../../research/provenance-navigation-design.md) — Investigation, alternatives, and migration rationale.

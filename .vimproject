@@ -120,6 +120,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   read_job
 
   repeated_tool_calls
+
+  provenance
  }
  lib=lib {
   scout-ai.rb

@@ -426,6 +426,11 @@ module LLM
         # to the chat total: doing that on every request produces the observed
         # triangular (and, after aggregation, worse) growth.
         meta = IndiferentHash.setup(tokens.dup)
+        # A lineage digest identifies copied conversational history, not an
+        # actual backend request. Persist a request identity so provenance can
+        # distinguish two genuinely repeated, otherwise identical inferences.
+        meta['inference_id'] = SecureRandom.uuid
+        meta['provider_response_id'] = response['id'] if response['id']
         tokens.each do |name, value|
           session_name = name + '_s'
           Thread.current[session_name] = Thread.current[session_name].to_i + value.to_i
