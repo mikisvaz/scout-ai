@@ -113,13 +113,16 @@ module LLM
 
     agents = tool_call_content.collect{|p| p.last }.select{|c| LLM::Agent === c }
 
-    cpus = Scout::Config.get(:cpus, :agent_ask, :agents, env: 'ASK_AGENTS', default: 3)
     agent_answers = TSV.setup({})
-    Open.traverse (0..agents.length-1).to_a, cpus: cpus, bar: 'Asking agents', type: :list, into: agent_answers do |i|
-      agent = agents[i]
-      res = agent.chat return_messages: true
-      [i, res]
-    end if agents.any?
+
+    if agents.any?
+      cpus = Scout::Config.get(:cpus, :agent_ask, :agents, env: 'ASK_AGENTS', default: 3)
+      Open.traverse (0..agents.length-1).to_a, cpus: cpus, bar: 'Asking agents', type: :list, into: agent_answers do |i|
+        agent = agents[i]
+        res = agent.chat return_messages: true
+        [i, res]
+      end
+    end
 
     tool_call_content.collect do |function_name,function_arguments,tool_call_id,tool_call,content|
       if Step === content

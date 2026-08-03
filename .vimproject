@@ -118,6 +118,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   fix_info
 
   read_job
+
+  repeated_tool_calls
  }
  lib=lib {
   scout-ai.rb
@@ -136,6 +138,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      persist.rb
      process.rb
      prompt.rb
+     prompt=prompt{
+      shorten_tools.rb
+      shorten_tools_epoch.rb
+     }
      provenance.rb
      process=process{
       clear.rb

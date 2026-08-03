@@ -126,9 +126,18 @@ module LLM
             raise exception
           end
         else
-          raise exception
+          begin
+            self.save_state
+          rescue
+            Log.exception $!
+          ensure
+            raise exception
+          end
         end
       end
+    end
+
+    def save_state
     end
 
     def prompt(messages, options = {})
