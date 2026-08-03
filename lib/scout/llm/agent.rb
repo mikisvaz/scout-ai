@@ -29,7 +29,7 @@ module LLM
         @workflow ||= begin
                         m = Module.new
                         m.extend Workflow
-                        m.name ||= 'ScoutAgent'
+                        m.name = 'ScoutAgent'
                         m.tasks = {}
                         m
                       end
@@ -86,7 +86,7 @@ module LLM
       begin
 
         if workflow || knowledge_base
-          tools.merge!(LLM.workflow_tools(workflow)) if workflow
+          tools.merge!(LLM.workflow_tools(workflow)) if workflow && workflow.tasks.any?
           tools.merge!(LLM.knowledge_base_tool_definition(knowledge_base)) if knowledge_base and knowledge_base.all_databases.any?
         end
 

@@ -60,7 +60,7 @@ module LLM
     if not workflow.exec_exports.include?(task_name.to_sym)
       properties[:return_path] = {
         type: 'boolean',
-        description: 'Instead of the result of the job, return the path were it is persisted'
+        description: 'Instead of the result of the job, return the path where it is persisted'
       }
     end
 
@@ -114,6 +114,7 @@ module LLM
       else
         if return_path
           job.run(true)
+          Chat.allow_read_dir job.path
           job.path
         else
           raise ScoutException, 'Potential recursive call' if allow_recursive != 'true' &&
