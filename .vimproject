@@ -122,8 +122,14 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   repeated_tool_calls
 
   provenance
+  provenance.2
+  provenance.3
+
+  analysis.themes
+  analysis.themes.2
+  analysis.themes.3
  }
- lib=lib {
+lib=lib {
   scout-ai.rb
   scout=scout{
    network=network{
@@ -132,19 +138,27 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     entity.rb
    }
    llm=llm{
-    utils.rb
+    agent.rb
+    ask.rb
     chat.rb
+    embed.rb
+    image.rb
+    mcp.rb
+    rag.rb
+    tools.rb
+    utils.rb
     chat=chat{
      annotation.rb
      parse.rb
      persist.rb
      process.rb
      prompt.rb
+     provenance.rb
+     tool_calls.rb
      prompt=prompt{
       shorten_tools.rb
       shorten_tools_epoch.rb
      }
-     provenance.rb
      process=process{
       clear.rb
       files.rb
@@ -153,47 +167,30 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
       tools.rb
      }
     }
-    tools.rb
     tools=tools{
+     call.rb
+     knowledge_base.rb
      mcp.rb
      workflow.rb
-     knowledge_base.rb
-     call.rb
     }
-
     backends=backends{
-     default.rb
-
-     responses.rb
-     openai.rb
-     ollama.rb
      anthropic.rb
-     vllm.rb
-     huggingface.rb
-     openwebui.rb
-
      bedrock.rb
+     default.rb
+     huggingface.rb
+     ollama.rb
+     openai.rb
+     openwebui.rb
      relay.rb
+     responses.rb
+     vllm.rb
     }
-
-    ask.rb
-
-    embed.rb
-
-    image.rb
-
-    rag.rb
-
-    mcp.rb
-
-    agent.rb
     agent=agent{
      chat.rb
      delegate.rb
      iterate.rb
      workflow.rb
     }
-
    }
    model=model{
     util=util{

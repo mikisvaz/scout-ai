@@ -154,7 +154,7 @@ module Chat
           message[:role].to_s + ": " + message[:content].to_s
         else
           re = Regexp.new(/^([a-z]+:)(\s)/ms)
-		  re = Regexp.new(re.source.encode(message[:content].encoding), re.options)
+          re = Regexp.new(re.source.encode(message[:content].to_s.encoding), re.options)
           message[:role].to_s + ":\n\n" +
             message[:content].to_s.gsub(re, '\\\\\1\2')
         end

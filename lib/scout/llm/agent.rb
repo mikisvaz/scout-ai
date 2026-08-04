@@ -110,7 +110,7 @@ module LLM
           if options[:return_messages]
             messages
           else
-            Chat.answer messages
+            Chat.setup(messages).answer
           end
         else
           options[:tools] = tools

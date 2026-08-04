@@ -37,6 +37,27 @@ module Chat
     on_error.call(error, kind, object, relation, reference)
   end
 
+  # Resolve a job reference from a chat meta message into a Step. References
+  # like "Planned/ask/Default_abc.chat" are relative workflow paths. Step.load
+  # may resolve them to a Scout-specific directory that does not contain the
+  # actual job data, so we fall back to checking Rbbt.var.jobs and Scout.var.jobs.
+  def self.load_job_reference(reference)
+    return reference if Step === reference
+    ref_str = reference.to_s
+
+    step = Step.load(ref_str)
+    return step if File.exist?(step.path.to_s) || File.exist?(step.path.to_s + '.info')
+
+    # Step.load resolves relative workflow paths (e.g. Planned/ask/Default_xyz.chat)
+    # via Path.find, which may point to a directory that does not contain the
+    # actual job data (e.g. ~/.scout/ instead of ~/.rbbt/var/jobs/). Try the
+    # standard Rbbt workflow storage location as a fallback.
+    rbbt_candidate = File.expand_path(File.join('~/.rbbt/var/jobs', ref_str))
+    return Step.load(rbbt_candidate) if File.exist?(rbbt_candidate) || File.exist?(rbbt_candidate + '.info')
+
+    step
+  end
+
   # Traverse the heterogeneous provenance graph using native Path and Step
   # values. The block receives:
   #
@@ -90,7 +111,7 @@ module Chat
           if relations.include?(:job)
             chat.jobs.each do |reference|
               begin
-                job = Step === reference ? reference : Step.load(reference)
+                job = load_job_reference(reference)
                 queue << [:job, job, :chat, object, :job]
               rescue StandardError => error
                 provenance_error(on_error, error, :chat, object, :job, reference)

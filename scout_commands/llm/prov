@@ -17,7 +17,9 @@ Examine the provenance of a chat or workflow job
 $ #{cmd} [<options>] <filename>
 
 -h--help Print this help
+-c--component Show per-component direct costs instead of aggregate totals
 -f--flow Print a compact provenance flow
+-l--long Show full filesystem paths instead of abbreviated names
 --dot* Write the flow as Graphviz DOT
 -p--plot* Render the flow as svg, png, or pdf
 EOF
@@ -26,9 +28,11 @@ if options[:help]
   exit 0
 end
 
+component = options.delete(:component)
 flow = options.delete(:flow)
 dot_file = options.delete(:dot)
 plot_file = options.delete(:plot)
+long = options.delete(:long)
 filename = ARGV.first
 raise MissingParameterException, :filename if filename.nil?
 
@@ -53,6 +57,9 @@ records = Chat.traverse_provenance(
   end
 ).to_a
 
+# ------------------------------------------------------------------
+# Build graph: nodes keyed by [kind, path], edges as {from, to, relation}
+# ------------------------------------------------------------------
 nodes = {}
 edges = []
 records.each do |kind, object, parent_kind, parent, relation, first_visit|
@@ -73,16 +80,32 @@ records.each do |kind, object, parent_kind, parent, relation, first_visit|
 end
 root_key = Chat.provenance_key(root_type, root)
 
+# Adjacency: parent -> children, sorted for readability
+adjacency = Hash.new { |h, k| h[k] = [] }
+edges.each do |edge|
+  adjacency[edge[:from]] << edge
+end
+RELATION_ORDER = { dependency: 0, log: 1, job: 2, result: 3 }
+adjacency.each_value do |children|
+  children.sort_by! { |e| RELATION_ORDER[e[:relation]] || 99 }
+end
+
+# ------------------------------------------------------------------
+# Token computation
+# ------------------------------------------------------------------
 chat_cache = {}
-node_tokens = lambda do |key|
+
+# Direct tokens for a single node:
+#   chat  -> its own direct inference tokens
+#   job   -> sum of tokens from its direct log chats (agent.chat + society chats)
+direct_tokens = lambda do |key|
   node = nodes[key]
   if node[:kind] == :chat
     chat = chat_cache[node[:path]] ||= Chat.load(node[:path])
     Chat.token_totals([chat])
   else
-    logs = edges.select { |edge| edge[:from] == key && edge[:relation] == :log }
-                .collect { |edge| nodes[edge[:to]][:path] }
-                .uniq
+    logs = edges.select { |e| e[:from] == key && e[:relation] == :log }
+                .collect { |e| nodes[e[:to]][:path] }.uniq
     chats = logs.collect { |path| chat_cache[path] ||= Chat.load(path) }
     Chat.token_totals(chats)
   end
@@ -91,48 +114,123 @@ rescue => error
   Chat::TOKEN_KEYS.each_with_object({}) { |name, totals| totals[name.to_sym] = 0 }
 end
 
-def provenance_report_line(kind, label, tokens, offset: 0, relation: nil, repeated: false)
-  color = kind == :job ? :yellow : :green
-  parts = [' ' * offset]
-  parts << Log.color(color, kind.to_s)
-  parts << Log.color(:magenta, relation.to_s) if relation
-  parts << Chat.print_tokens(tokens)
-  parts << Log.color(:blue, label.to_s)
-  parts << Log.color(:cyan, '(seen)') if repeated
-  parts.reject(&:empty?) * ' '
+# Aggregate tokens: sum of direct tokens across ALL reachable chat files
+# (deduplicated by path). This is the total cost of the provenance subtree.
+aggregate_cache = {}
+aggregate_tokens = lambda do |key|
+  return aggregate_cache[key] if aggregate_cache.key?(key)
+  visited = Set.new
+  stack = [key]
+  reachable_chats = []
+  while stack.any?
+    k = stack.pop
+    next if visited.include?(k)
+    visited << k
+    node = nodes[k]
+    reachable_chats << node[:path] if node[:kind] == :chat
+    (adjacency[k] || []).each { |e| stack << e[:to] }
+  end
+  unique_paths = reachable_chats.uniq
+  chats = unique_paths.collect { |path| chat_cache[path] ||= Chat.load(path) }
+  aggregate_cache[key] = Chat.token_totals(chats)
+rescue => error
+  Chat::TOKEN_KEYS.each_with_object({}) { |name, totals| totals[name.to_sym] = 0 }
 end
 
-def provenance_node_label(node, parent_node = nil)
+# Select mode: aggregate (default) or component (direct)
+node_tokens = component ? direct_tokens : aggregate_tokens
+
+# ------------------------------------------------------------------
+# Visibility: which nodes should be shown?
+# ------------------------------------------------------------------
+# Hidden nodes are skipped entirely — not printed and not traversed.
+#   - result-relation chats: they duplicate the job node and create cycles
+#   - top-level agent.chat log file (log/agent.chat): its cost is subsumed
+#     by the parent job.  Sub-agent conversations in nested directories
+#     (e.g. log/worker-theme_1/agent.chat) are real independent inferences
+#     and must be shown.
+def top_level_agent_chat?(path)
+  return false unless File.basename(path) == 'agent.chat'
+  parent = File.dirname(path)
+  parent.end_with?('/log') || parent.end_with?('/log/')
+end
+
+def hidden_node?(node, relation)
+  return true if relation == :result
+  return true if relation == :log && top_level_agent_chat?(node[:path])
+  false
+end
+
+# ------------------------------------------------------------------
+# Formatting helpers
+# ------------------------------------------------------------------
+def token_str(tokens)
+  parts = []
+  parts << "total=#{Misc.human_number(tokens[:tt])}" if tokens[:tt] && tokens[:tt].to_i > 0
+  parts << "prompt=#{Misc.human_number(tokens[:pt])}" if tokens[:pt] && tokens[:pt].to_i > 0
+  parts << "cont=#{Misc.human_number(tokens[:ct])}" if tokens[:ct] && tokens[:ct].to_i > 0
+  parts << "cache=#{Misc.human_number(tokens[:cct])}" if tokens[:cct] && tokens[:cct].to_i > 0
+  parts << "reason=#{Misc.human_number(tokens[:rt])}" if tokens[:rt] && tokens[:rt].to_i > 0
+  parts * ' '
+end
+
+def report_line(kind, label, tokens, offset: 0)
+  color = kind == :job ? :yellow : :green
+  parts = [' ' * (offset * 2)]
+  parts << Log.color(color, kind.to_s)
+  tok = token_str(tokens)
+  parts << tok unless tok.empty?
+  parts << Log.color(:blue, label.to_s) unless label.to_s.empty?
+  parts * ' '
+end
+
+def job_short_id(path)
+  File.basename(path).sub(/^Default_/, '')[0, 8]
+end
+
+def node_label(node, parent_node = nil, root_key = nil, key = nil, long = false)
   path = node[:path]
+  return path if long
   if node[:kind] == :job
     job = node[:object]
     workflow = job.info[:workflow] || job.info['workflow']
     task = job.info[:task_name] || job.info['task_name']
-    workflow && task ? "#{workflow}/#{task} #{path}" : path
+    short_id = job_short_id(path)
+    workflow && task ? "#{workflow}/#{task} #{short_id}" : short_id
   elsif parent_node && parent_node[:kind] == :job && path.include?('.files/log/')
-    Misc.path_relative_to(parent_node[:object].file('log'), path)
+    # Log chat under a job: show path relative to the job's log directory.
+    # Derive log dir from parent_node path (which is the realpath) to avoid
+    # symlink-resolution mismatches between the Step object and node path.
+    parent_log_dir = File.join(parent_node[:path] + ".files", "log")
+    rel = Misc.path_relative_to(parent_log_dir, path)
+    rel.nil? || rel.empty? ? File.basename(path) : rel
+  elsif key == root_key && node[:kind] == :chat
+    # Root chat: show basename
+    File.basename(path)
   else
     path
   end
 end
 
-# The default display is a spanning tree of the provenance DAG. Additional
-# incoming edges are printed as seen references rather than recursively
-# expanded.
+# ------------------------------------------------------------------
+# Tree rendering (default mode)
+# ------------------------------------------------------------------
 unless flow || dot_file || plot_file
-  adjacency = edges.group_by { |edge| edge[:from] }
   printed = Set.new
   print_tree = lambda do |key, offset, relation, parent_key|
-    repeated = printed.include?(key)
+    # Skip already-visited nodes entirely (no "(seen)" line)
+    return if printed.include?(key)
+
     node = nodes[key]
-    parent_node = parent_key && nodes[parent_key]
-    puts provenance_report_line(
-      node[:kind], provenance_node_label(node, parent_node), node_tokens.call(key),
-      offset: offset, relation: relation, repeated: repeated
-    )
-    return if repeated
+    parent_node = parent_key ? nodes[parent_key] : nil
+
+    # Skip hidden nodes entirely — don't print, don't traverse children
+    return if hidden_node?(node, relation)
 
     printed << key
+    puts report_line(node[:kind], node_label(node, parent_node, root_key, key, long),
+                     node_tokens.call(key), offset: offset)
+
     (adjacency[key] || []).each do |edge|
       print_tree.call(edge[:to], offset + 1, edge[:relation], key)
     end
@@ -140,9 +238,10 @@ unless flow || dot_file || plot_file
   print_tree.call(root_key, 0, nil, nil)
 end
 
-# Convert root-outward discovery relations into natural data-flow arrows for
-# compact and graphical renderers. Node identity remains [kind, path], so a
-# chat result and its producing Step may safely share a filesystem path.
+# ------------------------------------------------------------------
+# Flow / DOT / SVG mode
+# ------------------------------------------------------------------
+# Convert root-outward discovery relations into natural data-flow arrows.
 flow_edges = edges.collect do |edge|
   case edge[:relation]
   when :job
@@ -154,45 +253,62 @@ flow_edges = edges.collect do |edge|
   end
 end.uniq
 
-def short_number(number)
-  number = number.to_i
-  return format('%.1fM', number / 1_000_000.0) if number >= 1_000_000
-  return format('%.1fk', number / 1_000.0) if number >= 1_000
-  number.to_s
-end
-
 if flow || dot_file || plot_file
-  # Jobs are shown in dependency order, followed by chat files. This ordering
-  # affects presentation only; traversal order remains breadth-first.
-  job_keys = nodes.keys.select { |kind, _path| kind == :job }
-  predecessors = Hash.new { |hash, key| hash[key] = [] }
+  # Determine visible nodes using same rules as tree mode.
+  hidden_keys = Set.new
+  nodes.each do |key, node|
+    # top-level agent.chat is hidden; nested ones are visible
+    hidden_keys << key if node[:kind] == :chat && top_level_agent_chat?(node[:path])
+    # result-relation chats that duplicate a job (same path)
+    if node[:kind] == :chat
+      has_job_same_path = nodes.any? do |k, n|
+        n[:kind] == :job && n[:path] == node[:path]
+      end
+      hidden_keys << key if has_job_same_path
+    end
+  end
+  visible_keys = nodes.keys.reject { |k| hidden_keys.include?(k) }
+  visible_set = Set.new(visible_keys)
+
+  # Jobs in dependency order, then chat files
+  job_keys = visible_keys.select { |kind, _path| kind == :job }
+  predecessors = Hash.new { |hash, k| hash[k] = [] }
   flow_edges.each do |edge|
     predecessors[edge[:to]] << edge[:from] if edge[:relation] == :dependency
   end
   ordered_jobs = []
   visited_jobs = Set.new
   visit_job = lambda do |key|
-    return if visited_jobs.include?(key)
+    next if visited_jobs.include?(key)
     visited_jobs << key
-    predecessors[key].sort_by(&:last).each { |dependency| visit_job.call(dependency) }
+    predecessors[key].sort_by(&:last).each { |dep| visit_job.call(dep) }
     ordered_jobs << key
   end
   job_keys.sort_by(&:last).each { |key| visit_job.call(key) }
-  ordered_keys = ordered_jobs + (nodes.keys - job_keys).sort_by(&:last)
+  chat_keys = (visible_keys - job_keys).sort_by(&:last)
+  ordered_keys = ordered_jobs + chat_keys
   indexes = ordered_keys.each_with_index.to_h { |key, index| [key, index + 1] }
+
+  def short_number(number)
+    number = number.to_i
+    return format('%.1fM', number / 1_000_000.0) if number >= 1_000_000
+    return format('%.1fk', number / 1_000.0) if number >= 1_000
+    number.to_s
+  end
 
   if flow
     puts 'Flow'
     puts '===='
     ordered_keys.each do |key|
       node = nodes[key]
-      name = provenance_node_label(node)
+      name = node_label(node, nil, nil, key, long)
       tokens = short_number(node_tokens.call(key)[:tt])
-      id = node[:kind] == :job ? File.basename(node[:path]).sub(/^Default_/, '')[0, 8] : Misc.digest(node[:path])[0, 8]
+      id = node[:kind] == :job ? job_short_id(node[:path]) : Misc.digest(node[:path])[0, 8]
       puts format('[%2d] %-5s %-52s %8s %s', indexes[key], node[:kind].to_s.capitalize, name, tokens, id)
     end
     puts
     flow_edges.each do |edge|
+      next unless visible_set.include?(edge[:from]) && visible_set.include?(edge[:to])
       puts format('[%2d] --%-10s--> [%2d]', indexes[edge[:from]], edge[:relation], indexes[edge[:to]])
     end
   end
@@ -207,7 +323,7 @@ if flow || dot_file || plot_file
     ]
     ordered_keys.each do |key|
       node = nodes[key]
-      label = "#{node[:kind].to_s.capitalize}\n#{provenance_node_label(node)}\n#{short_number(node_tokens.call(key)[:tt])} tokens"
+      label = "#{node[:kind].to_s.capitalize}\n#{node_label(node, nil, nil, key, long)}\n#{short_number(node_tokens.call(key)[:tt])} tokens"
       shape = node[:kind] == :job ? 'box' : 'note'
       lines << %(  #{ids[key]} [shape=#{shape}, style="rounded,filled", fillcolor="#f7f7f7", label=#{JSON.generate(label)}];)
     end
@@ -217,6 +333,7 @@ if flow || dot_file || plot_file
       log: 'color="#2864a5", style="dashed", label="log"'
     }
     flow_edges.each do |edge|
+      next unless visible_set.include?(edge[:from]) && visible_set.include?(edge[:to])
       lines << %(  #{ids[edge[:from]]} -> #{ids[edge[:to]]} [#{styles[edge[:relation]] || "label=#{JSON.generate(edge[:relation].to_s)}"}];)
     end
     lines << '}'
