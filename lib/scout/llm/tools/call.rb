@@ -21,6 +21,7 @@ module LLM
     max_content_length = LLM.max_content_length
     IndiferentHash.setup tools
 
+    start_timestamp = Chat.timestamp
     tool_call_content = calls.collect do |tool_call|
       tool_call = IndiferentHash.setup tool_call
       tool_call_id, function_name, function_arguments = call_id_name_and_arguments(tool_call)
@@ -128,10 +129,12 @@ module LLM
       if Step === content
         step = content
         if content.done?
+          error = false
           content = content.load if content.done?
           content = content.to_s if TSV === content
           content = content.to_json unless String === content
         elsif content.error? && content.exception
+          error = :error
           content = if String === content.exception
                       {exception: content.exception}.to_json
                     else
@@ -143,6 +146,7 @@ module LLM
             content = content.to_s if TSV === content
             content = content.to_json unless String === content
           rescue
+            error = :error
             content = {exception: $!.message, stack: $!.backtrace }.to_json
           end
         end
@@ -159,6 +163,7 @@ module LLM
         exception_msg += " The results was persisted at '#{step.path}'." if step
         Log.high exception_msg
         content = {exception: exception_msg, stack: caller}.to_json
+        error = :truncated
       end
 
       Log.high "Called #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}): " + Log.fingerprint(content)
@@ -166,8 +171,23 @@ module LLM
       response_message = {
         name: function_name,
         content: content,
-        id: tool_call_id
+        id: tool_call_id,
       }
+
+      response_message[:error] = error if error
+
+      if step
+        response_message.merge!(
+          step: step.short_path,
+          start_timestamp: start_timestamp,
+          timestamp: Chat.timestamp
+        )
+      else
+        response_message.merge!(
+          start_timestamp: start_timestamp,
+          timestamp: Chat.timestamp
+        )
+      end
 
 
       [ 

@@ -520,6 +520,8 @@ module LLM
                      end
         end
 
+        timestamp = Chat.timestamp
+
         if process
           Scout.var.query.response[process].set_extension(:json).write response.to_json
           return response
@@ -556,6 +558,7 @@ module LLM
         if log_response
           meta = self.update_meta response, current_meta
           meta['reas'] = reasoning if reasoning
+          meta['timestamp'] = timestamp
         end
 
         output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta, relay: relay)

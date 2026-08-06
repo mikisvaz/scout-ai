@@ -1,4 +1,5 @@
 require 'set'
+require 'time'
 
 module Chat
   PROVENANCE_RELATIONS = %i[job dependency log result].freeze
@@ -199,5 +200,9 @@ module Chat
   def self.tokens(root, **options)
     chats = provenance_chat_files(root, **options).collect { |file| Chat.load(file) }
     Chat.token_totals(chats)
+  end
+
+  def self.timestamp
+    Time.now.utc.iso8601(3)
   end
 end
