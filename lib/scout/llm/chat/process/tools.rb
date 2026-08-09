@@ -1,18 +1,31 @@
 module Chat
 
-  def self.allow_dir(dir)
-    Thread.current['allowed_dirs'] ||= []
-    return if Thread.current['allowed_dirs'].include?(dir)
-    Log.medium "Allow #{dir}"
-    Thread.current['allowed_dirs'] << dir
+  def self.allow_path(path)
+    Thread.current['allowed_paths'] ||= []
+    return if Thread.current['allowed_paths'].include?(path)
+    Log.medium "Allow #{path}"
+    Thread.current['allowed_paths'] << path
   end
 
-  def self.allow_read_dir(dir)
-    Thread.current['allowed_read_dirs'] ||= []
-    return if Thread.current['allowed_read_dirs'].include?(dir)
-    Log.medium "Allow read #{dir}"
-    Thread.current['allowed_read_dirs'] << dir
+  def self.allow_read_path(path)
+    Thread.current['allowed_read_paths'] ||= []
+    return if Thread.current['allowed_read_paths'].include?(path)
+    Log.medium "Allow read #{path}"
+    Thread.current['allowed_read_paths'] << path
   end
+
+  def self.allow_job(job)
+    allow_path(job.path)
+    allow_path(job.info_file)
+    allow_path(job.files_dir)
+  end
+
+  def self.allow_read_job(job)
+    allow_read_path(job.path)
+    allow_read_path(job.info_file)
+    allow_read_path(job.files_dir)
+  end
+
 
   def self.load_workflow(workflow)
     workflow = begin

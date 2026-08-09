@@ -128,6 +128,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   analysis.themes
   analysis.themes.2
   analysis.themes.3
+
+  allow.test
  }
 lib=lib {
   scout-ai.rb
@@ -138,15 +140,13 @@ lib=lib {
     entity.rb
    }
    llm=llm{
-    agent.rb
     ask.rb
-    chat.rb
     embed.rb
     image.rb
     mcp.rb
     rag.rb
-    tools.rb
     utils.rb
+    chat.rb
     chat=chat{
      annotation.rb
      parse.rb
@@ -167,6 +167,7 @@ lib=lib {
       tools.rb
      }
     }
+    tools.rb
     tools=tools{
      call.rb
      knowledge_base.rb
@@ -185,6 +186,7 @@ lib=lib {
      responses.rb
      vllm.rb
     }
+    agent.rb
     agent=agent{
      chat.rb
      delegate.rb

@@ -57,7 +57,7 @@ module LLM
           job = Step.load Path.setup(job_path)
           jobs = [job] + job.rec_dependencies.to_a
           jobs.each do |job|
-            Chat.allow_read_dir job.files_dir if Open.exist?(job.files_dir)
+            Chat.allow_read_job job
           end
         rescue
           Log.exception $!

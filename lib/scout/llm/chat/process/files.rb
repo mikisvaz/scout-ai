@@ -94,13 +94,13 @@ module Chat
         job = Step.load job_path
         job = job.step(step) unless job.task_name == step
         {role: 'assistant', content: job.load.answer  }
-      elsif message[:role] == 'allow_dir'
-        dir = message[:content].to_s.strip
-        Chat.allow_dir(dir)
+      elsif message[:role] == 'allow_path'
+        path = message[:content].to_s.strip
+        Chat.allow_path(path)
         nil
-      elsif message[:role] == 'allow_read_dir'
-        dir = message[:content].to_s.strip
-        Chat.allow_read_dir(dir)
+      elsif message[:role] == 'allow_read_path'
+        path = message[:content].to_s.strip
+        Chat.allow_read_path(path)
         nil
       else
         message

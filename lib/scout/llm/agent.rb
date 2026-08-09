@@ -101,8 +101,7 @@ module LLM
 
           job = workflow.job(:ask, chat: Chat.print(messages))
           self.job = job
-          Chat.allow_dir job.files_dir
-          Chat.allow_read_dir workflow.directory
+          Chat.allow_job job
           job.clean if ENV['SCOUT_NO_ASK_CACHE'] == 'true'
           job.produce
           

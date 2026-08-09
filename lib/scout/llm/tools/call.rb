@@ -114,14 +114,15 @@ module LLM
 
     agents = tool_call_content.collect{|p| p.last }.select{|c| LLM::Agent === c }
 
-    agent_answers = TSV.setup({})
+    agent_answers = TSV.setup({}, key_field: 'Pos', fields: ['Content', 'Job path'], type: :list)
 
     if agents.any?
       cpus = Scout::Config.get(:cpus, :agent_ask, :agents, env: 'ASK_AGENTS', default: 3)
       Open.traverse (0..agents.length-1).to_a, cpus: cpus, bar: 'Asking agents', type: :list, into: agent_answers do |i|
         agent = agents[i]
         res = agent.chat return_messages: true
-        [i, res]
+        path = Step === agent.job ? agent.job.path : nil
+        [i, [res, path]]
       end
     end
 
@@ -151,7 +152,13 @@ module LLM
           end
         end
       elsif LLM::Agent === content
-        res = agent_answers[agents.index(content)]
+        res, path = agent_answers[agents.index(content)]
+
+        begin
+          Chat.allow_read_job Step.load(path) 
+        rescue
+        end if path
+
         content.current_chat.follow(res)
         content = content.answer
       else
