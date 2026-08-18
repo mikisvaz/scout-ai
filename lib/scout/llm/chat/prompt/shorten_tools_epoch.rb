@@ -262,8 +262,10 @@ module Chat
                "full=#{full} compacted=#{compacted} truncated=#{truncated_count} dropped=#{dropped_count} " \
                "protected=#{protected_positions.length}"
 
+    kept_messages = kept_messages.reverse
+
 	if dropped_count > 0 || truncated_count > 0
-	  kept_messages << {
+	  compaction_message = {
 		role: :user,
 		content: <<~TEXT.chomp
 	  === Context Management ===
@@ -278,9 +280,19 @@ module Chat
 	  Earlier tool results may no longer be present in the visible conversation history. If information appears to be missing, it may have been removed during context compaction rather than never existing. The absence of an earlier tool result in the current conversation does not necessarily mean that the tool has not already been executed.
 		TEXT
 	  }
-	end
 
-	kept_messages.reverse
+      index = kept_messages.rindex do |msg|
+        [:function_call, :function_call_output].include?(msg[:role].to_sym)
+      end
+
+      if index
+        kept_messages.insert(index + 1, compaction_message)
+      else
+        kept_messages << compaction_message
+      end
+    end
+
+    Chat.setup(kept_messages)
   end
 
   # --- repeated-call detection (forward pre-pass) ---
@@ -292,47 +304,47 @@ module Chat
   # pair.  Positions in this set should never be dropped.
   #
   def self.build_protected_positions(messages, total_tool_outputs)
-	protected = Set.new
+    protected = Set.new
 
-	fwd_pos = 0
-	pending_call_keys = {}  # id → dedup_key (set by function_call, consumed by output)
-	key_positions = Hash.new { |h, k| h[k] = [] }
+    fwd_pos = 0
+    pending_call_keys = {}  # id → dedup_key (set by function_call, consumed by output)
+    key_positions = Hash.new { |h, k| h[k] = [] }
 
-	messages.each do |msg|
-	  case msg[:role].to_sym
-	  when :function_call
-		json = msg[:content]
-		next unless json
-		tool_call = JSON.parse json rescue nil
-		next unless tool_call
-		name      = tool_call['name']
-		arguments = tool_call['arguments']
-		id        = tool_call['id']
-		pending_call_keys[id] = Chat.epoch_dedup_key(name, arguments)
-	  when :function_call_output
-		json = msg[:content]
-		next unless json
-		tool_call = JSON.parse json rescue nil
-		next unless tool_call
-		fwd_pos += 1
-		id   = tool_call['id']
-		key  = pending_call_keys.delete(id)
-		next unless key
-		key_positions[key] << fwd_pos
-	  end
-	end
+    messages.each do |msg|
+      case msg[:role].to_sym
+      when :function_call
+        json = msg[:content]
+        next unless json
+        tool_call = JSON.parse json rescue nil
+        next unless tool_call
+        name      = tool_call['name']
+        arguments = tool_call['arguments']
+        id        = tool_call['id']
+        pending_call_keys[id] = Chat.epoch_dedup_key(name, arguments)
+      when :function_call_output
+        json = msg[:content]
+        next unless json
+        tool_call = JSON.parse json rescue nil
+        next unless tool_call
+        fwd_pos += 1
+        id   = tool_call['id']
+        key  = pending_call_keys.delete(id)
+        next unless key
+        key_positions[key] << fwd_pos
+      end
+    end
 
-	key_positions.each do |key, positions|
-	  next if positions.length <= 1
-	  most_recent_fwd = positions.max
-	  reverse_pos     = total_tool_outputs - most_recent_fwd + 1
-	  protected << reverse_pos
-	end
+    key_positions.each do |key, positions|
+      next if positions.length <= 1
+      most_recent_fwd = positions.max
+      reverse_pos     = total_tool_outputs - most_recent_fwd + 1
+      protected << reverse_pos
+    end
 
-	unless protected.empty?
-	  Log.medium "Epoch: protecting #{protected.length} repeated call(s) from dropping"
-	end
+    unless protected.empty?
+      Log.medium "Epoch: protecting #{protected.length} repeated call(s) from dropping"
+    end
 
-	protected
+    protected
   end
 end
