@@ -85,7 +85,8 @@ if chat
   conversation.message :tool, workflow if workflow
 
   convo_options = LLM.options conversation
-  agent.start(Chat.setup(conversation)) if conversation.any?
+  agent.start
+  agent.follow(Chat.setup(conversation)) if conversation.any?
   agent.current_chat.concat LLM.chat(question) if question && ! question.empty?
   imports.each{|import| agent.import import } if imports
 
