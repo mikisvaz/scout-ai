@@ -441,7 +441,7 @@ module LLM
           meta["#{name}_c"] = current_meta["#{name}_c"].to_i + tokens[name].to_i
         end
 
-        Log.low "Meta: #{Log.fingerprint meta}"
+        Log.medium "Meta: #{Log.fingerprint meta}"
 
         meta
       end
