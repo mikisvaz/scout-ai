@@ -15,6 +15,7 @@ module LLM
 
     endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
 
+    persist ||= Scout::Config.get :persist, :ask, :llm, env: 'ASK_PERSIST,LLM_PERSIST,PERSIST'
     endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT,ENDPOINT,LLM,ASK'
     if endpoint && Scout.etc.AI[endpoint].find_with_extension(:yaml).exists?
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
@@ -48,6 +49,7 @@ module LLM
     Log.medium "Tools: #{Log.fingerprint tools.keys}" if tools
     Log.debug "#{Log.fingerprint tools}}" if tools
 
+    persist = false if persist.to_s.downcase == 'false'
     res = Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist, dir: Scout.var.cache.ask) do
       backend = IndiferentHash.process_options options, :backend
       backend ||= Scout::Config.get :backend, :ask, :llm, env: 'ASK_BACKEND,LLM_BACKEND', default: :responses
