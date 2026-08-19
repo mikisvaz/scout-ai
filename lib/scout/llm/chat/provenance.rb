@@ -2,7 +2,7 @@ require 'set'
 require 'time'
 
 module Chat
-  PROVENANCE_RELATIONS = %i[job dependency log result].freeze
+  PROVENANCE_RELATIONS = %i[job dependency log result agent_job].freeze
 
   # Return only chat logs owned by this job. This method is deliberately not
   # recursive; recursion belongs to traverse_provenance.
@@ -59,6 +59,56 @@ module Chat
     step
   end
 
+  # Resolve one job reference into a usable Step.  Returns [step, nil] when the
+  # job data is loadable (path or .info sidecar exists) and [nil, step] when the
+  # reference resolves to a directory without job data, keeping the would-be
+  # step for diagnostics.  Used by the :agent_job relation so unresolved
+  # receipt references are reported instead of enqueued.
+  def self.resolve_job_reference(reference)
+    step = load_job_reference(reference)
+    path = step.path.to_s
+    if File.exist?(path) || File.exist?(path + '.info')
+      [step, nil]
+    else
+      [nil, step]
+    end
+  end
+
+  # Diagnostics for agent_meta receipt problems found while expanding one chat
+  # node: malformed receipts collected by Chat.agent_meta_job_references plus
+  # outputs whose raw text mentions agent_meta but that Chat.tool_calls cannot
+  # even parse (Chat.agent_meta_unparseable_outputs).  Each record becomes one
+  # Chat.provenance_error call with relation :agent_job and kind/object
+  # :chat + the chat path, so strict mode (no on_error) raises
+  # Chat::AgentMetaError while warning mode keeps going.  Returns the valid job
+  # references so the caller can enqueue them afterwards.
+  def self.report_agent_meta_problems(chat, object, on_error = nil)
+    warnings = []
+    references = agent_meta_job_references(chat, source: object, warnings: warnings)
+    warnings.concat(agent_meta_unparseable_outputs(chat, source: object))
+
+    warnings.each do |warning|
+      error = AgentMetaError.build(warning[:reason],
+                                   chat_path: object.to_s,
+                                   output_address: warning[:output_address],
+                                   call_id: warning[:call_id],
+                                   tool_name: warning[:tool_name],
+                                   reference: warning[:reference] || warning[:raw_entry])
+      reference = agent_meta_error_reference(reason: warning[:reason],
+                                             source: warning[:source] || object.to_s,
+                                             output_address: warning[:output_address],
+                                             evidence_address: warning[:evidence_address],
+                                             call_id: warning[:call_id],
+                                             tool_name: warning[:tool_name],
+                                             agent_meta_index: warning[:agent_meta_index],
+                                             raw_entry: warning[:raw_entry],
+                                             reference: warning[:reference])
+      provenance_error(on_error, error, :chat, object, :agent_job, reference)
+    end
+
+    references
+  end
+
   # Traverse the heterogeneous provenance graph using native Path and Step
   # values. The block receives:
   #
@@ -70,8 +120,9 @@ module Chat
   # false in that case and the node is not expanded again.
   #
   # Relations describe root-outward discovery, not diagram arrow direction:
-  # chat -> producer job (:job), job -> dependency (:dependency), job -> log
-  # chat (:log), and job -> result chat (:result).
+  # chat -> producer job (:job), chat -> delegated-agent producer job
+  # (:agent_job, from agent_meta receipts), job -> dependency (:dependency),
+  # job -> log chat (:log), and job -> result chat (:result).
   #
   # Imported and continued chats are a chat-compilation concern, not a
   # provenance concern. They are resolved during Chat.parse and their content
@@ -116,6 +167,53 @@ module Chat
                 queue << [:job, job, :chat, object, :job]
               rescue StandardError => error
                 provenance_error(on_error, error, :chat, object, :job, reference)
+              end
+            end
+          end
+
+          if relations.include?(:agent_job)
+            # Malformed receipts and unparsable outputs are diagnostics, never
+            # provenance; they are reported through provenance_error and skipped.
+            references = begin
+                           report_agent_meta_problems(chat, object, on_error)
+                         rescue AgentMetaError
+                           raise
+                         rescue StandardError => error
+                           provenance_error(on_error, error, :chat, object, :agent_job, object)
+                           []
+                         end
+
+            references.each do |record|
+              reference = record[:job]
+              begin
+                job, _unresolved = resolve_job_reference(reference)
+                if job
+                  queue << [:job, job, :chat, object, :agent_job]
+                else
+                  error = AgentMetaError.build(:unresolved_job_reference,
+                                               chat_path: object.to_s,
+                                               output_address: record[:output_address],
+                                               call_id: record[:call_id],
+                                               tool_name: record[:tool_name],
+                                               reference: reference)
+                  provenance_error(on_error, error, :chat, object, :agent_job,
+                                   agent_meta_error_reference(reason: :unresolved_job_reference,
+                                                              source: object.to_s,
+                                                              output_address: record[:output_address],
+                                                              evidence_address: record[:evidence_address],
+                                                              call_id: record[:call_id],
+                                                              tool_name: record[:tool_name],
+                                                              reference: reference))
+                end
+              rescue AgentMetaError
+                raise
+              rescue StandardError => error
+                provenance_error(on_error, error, :chat, object, :agent_job,
+                                 agent_meta_error_reference(reason: :unresolved_job_reference,
+                                                            source: object.to_s,
+                                                            reference: reference,
+                                                            call_id: record[:call_id],
+                                                            tool_name: record[:tool_name]))
               end
             end
           end
@@ -197,6 +295,8 @@ module Chat
     prov
   end
 
+  # Provenance token aggregate: sum over all reachable chats (deduplicated by
+  # provenance_chat_files).
   def self.tokens(root, **options)
     chats = provenance_chat_files(root, **options).collect { |file| Chat.load(file) }
     Chat.token_totals(chats)

@@ -38,7 +38,9 @@ class TestChatProvenance < Test::Unit::TestCase
 
   def test_provenance_relations_does_not_include_import
     assert_not_include Chat::PROVENANCE_RELATIONS, :import
-    assert_equal %i[job dependency log result], Chat::PROVENANCE_RELATIONS
+    assert_not_include Chat::PROVENANCE_RELATIONS, :continue
+    assert_not_include Chat::PROVENANCE_RELATIONS, :last
+    assert_equal %i[job dependency log result agent_job], Chat::PROVENANCE_RELATIONS
   end
 
   def test_traverses_job_and_log_relations
