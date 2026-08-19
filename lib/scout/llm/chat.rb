@@ -8,6 +8,7 @@ require_relative 'chat/persist'
 require_relative 'chat/prompt'
 require_relative 'chat/provenance'
 require_relative 'chat/tool_calls'
+require_relative 'chat/agent_meta'
 
 module LLM
   def self.messages(question, role = nil)
