@@ -86,6 +86,11 @@ Call 2: ask(agent="Worker", prompt="Now do Y", conversation="task_1")
 Without a `conversation` name, each call is one-shot (the specialist answers
 and the conversation is not reused).
 
+Each delegated call leaves provenance evidence in the parent chat: the
+specialist's token usage is recorded next to the tool answer, so token costs
+can be traced afterwards with `scout-ai llm prov --evidence`. See the
+[developer provenance guide](../developer/Provenance.md) for details.
+
 ---
 
 ## Named hand-off tools (delegate)

@@ -175,6 +175,17 @@ SOCIAL_PRIVATE_OPTIONS = %i[
 This prevents leaking session state, tool blocks, or message arrays from the
 caller to the specialist.
 
+### Delegated inference receipts
+
+When a delegation tool returns an `LLM::Agent`, `LLM.process_calls`
+serializes the child agent's `meta` messages into the parent
+`function_call_output` envelope as an `agent_meta` array. These receipts are
+provenance evidence, not parent-chat messages: the child's inference metadata
+and producer job reference are read from the paired tool output and never
+injected into the parent chat. Provenance tooling consumes them through
+`Chat.agent_meta_evidence` and the `:agent_job` relation; see
+[Provenance.md](Provenance.md) for the extraction and accounting rules.
+
 ---
 
 ## The `delegate` method — named hand-off
@@ -234,6 +245,7 @@ New code should use `conversation` and `inherit` as separate parameters.
 ## Cross-references
 
 - [../user/Delegation.md](../user/Delegation.md) — User guide to delegation.
+- [Provenance.md](Provenance.md) — Receipt-based provenance for delegated inference.
 - [../user/MultiAgentWorkflows.md](../user/MultiAgentWorkflows.md) — Orchestration patterns.
 - [../../research/agent-delegation-analysis.md](../../research/agent-delegation-analysis.md) — Deep investigation.
 - [../../research/multi-agent-patterns-analysis.md](../../research/multi-agent-patterns-analysis.md) — SC26 patterns.

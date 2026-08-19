@@ -18,6 +18,7 @@ The structural relations are:
 | Parent | Relation | Child | Meaning |
 |---|---|---|---|
 | chat | `job` | job | A projected response was produced by a Workflow job. |
+| chat | `agent_job` | job | A delegated tool call returned an agent whose `job=` receipt names the producer job. |
 | job | `dependency` | job | A normal Scout Workflow dependency. |
 | job | `log` | chat | A persisted agent conversation under `.files/log/**/*.chat`. |
 | job | `result` | chat | The job result is itself a chat file. |
@@ -58,7 +59,7 @@ By default, loading and resolution errors are raised. Analytical callers that ne
 
 This distinguishes absent evidence from evidence that could not be read.
 
-The `follow` option can restrict traversal to selected relations. The supported values are `job`, `dependency`, `log`, and `result`.
+The `follow` option can restrict traversal to selected relations. The supported values are `job`, `dependency`, `log`, `result`, and `agent_job`.
 
 ### Collectors
 
@@ -156,6 +157,36 @@ Provider call IDs are scoped to a chat; do not assume they are globally unique a
 
 Calls named `ask` or `hand_off_to_*` provide semantic evidence of delegation. Workflow-backed calls have structural job/log links. A socialized call's association with a society log may still be inferred from naming conventions, so reports should label that association as inferred rather than authoritative.
 
+## Delegated agent receipts (`agent_meta`)
+
+When a tool returns an `LLM::Agent`, `LLM.process_calls` serializes the child agent's `meta` messages as an `agent_meta` array inside the parent `function_call_output` JSON envelope. The envelope is generic: it is produced for any tool returning an agent, not only for `ask`. Each receipt entry has the shape `{ "role": "meta", "content": "..." }` and carries the child's direct inference metadata (`pt`, `ct`, `tt`, ..., `inference_id`) or a producer reference (`job=<path>`). See [../../research/agent-meta-provenance-integration-plan.md](../../research/agent-meta-provenance-integration-plan.md) for the design record.
+
+Receipts are embedded provenance evidence, **not** parent-chat messages, and must never be injected into the parent chat. `Chat#meta`, `chat.role_messages(:meta)`, and `Chat.token_totals([chat])` keep describing the local chat only. A receipt is read as an observation attached to the paired tool output.
+
+### Receipt extraction helpers
+
+- `Chat.agent_meta_evidence(chat, source: nil, warnings: nil)` returns one Hash per valid receipt entry across the paired tool outputs of a chat. Pairing is delegated to `Chat.tool_calls`; raw text is never scanned. Records carry `origin: :agent_meta`, the parsed `meta`, `source`, `output_address`, `evidence_address` (the output address plus `[:agent_meta, index]`), `call_id`, `tool_name`, `agent_meta_index`, and `raw_message`.
+- `Chat.meta_evidence(chat, source: nil, warnings: nil)` returns the local `meta` messages (`origin: :chat_meta`, with `meta_address`) followed by the receipt records.
+- `Chat.agent_meta_job_references(chat, source: nil, warnings: nil)` filters receipt records whose parsed meta has a `job` key and adds the reference at the top level as `job:`.
+
+Malformed receipts (`agent_meta` not an Array; an entry that is not a Hash, has the wrong role, has non-String content, or parses to nothing) are skipped and never reinterpreted as provenance. When the caller supplies a `warnings` Array, each malformed item appends one warning Hash with the reason (`:not_an_array`, `:not_a_hash`, `:invalid_role`, `:invalid_content`, `:unparseable_meta`), the output address, `call_id`, `tool_name`, and the raw entry.
+
+### The `agent_job` relation
+
+`Chat::PROVENANCE_RELATIONS` includes `agent_job`: chat to delegated producer job, resolved from `job=` receipts. The child is a normal Step and follows `dependency`, `log`, and `result` as usual. A job reference whose Step path and `.info` sidecar both do not exist is not followed and is reported instead.
+
+Diagnostics go through `Chat.provenance_error` with relation `:agent_job`. In strict mode (no `on_error`) a malformed receipt raises `Chat::AgentMetaError`. With `on_error`, each problem is reported once per receipt, together with tool outputs that fail to parse but mention `agent_meta` (`:unparseable_output`, diagnostics only) and unresolvable job references (`:unresolved_job_reference`), while the rest of the chat's provenance still expands.
+
+### Provenance-aware token accounting
+
+`Chat.provenance_token_events(root, warnings: nil, **options)` returns one Hash per deduplicated direct inference event across discovered chats and their receipts, with `inference_id`, `identity`, `deduplication`, canonical `meta`, `tokens`, `evidence`, and `conflict`:
+
+- identity priority: `inference_id`, then `provider_response_id`, then conversational lineage for chat-side legacy metas, then the receipt evidence address itself (`:receipt_unresolved`, never merged, so legacy receipt data may overcount);
+- canonical evidence: `:chat_meta` beats `:agent_meta`; within one origin the first in discovery order wins. Tokens come from the canonical evidence only, never from a sum of duplicates;
+- conflicting evidence that shares an identity keeps every evidence record with its own meta, counts only the canonical one, sets `conflict: true`, and appends an `:identity_conflict` warning when a `warnings` Array was supplied.
+
+`Chat.provenance_token_totals(root, scope: :aggregate)` sums event tokens by scope: `:aggregate` (every event once), `:local` (events with chat-side evidence), `:receipt` (events with receipt evidence). `Chat.tokens(root)` delegates to the collector, so provenance aggregates include receipt-only child usage without double counting when the same child inference is also persisted in a job.
+
 ## Workflow failures and partial provenance
 
 Traversal visits jobs regardless of `done?`. Error and aborted Steps may still have dependencies, Step info, results, or partial agent logs. Status and exception details remain authoritative in Step info.
@@ -176,10 +207,15 @@ Usage:
     scout-ai llm prov path/to/chat --flow
     scout-ai llm prov path/to/chat --dot flow.dot
     scout-ai llm prov path/to/chat --plot flow.svg
+    scout-ai llm prov path/to/chat --evidence
 
 The default tree is a spanning-tree presentation of a DAG. Repeated nodes are displayed as seen references rather than recursively expanded. Compact and graphical flows choose natural data-flow arrow direction during rendering without changing traversal semantics.
 
 Job token values describe direct chat logs owned by that job. They do not silently include the complete dependency subtree.
+
+Delegated calls are reported from `agent_meta` receipts. The tree labels a job reached through a receipt as `delegated-job`, adds one `delegated receipt: N events, total=<tt>, <tools>` annotation line under chats that carry receipts, and `--component` prints `scope local:` / `scope receipt:` / `scope aggregate:` lines when receipt evidence exists. Flow and DOT render receipt edges as `delegated_result`.
+
+`--evidence` prints the deduplicated direct inference events behind the totals: identity, raw token values, evidence locations (parent output address plus call id), and status (`counted once`, `receipt-only`, `legacy unresolved`, `conflict`), followed by receipt-only, legacy-unresolved, identity-conflict, and job-projection sections. Receipt problems and identity conflicts are listed in the trailing warnings block.
 
 ## ChatAnalyst
 
@@ -192,11 +228,14 @@ This keeps responsibilities separate:
 - `prov` owns human and Graphviz rendering;
 - Workflow Step info owns execution lifecycle and failure provenance.
 
+ChatAnalyst is expected to consume the receipt primitives above — `Chat.agent_meta_evidence`, `Chat.meta_evidence`, `Chat.agent_meta_job_references`, and the `:agent_job` relation — instead of re-deriving delegated inference evidence. That update is pending and out of this change.
+
 ## Key source files
 
 | File | Responsibility |
 |---|---|
-| `lib/scout/llm/chat/provenance.rb` | Structural traversal, direct neighbours, and collectors. |
+| `lib/scout/llm/chat/provenance.rb` | Structural traversal, direct neighbours, collectors, and token events. |
+| `lib/scout/llm/chat/agent_meta.rb` | Delegated-agent receipt evidence extraction. |
 | `lib/scout/llm/chat/process/meta.rb` | Meta parsing, lineage, source-aware tracing, projections, and token totals. |
 | `lib/scout/llm/chat/tool_calls.rb` | Tool-call pairing and common status interpretation. |
 | `lib/scout/llm/backends/default.rb` | Direct token metadata and inference identities. |
