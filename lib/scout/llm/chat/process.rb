@@ -14,4 +14,8 @@ module Chat
   def self.indiferent(messages)
     messages.collect{|msg| IndiferentHash.setup msg }
   end
+
+  def self.find_role(messages, role)
+    messages.select{|m| m[:role].to_sym == role.to_sym }
+  end
 end
