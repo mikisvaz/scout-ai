@@ -130,6 +130,12 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   analysis.themes.3
 
   allow.test
+  
+  test.ggoss
+
+  ask_meta
+
+  ask_meta_critic
  }
 lib=lib {
   scout-ai.rb

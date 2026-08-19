@@ -127,6 +127,7 @@ module LLM
     end
 
     tool_call_content.collect do |function_name,function_arguments,tool_call_id,tool_call,content|
+      agent_meta = []
       if Step === content
         step = content
         if content.done?
@@ -160,6 +161,7 @@ module LLM
         end if path
 
         content.current_chat.follow(res)
+        agent_meta = Chat.find_role(res, :meta)
         content = content.answer
       else
         step = nil
@@ -182,6 +184,7 @@ module LLM
       }
 
       response_message[:error] = error if error
+      response_message[:agent_meta] = agent_meta if agent_meta && agent_meta.any?
 
       if step
         response_message.merge!(
@@ -197,9 +200,14 @@ module LLM
       end
 
 
+      json_content = begin
+                       response_message.to_json
+                     rescue
+                       "Error turning content into JSON (#{$!.message}): #{Log.fingerprint response_message}"
+                     end
       [ 
         tool_call,
-        IndiferentHash.setup({role: "function_call_output", content: response_message.to_json})
+        IndiferentHash.setup({role: "function_call_output", content: json_content})
       ]
     end.flatten
   end
