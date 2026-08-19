@@ -20,6 +20,7 @@ $ #{cmd} [<options>] <filename>
 -c--component Show per-component direct costs instead of aggregate totals
 -f--flow Print a compact provenance flow
 -l--long Show full filesystem paths instead of abbreviated names
+-e--evidence List the deduplicated direct inference events and their evidence
 --dot* Write the flow as Graphviz DOT
 -p--plot* Render the flow as svg, png, or pdf
 EOF
@@ -33,6 +34,7 @@ flow = options.delete(:flow)
 dot_file = options.delete(:dot)
 plot_file = options.delete(:plot)
 long = options.delete(:long)
+evidence = options.delete(:evidence)
 filename = ARGV.first
 raise MissingParameterException, :filename if filename.nil?
 
@@ -85,7 +87,7 @@ adjacency = Hash.new { |h, k| h[k] = [] }
 edges.each do |edge|
   adjacency[edge[:from]] << edge
 end
-RELATION_ORDER = { dependency: 0, log: 1, job: 2, result: 3 }
+RELATION_ORDER = { dependency: 0, log: 1, job: 2, agent_job: 3, result: 4 }
 adjacency.each_value do |children|
   children.sort_by! { |e| RELATION_ORDER[e[:relation]] || 99 }
 end
@@ -114,25 +116,56 @@ rescue => error
   Chat::TOKEN_KEYS.each_with_object({}) { |name, totals| totals[name.to_sym] = 0 }
 end
 
-# Aggregate tokens: sum of direct tokens across ALL reachable chat files
-# (deduplicated by path). This is the total cost of the provenance subtree.
+# ------------------------------------------------------------------
+# Receipt (agent_meta) evidence: delegated inference events embedded in
+# function_call_output envelopes.  Problems are collected, never fatal.
+# ------------------------------------------------------------------
+receipt_warnings = []
+token_events = nil
+token_events_for = lambda do
+  return token_events unless token_events.nil?
+  token_events = begin
+    Chat.provenance_token_events(root, warnings: receipt_warnings)
+  rescue => error
+    warnings << { error: error, kind: root_type, object: root, relation: :tokens }
+    []
+  end
+end
+
+def receipt_evidence(event)
+  event[:evidence].select { |evidence| evidence[:origin] == :agent_meta }
+end
+
+# Receipt evidence grouped by the chat file that carries the envelope; used
+# for the one-line delegated annotations and to decide whether scope lines
+# are needed in component mode.
+receipt_events_by_source = Hash.new { |hash, key| hash[key] = [] }
+has_receipt_evidence = false
+token_events_for.call.each do |event|
+  next if receipt_evidence(event).empty?
+  has_receipt_evidence = true
+  receipt_evidence(event).collect { |evidence| evidence[:source] }.compact.uniq.each do |source|
+    receipt_events_by_source[source] << event
+  end
+end
+
+# Aggregate tokens: provenance-aware totals of the subtree reachable from the
+# node.  Direct inference events are deduplicated by identity, so usage that
+# exists only inside agent_meta receipts (delegated children whose logs were
+# never saved) is included without double counting.
 aggregate_cache = {}
 aggregate_tokens = lambda do |key|
   return aggregate_cache[key] if aggregate_cache.key?(key)
-  visited = Set.new
-  stack = [key]
-  reachable_chats = []
-  while stack.any?
-    k = stack.pop
-    next if visited.include?(k)
-    visited << k
-    node = nodes[k]
-    reachable_chats << node[:path] if node[:kind] == :chat
-    (adjacency[k] || []).each { |e| stack << e[:to] }
-  end
-  unique_paths = reachable_chats.uniq
-  chats = unique_paths.collect { |path| chat_cache[path] ||= Chat.load(path) }
-  aggregate_cache[key] = Chat.token_totals(chats)
+  node = nodes[key]
+  subtree = node[:kind] == :job ? node[:object] : node[:path]
+  aggregate_cache[key] = Chat.provenance_token_totals(subtree, warnings: receipt_warnings)
+rescue => error
+  Chat::TOKEN_KEYS.each_with_object({}) { |name, totals| totals[name.to_sym] = 0 }
+end
+
+# Whole-tree totals per scope; only meaningful when receipts exist.
+scope_totals = lambda do |scope|
+  Chat.provenance_token_totals(root, scope: scope, warnings: receipt_warnings)
 rescue => error
   Chat::TOKEN_KEYS.each_with_object({}) { |name, totals| totals[name.to_sym] = 0 }
 end
@@ -228,14 +261,42 @@ unless flow || dot_file || plot_file
     return if hidden_node?(node, relation)
 
     printed << key
-    puts report_line(node[:kind], node_label(node, parent_node, root_key, key, long),
-                     node_tokens.call(key), offset: offset)
+    label = node_label(node, parent_node, root_key, key, long)
+    # A job reached through an agent_meta receipt is a delegated producer.
+    label = "delegated-job #{label}" if node[:kind] == :job && relation == :agent_job
+    puts report_line(node[:kind], label, node_tokens.call(key), offset: offset)
+
+    # One compact annotation line for the delegated usage embedded in this
+    # chat's own outputs; never one line per receipt.
+    if node[:kind] == :chat
+      events = receipt_events_by_source.key?(node[:path]) ? receipt_events_by_source[node[:path]] : []
+      if events && events.any?
+        delegated_tt = events.inject(0) { |sum, event| sum + event[:tokens][:tt].to_i }
+        tools = events.flat_map do |event|
+          receipt_evidence(event).collect { |evidence| evidence[:tool_name] }
+        end.compact.uniq.sort
+        annotation = "delegated receipt: #{events.length} events, total=#{Misc.human_number(delegated_tt)}"
+        annotation += ", #{tools * ','}" unless tools.empty?
+        puts [(' ' * ((offset + 1) * 2)), Log.color(:cyan, annotation)] * ' '
+      end
+    end
 
     (adjacency[key] || []).each do |edge|
       print_tree.call(edge[:to], offset + 1, edge[:relation], key)
     end
   end
   print_tree.call(root_key, 0, nil, nil)
+
+  # Component mode: make the scope of the numbers explicit once receipts are
+  # present; chats without receipts keep the previous output exactly.
+  if component && has_receipt_evidence
+    %i[local receipt aggregate].each do |scope|
+      totals = scope_totals.call(scope)
+      rendered = token_str(totals)
+      rendered = 'total=0' if rendered.empty?
+      puts Log.color(:cyan, "scope #{scope}:") + ' ' + rendered
+    end
+  end
 end
 
 # ------------------------------------------------------------------
@@ -246,6 +307,8 @@ flow_edges = edges.collect do |edge|
   case edge[:relation]
   when :job
     { from: edge[:to], to: edge[:from], relation: :result }
+  when :agent_job
+    { from: edge[:to], to: edge[:from], relation: :delegated_result }
   when :dependency
     { from: edge[:to], to: edge[:from], relation: :dependency }
   else
@@ -329,6 +392,7 @@ if flow || dot_file || plot_file
     end
     styles = {
       result: 'color="#39804a", penwidth=1.5, label="result"',
+      delegated_result: 'color="#8a6d3b", penwidth=1.2, label="delegated_result"',
       dependency: 'color="#333333", label="dependency"',
       log: 'color="#2864a5", style="dashed", label="log"'
     }
@@ -353,7 +417,136 @@ if flow || dot_file || plot_file
   end
 end
 
+# ------------------------------------------------------------------
+# Evidence mode: the deduplicated direct inference events behind the totals
+# ------------------------------------------------------------------
+if evidence
+  def evidence_location_str(address)
+    return '' unless Array === address && address.any?
+    rest = address[1..-1]
+    base = address[0].nil? ? '?' : File.basename(address[0].to_s)
+    if rest.length >= 3 && rest[1] == :agent_meta
+      "#{base}:#{rest[0]}[agent_meta,#{rest[2]}]"
+    else
+      "#{base}:#{rest[0]}"
+    end
+  end
+
+  def event_id_str(event)
+    return event[:inference_id] if event[:inference_id]
+    identity = event[:identity]
+    # Legacy receipts have no stable id: show the receipt location instead of
+    # the raw address array.
+    return "receipt=#{evidence_location_str(identity[1])}" if identity.first == :receipt
+    identity.length == 2 ? "#{identity[0]}=#{identity[1]}" : identity * '='
+  end
+
+  def event_status(event)
+    if event[:conflict]
+      'conflict'
+    elsif event[:deduplication] == :receipt_unresolved
+      'legacy unresolved'
+    elsif event[:evidence].all? { |item| item[:origin] == :agent_meta }
+      'receipt-only'
+    else
+      'counted once'
+    end
+  end
+
+  events = token_events_for.call
+  puts
+  puts 'Direct inference events'
+  puts '======================='
+  if events.empty?
+    puts '(none)'
+  else
+    # Raw integers here: every number must stay directly comparable with the
+    # meta records at the evidence addresses.
+    rows = events.collect do |event|
+      tokens = event[:tokens]
+      token_parts = ["total=#{tokens[:tt].to_i}"]
+      token_parts << "prompt=#{tokens[:pt].to_i}" if tokens[:pt].to_i > 0
+      token_parts << "cont=#{tokens[:ct].to_i}" if tokens[:ct].to_i > 0
+      token_parts << "cache=#{tokens[:cct].to_i}" if tokens[:cct].to_i > 0
+      token_parts << "reason=#{tokens[:rt].to_i}" if tokens[:rt].to_i > 0
+      evidence_parts = event[:evidence].collect do |item|
+        location = evidence_location_str(item[:evidence_address] || item[:meta_address])
+        call = item[:call_id] ? " call=#{item[:call_id]}" : ''
+        "#{item[:origin]} #{location}#{call}"
+      end
+      [event_id_str(event), token_parts * ' ', evidence_parts * '; ', event_status(event)]
+    end
+    puts format('%-26s %-36s %-56s %s', 'Inference ID', 'Tokens', 'Evidence', 'Status')
+    rows.each { |row| puts format('%-26s %-36s %-56s %s', *row) }
+  end
+
+  receipt_only = events.select { |event| event_status(event) == 'receipt-only' }
+  legacy_unresolved = events.select { |event| event[:deduplication] == :receipt_unresolved }
+
+  unless receipt_only.empty?
+    puts
+    puts "Receipt-only events (no saved child log): #{receipt_only.collect { |event| event_id_str(event) } * ', '}"
+  end
+
+  unless legacy_unresolved.empty?
+    puts
+    puts 'Legacy unresolved events (no inference_id; one per receipt, may overcount):'
+    legacy_unresolved.each do |event|
+      location = evidence_location_str(event[:evidence].first[:evidence_address])
+      puts "  #{event_id_str(event)} at #{location}"
+    end
+  end
+
+  seen_conflicts = Set.new
+  conflicts = receipt_warnings.select do |warning|
+    warning[:reason] == :identity_conflict && seen_conflicts.add?(warning[:identity])
+  end
+  unless conflicts.empty?
+    puts
+    puts 'Identity conflicts (only the canonical evidence is counted):'
+    conflicts.each do |conflict|
+      values = conflict[:values].collect { |field, list| "#{field}=#{Array(list).uniq * '|'}" } * ' '
+      puts "  #{conflict[:identity] * '='}: disputed #{conflict[:fields] * ','} (#{values})"
+    end
+  end
+
+  job_references = nodes.values.select { |node| node[:kind] == :chat }
+                        .sort_by { |node| node[:path] }.flat_map do |node|
+    chat = chat_cache[node[:path]] ||= Chat.load(node[:path])
+    Chat.agent_meta_job_references(chat, source: node[:path]).collect do |record|
+      record.merge(chat_label: File.basename(node[:path]))
+    end
+  end
+  unless job_references.empty?
+    puts
+    puts 'Job projection references (no direct tokens):'
+    job_references.each do |record|
+      location = evidence_location_str(record[:evidence_address])
+      tool = record[:tool_name] || '?'
+      puts "  job=#{record[:job]} at #{location} call=#{record[:call_id]} tool=#{tool}"
+    end
+  end
+end
+
 warnings.each do |warning|
   error = warning[:error]
+  # Receipt problems are reported in detail by the receipt_warnings block
+  # below (reason, location, call id); skip the generic line for them.
+  next if Chat::AgentMetaError === error
   Log.warn "Incomplete provenance at #{warning[:kind]} #{warning[:object]} (#{warning[:relation]}): #{error.message}"
+end
+
+# Receipt problems and identity conflicts collected by the token collector.
+# The same problem may be reported once per aggregate subtree, so printed
+# lines are deduplicated by their location.
+seen_receipt_warnings = Set.new
+receipt_warnings.each do |warning|
+  key = warning.values_at(:reason, :source, :output_address, :call_id, :agent_meta_index, :identity)
+  next unless seen_receipt_warnings.add?(key)
+  if warning[:reason] == :identity_conflict
+    Log.warn "identity conflict: #{warning[:identity] * '='} disagrees on #{warning[:fields] * ','}"
+  else
+    location = warning[:evidence_address] || warning[:output_address]
+    Log.warn "agent_meta receipt: #{warning[:reason]} in #{warning[:source]} at #{location.inspect} call=#{warning[:call_id]}#{warning[:message] ? ' - ' + warning[:message] : ''}"
+  end
 end
