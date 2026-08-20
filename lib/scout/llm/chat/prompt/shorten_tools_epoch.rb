@@ -271,6 +271,9 @@ module Chat
 	  === Context Management ===
 
       To fit within the model context window, this conversation has been compacted: some tool calls arguments and tool call outputs have been truncated, and some have been removed entirely.
+
+      Compacted: #{truncated_count}
+      Removed: #{dropped_count}
       
       Earlier tool results may no longer be present in the visible conversation history. If information appears to be missing, it may have been removed during context compaction rather than never existing. The absence of an earlier tool result in the current conversation does not necessarily mean that the tool has not already been executed.
 
