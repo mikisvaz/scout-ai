@@ -270,18 +270,15 @@ module Chat
 		content: <<~TEXT.chomp
 	  === Context Management ===
 
-	  To fit within the model context window, this conversation has been compacted.
+      To fit within the model context window, this conversation has been compacted: some tool calls arguments and tool call outputs have been truncated, and some have been removed entirely.
+      
+      Earlier tool results may no longer be present in the visible conversation history. If information appears to be missing, it may have been removed during context compaction rather than never existing. The absence of an earlier tool result in the current conversation does not necessarily mean that the tool has not already been executed.
 
-	  Total tool interactions: #{total_tool_outputs}
-	  Visible in full: #{keep_full_count}
-	  Compacted: #{truncated_count}
-	  Removed: #{dropped_count}
-
-	  Earlier tool results may no longer be present in the visible conversation history. If information appears to be missing, it may have been removed during context compaction rather than never existing. The absence of an earlier tool result in the current conversation does not necessarily mean that the tool has not already been executed.
+      Repeated tool calls with the same arguments will be flagged and protected from removal or truncation.
 		TEXT
 	  }
 
-      index = kept_messages.rindex do |msg|
+      index = kept_messages.index do |msg|
         [:function_call, :function_call_output].include?(msg[:role].to_sym)
       end
 
