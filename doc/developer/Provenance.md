@@ -175,7 +175,7 @@ Malformed receipts (`agent_meta` not an Array; an entry that is not a Hash, has 
 
 `Chat::PROVENANCE_RELATIONS` includes `agent_job`: chat to delegated producer job, resolved from `job=` receipts. The child is a normal Step and follows `dependency`, `log`, and `result` as usual. A job reference whose Step path and `.info` sidecar both do not exist is not followed and is reported instead.
 
-Diagnostics go through `Chat.provenance_error` with relation `:agent_job`. In strict mode (no `on_error`) a malformed receipt raises `Chat::AgentMetaError`. With `on_error`, each problem is reported once per receipt, together with tool outputs that fail to parse but mention `agent_meta` (`:unparseable_output`, diagnostics only) and unresolvable job references (`:unresolved_job_reference`), while the rest of the chat's provenance still expands.
+Diagnostics go through `Chat.provenance_error` with relation `:agent_job`; the error itself is a plain `ScoutException` whose message is built by `Chat.agent_meta_error_message`, and every structured fact (enclosing chat path, tool output address, receipt address, call id, tool name, malformed entry, reference, reason) travels in the `on_error` reference Hash. In strict mode (no `on_error`) a malformed receipt raises; with `on_error` each problem is reported once per receipt, while the rest of the chat's provenance still expands. Only output JSON that parses to a Hash carrying an explicit `agent_meta` key is ever inspected: unparseable tool outputs are never scanned for the substring `agent_meta`.
 
 ### Provenance-aware token accounting
 
@@ -183,9 +183,13 @@ Diagnostics go through `Chat.provenance_error` with relation `:agent_job`. In st
 
 - identity priority: `inference_id`, then `provider_response_id`, then conversational lineage for chat-side legacy metas, then the receipt evidence address itself (`:receipt_unresolved`, never merged, so legacy receipt data may overcount);
 - canonical evidence: `:chat_meta` beats `:agent_meta`; within one origin the first in discovery order wins. Tokens come from the canonical evidence only, never from a sum of duplicates;
-- conflicting evidence that shares an identity keeps every evidence record with its own meta, counts only the canonical one, sets `conflict: true`, and appends an `:identity_conflict` warning when a `warnings` Array was supplied.
+- conflicting evidence that shares an identity keeps every evidence record with its own meta, counts only the canonical one, sets `conflict: true`, and appends an `:identity_conflict` warning when a `warnings` Array was supplied. `strict: true` raises instead.
 
-`Chat.provenance_token_totals(root, scope: :aggregate)` sums event tokens by scope: `:aggregate` (every event once), `:local` (events with chat-side evidence), `:receipt` (events with receipt evidence). `Chat.tokens(root)` delegates to the collector, so provenance aggregates include receipt-only child usage without double counting when the same child inference is also persisted in a job.
+Deduplication happens exactly once, inside this collector: chat-side records are collected with `deduplicate: false`, so an inference persisted in several saved chats/logs plus one receipt yields a single event whose `evidence` array lists every address.
+
+A missing `provider_response_id` in one evidence record and a present one in another is *incomplete evidence*, not a conflict: such events set `incomplete_evidence: true`, are counted normally, and never trigger conflict warnings. Only two different non-empty `provider_response_id` values (or disagreement on `pt`/`ct`/`tt`) conflict. A conflicting event still contributes its canonical tokens, so any total containing conflicts is best-effort, not authoritative; `Chat.provenance_token_totals(root, conflicts: hash)` reports that flag explicitly.
+
+`Chat.provenance_token_totals(root, scope:)` sums event tokens by scope. Scopes are **evidence coverage**, not a partition of cost: an event stored both in a saved child log and in a receipt belongs to `:chat_evidence` and to `:receipt_evidence`, so those two must never be summed together. `:deduplicated_total` (default) counts every event once and `:receipt_only` is the disjoint delegated contribution with no saved-chat evidence. `Chat.tokens(root)` delegates to the collector, so provenance aggregates include receipt-only child usage without double counting when the same child inference is also persisted in a job.
 
 ## Workflow failures and partial provenance
 

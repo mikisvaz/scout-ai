@@ -161,12 +161,21 @@ class TestProvCLI < Test::Unit::TestCase
 
       out, _err, status = prov('--component', parent)
       assert status.success?
-      assert_include out, 'scope local:'
-      assert_include out, 'scope receipt:'
-      assert_include out, 'scope aggregate:'
+      assert_include out, 'evidence deduplicated_total:'
+      assert_include out, 'evidence chat_evidence:'
+      assert_include out, 'evidence receipt_evidence:'
+      assert_include out, 'evidence receipt_only:'
 
       expected = Chat.provenance_token_totals(parent)
-      assert_match(/scope aggregate: total=#{expected[:tt]}/, out)
+      assert_match(/evidence deduplicated_total: total=#{expected[:tt]}/, out)
+
+      # Coverage figures are explicitly labelled as overlapping; nothing in
+      # the output invites summing them.
+      assert_include out, 'overlaps chat_evidence', out
+      assert_include out, 'no saved chat/log', out
+
+      # No conflicts in this fixture: no non-authoritative label.
+      assert_not_include out, 'not exact', out
     end
 
     Dir.mktmpdir do |dir|
@@ -175,9 +184,10 @@ class TestProvCLI < Test::Unit::TestCase
 
       out, _err, status = prov('--component', plain)
       assert status.success?
-      assert_not_include out, 'scope local:', 'legacy chat must not gain scope lines'
-      assert_not_include out, 'scope receipt:'
-      assert_not_include out, 'scope aggregate:'
+      assert_not_include out, 'evidence deduplicated_total:', 'legacy chat must not gain scope lines'
+      assert_not_include out, 'evidence chat_evidence:'
+      assert_not_include out, 'evidence receipt_evidence:'
+      assert_not_include out, 'evidence receipt_only:'
       assert_not_include out, 'delegated receipt:'
     end
   end
@@ -214,8 +224,9 @@ class TestProvCLI < Test::Unit::TestCase
 
       out, _err, status = prov('--component', legacy)
       assert status.success?
-      assert_include out, 'scope local: total=0', out
-      assert_include out, 'scope receipt: total=5'
+      assert_include out, 'evidence chat_evidence: total=0', out
+      assert_include out, 'evidence receipt_evidence: total=5'
+      assert_include out, 'evidence receipt_only: total=5'
 
       out, _err, status = prov('--evidence', legacy)
       assert status.success?

@@ -263,7 +263,14 @@ module Chat
   # A meta starts a response segment. The segment continues until another meta,
   # a new user/system turn, or the end of the chat. Consecutive and final metas
   # with no covered messages remain as orphan records.
-  def self.trace_indices(indices)
+  # Trace one or more message indexes into segment entries.  By default
+  # entries are globally deduplicated across every supplied index (an
+  # inference copied into two chats yields one entry), which is the semantics
+  # Chat.token_totals has always had.  Pass `deduplicate: false` when the
+  # caller needs every persisted evidence location preserved, e.g.
+  # Chat.provenance_token_events, which performs its own identity grouping so
+  # an event can list all of its evidence records.
+  def self.trace_indices(indices, deduplicate: true)
     seen = Set.new
     trace = []
     add = lambda do |pending|
@@ -271,7 +278,7 @@ module Chat
       inference_id = pending[:meta][:inference_id]
       deduplication = inference_id ? :inference_id : :legacy_lineage
       dedup_key = inference_id ? [:inference_id, inference_id] : [:lineage, pending[:id]]
-      return if seen.include?(dedup_key)
+      return if deduplicate && seen.include?(dedup_key)
       seen << dedup_key
       trace << {
         id: pending[:id],
@@ -318,10 +325,13 @@ module Chat
 
   # Trace chats while preserving the persisted address of every meta and
   # covered message. Sources may be a Hash of path => Chat or an Array of
-  # [path, Chat] pairs.
-  def self.trace_chat_sources(sources)
+  # [path, Chat] pairs. The optional second argument keeps one entry per
+  # persisted location instead of collapsing copies (see Chat.trace_indices);
+  # it is positional because `sources` is naturally a brace-less Hash at call
+  # sites, which Ruby 3 would otherwise turn into keywords.
+  def self.trace_chat_sources(sources, deduplicate = true)
     pairs = sources.to_a
-    trace_indices(pairs.collect { |source, chat| chat.message_index(source: source) })
+    trace_indices(pairs.collect { |source, chat| chat.message_index(source: source) }, deduplicate: deduplicate)
   end
 
   # Select trace entries that carry direct token counts (not job projections).

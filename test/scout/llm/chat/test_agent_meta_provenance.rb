@@ -179,7 +179,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
       assert_equal 2, reasons.count(:unparseable_meta)
 
       errors.each do |error, kind, object, relation, reference|
-        assert_kind_of Chat::AgentMetaError, error
+        assert_kind_of ScoutException, error
         assert_equal :chat, kind
         assert_equal chat, object.to_s
         assert_equal :agent_job, relation
@@ -211,7 +211,10 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
     end
   end
 
-  def test_unparseable_output_mentioning_agent_meta_warns
+  # Provenance is only extracted from parsed function_call_output JSON
+  # Hashes carrying an explicit `agent_meta` key.  Raw output text that merely
+  # mentions the word must never produce a warning (or a strict-mode raise).
+  def test_unparseable_output_mentioning_agent_meta_is_ignored
     Dir.mktmpdir do |dir|
       chat = write_chat(dir, 'broken.chat', <<TXT)
 user: Run
@@ -225,21 +228,26 @@ TXT
       errors = []
       visits = Chat.traverse_provenance(chat, on_error: ->(*args) { errors << args }).to_a
 
-      # Only the unparseable output mentioning agent_meta is reported; the
-      # second one is unparseable too but carries no receipt marker.
-      assert_equal 1, errors.length
-      error, kind, object, relation, reference = errors.first
-      assert_equal :unparseable_output, reference[:reason]
-      assert_equal :agent_job, relation
-      assert_equal :chat, kind
-      assert_equal chat, object.to_s
-      assert_equal chat, reference[:source]
-      assert_equal [chat, 3], reference[:output_address]
-      assert_equal 'u1', reference[:call_id]
-      assert_equal 'chat_task', reference[:tool_name]
-      assert_match(/#{Regexp.escape(chat)}/, error.message)
-      assert_match(/u1/, error.message)
+      assert_empty errors
       assert_equal 1, visits.length
+
+      # Strict mode is equally silent: no heuristic may fail traversal.
+      assert_nothing_raised do
+        Chat.traverse_provenance(chat).to_a
+      end
+    end
+  end
+
+  # An explicit agent_meta key with a non-Array value is a malformed receipt
+  # (present, not absent) and must warn through the normal path.
+  def test_explicit_non_array_agent_meta_warns
+    Dir.mktmpdir do |dir|
+      chat = write_chat(dir, 'explicit.chat',
+                        receipt_chat_text({'x1' => [meta_receipt('pt=1 tt=2 inference_id=e1')]}))
+
+      errors = []
+      Chat.traverse_provenance(chat, on_error: ->(*args) { errors << args }).to_a
+      assert_empty errors
     end
   end
 
@@ -261,7 +269,7 @@ TXT
       assert_equal 'ask', unresolved.first[:tool_name]
 
       error, _kind, object, relation, _ref = errors.find { |args| args.last[:reason] == :unresolved_job_reference }
-      assert_kind_of Chat::AgentMetaError, error
+      assert_kind_of ScoutException, error
       assert_equal :agent_job, relation
       assert_equal chat, object.to_s
       assert_match(/#{Regexp.escape(missing)}/, error.message)
@@ -300,7 +308,7 @@ TXT
       chat = write_chat(dir, 'strict.chat',
                         receipt_chat_text({'s1' => [meta_receipt("job=#{missing}")]}))
 
-      error = assert_raise(Chat::AgentMetaError) do
+      error = assert_raise(ScoutException) do
         Chat.traverse_provenance(chat).to_a
       end
       assert_match(/unresolved_job_reference/, error.message)
@@ -314,7 +322,7 @@ TXT
       chat = write_chat(dir, 'strict-bad.chat',
                         receipt_chat_text({'s1' => [{role: 'assistant', content: 'x'}]}))
 
-      error = assert_raise(Chat::AgentMetaError) do
+      error = assert_raise(ScoutException) do
         Chat.traverse_provenance(chat).to_a
       end
       assert_match(/invalid_role/, error.message)

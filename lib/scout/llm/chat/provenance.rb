@@ -75,25 +75,28 @@ module Chat
   end
 
   # Diagnostics for agent_meta receipt problems found while expanding one chat
-  # node: malformed receipts collected by Chat.agent_meta_job_references plus
-  # outputs whose raw text mentions agent_meta but that Chat.tool_calls cannot
-  # even parse (Chat.agent_meta_unparseable_outputs).  Each record becomes one
-  # Chat.provenance_error call with relation :agent_job and kind/object
-  # :chat + the chat path, so strict mode (no on_error) raises
-  # Chat::AgentMetaError while warning mode keeps going.  Returns the valid job
-  # references so the caller can enqueue them afterwards.
+  # node: malformed receipts collected by Chat.agent_meta_job_references.
+  # Provenance is only ever extracted from parsed function_call_output JSON
+  # Hashes carrying an explicit `agent_meta` key; raw output text is never
+  # inspected, so output content that merely mentions "agent_meta" cannot
+  # produce a warning.  Each malformed record becomes one Chat.provenance_error
+  # call with relation :agent_job and kind/object :chat + the chat path, so
+  # strict mode (no on_error) raises ScoutException while warning mode keeps
+  # going.  Returns the valid job references so the caller can enqueue them
+  # afterwards.
   def self.report_agent_meta_problems(chat, object, on_error = nil)
     warnings = []
     references = agent_meta_job_references(chat, source: object, warnings: warnings)
-    warnings.concat(agent_meta_unparseable_outputs(chat, source: object))
 
     warnings.each do |warning|
-      error = AgentMetaError.build(warning[:reason],
-                                   chat_path: object.to_s,
-                                   output_address: warning[:output_address],
-                                   call_id: warning[:call_id],
-                                   tool_name: warning[:tool_name],
-                                   reference: warning[:reference] || warning[:raw_entry])
+      error = ScoutException.new(
+        agent_meta_error_message(warning[:reason],
+                                 chat_path: object.to_s,
+                                 output_address: warning[:output_address],
+                                 call_id: warning[:call_id],
+                                 tool_name: warning[:tool_name],
+                                 reference: warning[:reference] || warning[:raw_entry])
+      )
       reference = agent_meta_error_reference(reason: warning[:reason],
                                              source: warning[:source] || object.to_s,
                                              output_address: warning[:output_address],
@@ -112,12 +115,20 @@ module Chat
   # Traverse the heterogeneous provenance graph using native Path and Step
   # values. The block receives:
   #
-  #   kind, object, parent_kind, parent, relation, first_visit
+  #   kind, object, parent_kind, parent, relation, first_visit, detail
   #
   # `kind` is :chat or :job. Chat objects are persisted file Paths; jobs are
   # Steps. The root has nil parent/relation. Every structural edge is yielded,
   # including an edge to a node visited through another branch; first_visit is
   # false in that case and the node is not expanded again.
+  #
+  # `detail` is nil for every ordinary edge. For an :agent_job edge it is the
+  # agent_meta receipt record (Chat.agent_meta_job_references entry) that
+  # produced the edge, so the originating function output address, receipt
+  # address, call id and tool name stay auditable without re-parsing the parent
+  # chat. Blocks accepting only the first six arguments keep working; the
+  # trailing detail is only passed when the block can receive it (or accepts
+  # any number of arguments).
   #
   # Relations describe root-outward discovery, not diagram arrow direction:
   # chat -> producer job (:job), chat -> delegated-agent producer job
@@ -130,6 +141,12 @@ module Chat
   # therefore never follows import, continue, or last references.
   def self.traverse_provenance(root, root_type: nil, follow: :all, on_error: nil, &block)
     return enum_for(__method__, root, root_type: root_type, follow: follow, on_error: on_error) unless block
+    # Lambda blocks have strict arity; keep six-argument callbacks compatible
+    # by only yielding the trailing detail when the block can receive it.
+    detail_arity = lambda do
+      return true if block.arity == -1
+      block.arity >= 7
+    end
 
     relations = follow == :all ? PROVENANCE_RELATIONS : Array(follow).collect(&:to_sym)
     unknown = relations - PROVENANCE_RELATIONS
@@ -149,10 +166,14 @@ module Chat
     seen = Set.new
 
     until queue.empty?
-      kind, object, parent_kind, parent, relation = queue.shift
+      kind, object, parent_kind, parent, relation, detail = queue.shift
       key = provenance_key(kind, object)
       first_visit = !seen.include?(key)
-      block.call(kind, object, parent_kind, parent, relation, first_visit)
+      if detail_arity.call
+        block.call(kind, object, parent_kind, parent, relation, first_visit, detail)
+      else
+        block.call(kind, object, parent_kind, parent, relation, first_visit)
+      end
       next unless first_visit
       seen << key
 
@@ -172,12 +193,10 @@ module Chat
           end
 
           if relations.include?(:agent_job)
-            # Malformed receipts and unparsable outputs are diagnostics, never
-            # provenance; they are reported through provenance_error and skipped.
+            # Malformed receipts are diagnostics, never provenance; they are
+            # reported through provenance_error and skipped.
             references = begin
                            report_agent_meta_problems(chat, object, on_error)
-                         rescue AgentMetaError
-                           raise
                          rescue StandardError => error
                            provenance_error(on_error, error, :chat, object, :agent_job, object)
                            []
@@ -188,14 +207,19 @@ module Chat
               begin
                 job, _unresolved = resolve_job_reference(reference)
                 if job
-                  queue << [:job, job, :chat, object, :agent_job]
+                  # The receipt record travels with the edge as its detail so
+                  # the traversal keeps the originating output address, call
+                  # id and receipt index.
+                  queue << [:job, job, :chat, object, :agent_job, record]
                 else
-                  error = AgentMetaError.build(:unresolved_job_reference,
-                                               chat_path: object.to_s,
-                                               output_address: record[:output_address],
-                                               call_id: record[:call_id],
-                                               tool_name: record[:tool_name],
-                                               reference: reference)
+                  error = ScoutException.new(
+                    agent_meta_error_message(:unresolved_job_reference,
+                                             chat_path: object.to_s,
+                                             output_address: record[:output_address],
+                                             call_id: record[:call_id],
+                                             tool_name: record[:tool_name],
+                                             reference: reference)
+                  )
                   provenance_error(on_error, error, :chat, object, :agent_job,
                                    agent_meta_error_reference(reason: :unresolved_job_reference,
                                                               source: object.to_s,
@@ -205,8 +229,6 @@ module Chat
                                                               tool_name: record[:tool_name],
                                                               reference: reference))
                 end
-              rescue AgentMetaError
-                raise
               rescue StandardError => error
                 provenance_error(on_error, error, :chat, object, :agent_job,
                                  agent_meta_error_reference(reason: :unresolved_job_reference,
@@ -245,22 +267,33 @@ module Chat
   # Flat structural edges suitable for JSON reports and renderers. Objects are
   # intentionally retained as native values; presentation code can shorten or
   # serialize paths as needed.
+  #
+  # `:agent_job` edges carry the agent_meta receipt record that produced them
+  # under `detail:` (call id, tool name, output address, receipt address, job
+  # reference). Two distinct receipts pointing at the same job therefore remain
+  # two distinguishable edges instead of collapsing into one; ordinary edges
+  # keep `detail: nil`.
   def self.provenance_edges(root, **options)
     edges = []
-    traverse_provenance(root, **options) do |kind, object, parent_kind, parent, relation, _first|
+    traverse_provenance(root, **options) do |kind, object, parent_kind, parent, relation, _first, detail|
       next unless parent
       edge = {
         from_kind: parent_kind,
         from: parent,
         relation: relation,
         to_kind: kind,
-        to: object
+        to: object,
+        detail: detail
       }
-      edges << edge unless edges.any? do |other|
+      same_edge = lambda do |other|
         other[:relation] == relation &&
           provenance_key(other[:from_kind], other[:from]) == provenance_key(parent_kind, parent) &&
-          provenance_key(other[:to_kind], other[:to]) == provenance_key(kind, object)
+          provenance_key(other[:to_kind], other[:to]) == provenance_key(kind, object) &&
+          (relation != :agent_job ||
+           (detail.nil? && other[:detail].nil?) ||
+           (detail && other[:detail] && detail[:evidence_address] == other[:detail][:evidence_address]))
       end
+      edges << edge unless edges.any?(&same_edge)
     end
     edges
   end
@@ -317,14 +350,17 @@ module Chat
   #
   # Warning routing: when the caller supplies a `warnings` Array, two kinds of
   # problems are reported into it instead of raising:
-  #   * traversal-stage agent_meta problems (Chat::AgentMetaError, i.e.
-  #     malformed receipts and unresolved job references) arrive as the
-  #     agent_meta_error_reference Hash plus `message:`; the traversal keeps
-  #     going so one bad receipt never hides the rest of the provenance;
+  #   * traversal-stage agent_meta problems (malformed receipts and unresolved
+  #     job references) arrive as the agent_meta_error_reference Hash plus
+  #     `message:`; the traversal keeps going so one bad receipt never hides
+  #     the rest of the provenance;
   #   * identity_conflict records (see below).
   # Unrelated traversal errors keep strict semantics: they raise, both with and
   # without a warnings Array.  Without the Array, agent_meta problems raise
   # exactly like Chat.traverse_provenance strict mode.
+  #
+  # Identity conflicts never raise here; pass `strict: true` to make them
+  # raise instead of being reported (see below).
   #
   # Event shape:
   #
@@ -342,8 +378,14 @@ module Chat
   #       {origin: :agent_meta, source:, evidence_address:, output_address:,
   #        agent_meta_index:, call_id:, tool_name:, meta:}
   #     ],
-  #     conflict: true|false
+  #     conflict: true|false,
+  #     incomplete_evidence: true|false
   #   }
+  #
+  # `evidence` holds EVERY persisted location of the event (the same
+  # inference copied into several saved chats/logs appears once per chat plus
+  # once per receipt).  Only the canonical evidence supplies `meta` and
+  # `tokens`.
   #
   # Identity (grouping) rules, in priority order:
   #
@@ -357,18 +399,31 @@ module Chat
   #
   # Identity conflicts: when evidence sharing an identity disagree on any
   # TOKEN_KEYS value (compared as integers, missing counts as 0) or on
-  # provider_response_id (missing vs present counts as disagreement), the
-  # event keeps every evidence record, counts only the canonical one, sets
-  # conflict: true, and - when a warnings Array was supplied - appends one
-  # Hash per conflicting event:
+  # provider_response_id (two DIFFERENT non-empty values), the event keeps
+  # every evidence record, counts only the canonical one, sets conflict: true,
+  # and - when a warnings Array was supplied - appends one Hash per conflicting
+  # event:
   #
   #   {reason: :identity_conflict, inference_id:, identity:,
   #    fields: <Array of disputed field symbols>,
   #    values: <Hash field => the raw meta values in evidence order>,
   #    evidence: <the event evidence records>}
   #
+  # A missing provider_response_id in one record and a present one in another
+  # is INCOMPLETE EVIDENCE, not a conflict: one copy simply carries richer
+  # metadata (e.g. across a metadata-format migration). Such events set
+  # incomplete_evidence: true, are counted normally, and are never warned about
+  # as conflicts.  The same leniency applies to optional detailed usage fields
+  # (cct/cwt/rt): only the immutable core (inference identity, pt/ct/tt,
+  # non-empty provider_response_id) can conflict.
+  #
+  # A conflicting event is counted once from its canonical evidence, but that
+  # number is NOT authoritative: reports must label any total containing
+  # conflicts as unresolved (see Chat.provenance_token_totals `conflicts:`).
+  # Pass `strict: true` to raise ScoutException on the first conflict instead.
+  #
   # Checkpoint fields (*_c, *_s) are never read or summed here.
-  def self.provenance_token_events(root, warnings: nil, **traversal_options)
+  def self.provenance_token_events(root, warnings: nil, strict: false, **traversal_options)
     # Route traversal-stage agent_meta problems into the caller's warnings
     # Array instead of letting them raise.  Other traversal errors stay strict
     # (raise), and an explicitly supplied on_error keeps being called.
@@ -376,7 +431,8 @@ module Chat
       caller_on_error = traversal_options[:on_error]
       traversal_options = traversal_options.merge(
         on_error: lambda do |error, kind, object, relation, reference|
-          if relation == :agent_job && AgentMetaError === error
+          if relation == :agent_job && reference.is_a?(Hash) && reference[:reason] &&
+             error.message.to_s.include?('agent_meta receipt')
             warnings << reference.merge(message: error.message)
             caller_on_error.call(error, kind, object, relation, reference) if caller_on_error
           elsif caller_on_error
@@ -394,11 +450,12 @@ module Chat
 
     evidences = []
 
-    # Chat-side direct events.  One trace_chat_sources call over the whole
-    # source list keeps the existing global lineage/inference_id dedup, which
-    # is exactly the previous Chat.token_totals behavior (a copied chat in two
-    # discovered locations still yields one legacy event).
-    trace_chat_sources(sources).each do |entry|
+    # Chat-side direct events.  `deduplicate: false` keeps one entry per
+    # persisted location: an inference copied into several saved chats/logs
+    # (or projected into several places) yields several evidence records, one
+    # per address.  Grouping by identity happens exactly once, below, so the
+    # resulting event can list every location.
+    trace_chat_sources(sources, false).each do |entry|
       meta = entry[:meta]
       next if meta[:job]
       next unless TOKEN_KEYS.any? { |key| meta.include?(key) }
@@ -513,20 +570,40 @@ module Chat
         hash[key.to_sym] = canonical[:meta][key].to_i
       end
 
+      # Immutable core only: pt/ct/tt and a genuinely different non-empty
+      # provider_response_id.  Optional detail fields (cct, cwt, rt) and a
+      # missing-vs-present provider_response_id are incomplete evidence, not
+      # conflicts.
+      core_fields = %i[pt ct tt]
       fields = []
       values = {}
-      TOKEN_KEYS.each do |key|
+      core_fields.each do |key|
         next unless ordered.collect { |evidence| evidence[:meta][key].to_i }.uniq.length > 1
-        fields << key.to_sym
-        values[key.to_sym] = ordered.collect { |evidence| evidence[:meta][key] }
+        fields << key
+        values[key] = ordered.collect { |evidence| evidence[:meta][key] }
       end
-      if ordered.collect { |evidence| evidence[:meta][:provider_response_id] }.uniq.length > 1
+      provider_ids = ordered.collect { |evidence| evidence[:meta][:provider_response_id].to_s }
+                                 .reject { |value| value.strip.empty? }.uniq
+      if provider_ids.length > 1
         fields << :provider_response_id
         values[:provider_response_id] = ordered.collect { |evidence| evidence[:meta][:provider_response_id] }
       end
 
+      # Incomplete evidence: exactly one non-empty provider_response_id value
+      # while at least one copy lacks it (metadata-format migration), so there
+      # is nothing to disagree about.
+      present_ids = ordered.collect { |evidence| evidence[:meta][:provider_response_id].to_s }
+                            .reject { |value| value.strip.empty? }
+      if present_ids.uniq.length <= 1 &&
+         present_ids.length != ordered.length && !present_ids.empty?
+        event[:incomplete_evidence] = true
+      end
+
       next unless fields.any?
       event[:conflict] = true
+      if strict
+        raise ScoutException, "agent_meta identity conflict on #{event[:identity] * '='}: disputed #{fields * ','}"
+      end
       next unless Array === warnings
       warnings << {
         reason: :identity_conflict,
@@ -547,7 +624,8 @@ module Chat
         meta: event[:meta],
         tokens: event[:tokens],
         evidence: event[:evidence],
-        conflict: event[:conflict] || false
+        conflict: event[:conflict] || false,
+        incomplete_evidence: event[:incomplete_evidence] || false
       }
     end
   end
@@ -556,20 +634,41 @@ module Chat
   # symbol keyed and zero initialized exactly like Chat.token_totals:
   # {pt:, ct:, tt:, cct:, cwt:, rt:}.
   #
-  # Scopes:
-  #   * :aggregate - every event counted once (default);
-  #   * :local     - only events with at least one :chat_meta evidence;
-  #   * :receipt   - only events with at least one :agent_meta evidence.
-  def self.provenance_token_totals(root, scope: :aggregate, warnings: nil, **traversal_options)
+  # Scopes.  These are EVIDENCE COVERAGE descriptions, not a partition of cost:
+  # an event represented both in a saved child log and in a receipt belongs to
+  # :chat_evidence AND to :receipt_evidence, so the two are not additive and
+  # must never be summed together.  Only :deduplicated_total and :receipt_only
+  # are safe to compare additively.
+  #
+  #   * :deduplicated_total - every event counted once (default);
+  #   * :chat_evidence      - events with at least one :chat_meta evidence
+  #                           (physically stored in a chat/log file);
+  #   * :receipt_evidence   - events with at least one :agent_meta evidence
+  #                           (embedded in a function_call_output receipt);
+  #   * :receipt_only       - events with receipt evidence and NO saved-chat
+  #                           evidence (the disjoint delegated contribution).
+  #
+  # Conflict handling: a conflicting event still contributes its canonical
+  # tokens, so a total containing conflicts is a best-effort view, not an
+  # authoritative cost.  The `conflicts:` keyword makes that explicit in
+  # machine readable form; with `strict: true` conflicts raise instead (the
+  # keyword is forwarded to provenance_token_events).
+  def self.provenance_token_totals(root, scope: :deduplicated_total, warnings: nil,
+                                   conflicts: nil, **traversal_options)
     events = provenance_token_events(root, warnings: warnings, **traversal_options)
 
     selected = case scope.to_sym
-               when :aggregate
+               when :deduplicated_total
                  events
-               when :local
+               when :chat_evidence
                  events.select { |event| event[:evidence].any? { |e| e[:origin] == :chat_meta } }
-               when :receipt
+               when :receipt_evidence
                  events.select { |event| event[:evidence].any? { |e| e[:origin] == :agent_meta } }
+               when :receipt_only
+                 events.select do |event|
+                   event[:evidence].any? { |e| e[:origin] == :agent_meta } &&
+                     event[:evidence].none? { |e| e[:origin] == :chat_meta }
+                 end
                else
                  raise ParameterException, "Unknown token scope: #{scope}"
                end
@@ -578,6 +677,15 @@ module Chat
     selected.each do |event|
       TOKEN_KEYS.each { |key| totals[key.to_sym] += event[:tokens][key.to_sym] }
     end
+
+    if conflicts.is_a?(Hash)
+      conflicting = events.select { |event| event[:conflict] }
+      incomplete = events.select { |event| event[:incomplete_evidence] }
+      conflicts[:events] = conflicting.length
+      conflicts[:incomplete_evidence_events] = incomplete.length
+      conflicts[:authoritative] = conflicting.empty?
+    end
+
     totals
   end
 

@@ -64,7 +64,7 @@ records = Chat.traverse_provenance(
 # ------------------------------------------------------------------
 nodes = {}
 edges = []
-records.each do |kind, object, parent_kind, parent, relation, first_visit|
+records.each do |kind, object, parent_kind, parent, relation, first_visit, _detail|
   key = Chat.provenance_key(kind, object)
   nodes[key] ||= { kind: kind, object: object, path: Chat.provenance_path(kind, object) }
   next unless parent
@@ -287,14 +287,29 @@ unless flow || dot_file || plot_file
   end
   print_tree.call(root_key, 0, nil, nil)
 
-  # Component mode: make the scope of the numbers explicit once receipts are
-  # present; chats without receipts keep the previous output exactly.
+  # Component mode: make the evidence coverage behind the numbers explicit
+  # once receipts are present; chats without receipts keep the previous output
+  # exactly.  These are COVERAGE figures, not additive cost categories:
+  # chat_evidence + receipt_evidence double counts every event that exists in
+  # both a saved child log and a receipt.  Only deduplicated_total is the
+  # cost, and receipt_only is the disjoint delegated contribution.
   if component && has_receipt_evidence
-    %i[local receipt aggregate].each do |scope|
+    coverage = [[:deduplicated_total, 'total'],
+                [:chat_evidence, 'events with saved chat/log evidence'],
+                [:receipt_evidence, 'events inside agent_meta receipts (overlaps chat_evidence)'],
+                [:receipt_only, 'receipt evidence with no saved chat/log']]
+    coverage.each do |scope, note|
       totals = scope_totals.call(scope)
       rendered = token_str(totals)
       rendered = 'total=0' if rendered.empty?
-      puts Log.color(:cyan, "scope #{scope}:") + ' ' + rendered
+      puts Log.color(:cyan, "evidence #{scope}:") + ' ' + rendered + ' ' + Log.color(:cyan, "(#{note})")
+    end
+
+    conflict_info = {}
+    Chat.provenance_token_totals(root, warnings: [], conflicts: conflict_info)
+    unless conflict_info[:authoritative]
+      puts Log.color(:red, 'unresolved identity conflicts: ') +
+        "#{conflict_info[:events]} conflicting event(s); totals above are best-effort (canonical evidence only), not exact"
     end
   end
 end
@@ -443,7 +458,9 @@ if evidence
 
   def event_status(event)
     if event[:conflict]
-      'conflict'
+      'conflict (counted once, not authoritative)'
+    elsif event[:incomplete_evidence]
+      'incomplete evidence'
     elsif event[:deduplication] == :receipt_unresolved
       'legacy unresolved'
     elsif event[:evidence].all? { |item| item[:origin] == :agent_meta }
@@ -503,27 +520,36 @@ if evidence
   end
   unless conflicts.empty?
     puts
-    puts 'Identity conflicts (only the canonical evidence is counted):'
+    puts 'Identity conflicts (counted once from canonical evidence; totals containing these are NOT authoritative):'
     conflicts.each do |conflict|
       values = conflict[:values].collect { |field, list| "#{field}=#{Array(list).uniq * '|'}" } * ' '
       puts "  #{conflict[:identity] * '='}: disputed #{conflict[:fields] * ','} (#{values})"
     end
   end
 
-  job_references = nodes.values.select { |node| node[:kind] == :chat }
-                        .sort_by { |node| node[:path] }.flat_map do |node|
-    chat = chat_cache[node[:path]] ||= Chat.load(node[:path])
-    Chat.agent_meta_job_references(chat, source: node[:path]).collect do |record|
-      record.merge(chat_label: File.basename(node[:path]))
+  incomplete = events.select { |event| event[:incomplete_evidence] }
+  unless incomplete.empty?
+    puts
+    puts 'Incomplete evidence (one copy lacks provider_response_id; no conflict):'
+    incomplete.each do |event|
+      puts "  #{event_id_str(event)}"
     end
   end
-  unless job_references.empty?
+
+  # Agent-job references come straight from the traversal edge details, so no
+  # parent chat has to be re-parsed here: the edge already carries the receipt
+  # record (call id, tool name, output address, receipt address, reference).
+  agent_job_edges = records.select do |kind, _object, parent_kind, _parent, relation, _first|
+    relation == :agent_job && parent_kind == :chat && kind == :job
+  end
+  unless agent_job_edges.empty?
     puts
     puts 'Job projection references (no direct tokens):'
-    job_references.each do |record|
-      location = evidence_location_str(record[:evidence_address])
-      tool = record[:tool_name] || '?'
-      puts "  job=#{record[:job]} at #{location} call=#{record[:call_id]} tool=#{tool}"
+    agent_job_edges.each do |_kind, object, _parent_kind, _parent, _relation, _first, detail|
+      detail ||= {}
+      location = evidence_location_str(detail[:evidence_address])
+      tool = detail[:tool_name] || '?'
+      puts "  job=#{object.path} at #{location} call=#{detail[:call_id]} tool=#{tool} (delegated_result edge)"
     end
   end
 end
@@ -531,8 +557,10 @@ end
 warnings.each do |warning|
   error = warning[:error]
   # Receipt problems are reported in detail by the receipt_warnings block
-  # below (reason, location, call id); skip the generic line for them.
-  next if Chat::AgentMetaError === error
+  # below (reason, location, call id); skip the generic line for them.  They
+  # are recognized by their structured reference, not by a class: agent_meta
+  # diagnostics travel as ordinary ScoutException plus a reference Hash.
+  next if warning[:relation] == :agent_job && Hash === warning[:reference] && warning[:reference][:reason]
   Log.warn "Incomplete provenance at #{warning[:kind]} #{warning[:object]} (#{warning[:relation]}): #{error.message}"
 end
 

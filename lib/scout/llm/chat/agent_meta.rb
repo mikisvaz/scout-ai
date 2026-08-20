@@ -1,21 +1,19 @@
 module Chat
-  # Diagnostics error for malformed or unusable agent_meta receipts discovered
-  # during provenance traversal.  It holds no traversal state; it only renders
-  # a human readable location (chat path, output address, call id and tool name
-  # when known) so warnings and strict-mode failures point at the exact receipt
-  # that could not be used.
-  class AgentMetaError < StandardError
-    def self.build(reason, chat_path: nil, output_address: nil, call_id: nil, tool_name: nil, reference: nil)
-      message = +"agent_meta receipt #{reason}"
-      message << " in chat #{chat_path}" if chat_path
-      message << " at output #{Array(output_address).inspect}" unless output_address.nil?
-      details = []
-      details << "call #{call_id}" if call_id
-      details << "tool #{tool_name}" if tool_name
-      message << " (#{details * ', '})" unless details.empty?
-      message << " reference #{reference}" if reference
-      new(message)
-    end
+  # Render the human readable message for a malformed or unusable agent_meta
+  # receipt.  This is a plain module function, not a dedicated error class: the
+  # raised exception is ScoutException and the structured facts (chat path,
+  # output address, call id, tool name, raw entry, reference) always travel in
+  # the on_error callback `reference` Hash built by Chat.agent_meta_error_reference.
+  def self.agent_meta_error_message(reason, chat_path: nil, output_address: nil, call_id: nil, tool_name: nil, reference: nil)
+    message = +"agent_meta receipt #{reason}"
+    message << " in chat #{chat_path}" if chat_path
+    message << " at output #{Array(output_address).inspect}" unless output_address.nil?
+    details = []
+    details << "call #{call_id}" if call_id
+    details << "tool #{tool_name}" if tool_name
+    message << " (#{details * ', '})" unless details.empty?
+    message << " reference #{reference}" if reference
+    message
   end
 
   # Delegated-agent inference evidence embedded in function_call_output
@@ -71,8 +69,13 @@ module Chat
       output_info = call[:output_info]
       next [] unless Hash === output_info
 
-      agent_meta = output_info['agent_meta'] || output_info[:agent_meta]
-      next [] if agent_meta.nil?
+      # Key presence, not truthiness: an explicit `agent_meta: false` or
+      # `agent_meta: nil` is a present-but-malformed receipt and must warn,
+      # while an absent key simply has no receipt at all.
+      has_agent_meta = output_info.key?('agent_meta') || output_info.key?(:agent_meta)
+      next [] unless has_agent_meta
+      agent_meta = output_info['agent_meta']
+      agent_meta = output_info[:agent_meta] if agent_meta.nil? && output_info.key?(:agent_meta)
 
       add_warning = lambda do |reason, index, raw_entry|
         return unless Array === warnings
@@ -163,6 +166,13 @@ module Chat
   # This is an analysis view only.  Chat#meta, chat.role_messages(:meta), and
   # Chat.token_totals([chat]) keep describing the local Chat and do not absorb
   # delegated receipts.
+  #
+  # Validation asymmetry, intentional: ordinary persisted `meta:` messages are
+  # historical data with no enforced schema, so they stay permissive here (a
+  # record is included even when Chat.parse_meta yields an empty Hash) exactly
+  # as Chat.trace_chats and Chat.token_totals have always treated them.  A
+  # receipt instead has a narrow, generated schema, so malformed receipt
+  # entries are skipped with a warning instead of being silently trusted.
   def self.meta_evidence(chat, source: nil, warnings: nil)
     local = chat.each_with_index.select do |message, _index|
       message[:role].to_s == 'meta'
@@ -188,55 +198,6 @@ module Chat
     agent_meta_evidence(chat, source: source, warnings: warnings)
       .select { |record| record[:meta][:job] }
       .collect { |record| record.merge(job: record[:meta][:job]) }
-  end
-
-  # Diagnostics only: `function_call_output` messages whose content is not a
-  # JSON Hash (so Chat.tool_calls cannot pair them and any receipt inside is
-  # invisible) but whose raw text mentions `agent_meta`.  No provenance is
-  # ever extracted from raw text; this only reports where a receipt was
-  # probably lost.  Outputs whose content parses into a Hash are never
-  # reported here, even when their agent_meta payload is malformed; those are
-  # reported by Chat.agent_meta_evidence instead.
-  #
-  # Record shape:
-  #
-  #   { origin: :agent_meta, reason: :unparseable_output, source:,
-  #     output_address:, call_id:, tool_name: }
-  #
-  # call_id and tool_name come from the nearest preceding
-  # function_call/mcp_call message and are nil when there is none.
-  def self.agent_meta_unparseable_outputs(chat, source: nil)
-    last_call = nil
-    chat.each_with_index.collect do |message, index|
-      role = message[:role].to_s
-
-      if %w[function_call mcp_call].include?(role)
-        info = parse_tool_message(message)
-        if Hash === info
-          last_call = {
-            call_id: info['id'] || info['call_id'] || info['tool_call_id'],
-            tool_name: info['name'] || info.dig('function', 'name')
-          }
-        end
-        next nil
-      end
-
-      next nil unless role == 'function_call_output'
-
-      next nil if Hash === parse_tool_message(message)
-
-      content = message[:content].to_s
-      next nil unless content.include?('agent_meta')
-
-      {
-        origin: :agent_meta,
-        reason: :unparseable_output,
-        source: source ? source.to_s : nil,
-        output_address: source ? [source.to_s, index] : index,
-        call_id: last_call ? last_call[:call_id] : nil,
-        tool_name: last_call ? last_call[:tool_name] : nil
-      }
-    end.compact
   end
 
   # Uniform `reference` Hash handed to on_error for agent_meta provenance

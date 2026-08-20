@@ -68,10 +68,10 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
       assert_equal({pt: 180, ct: 100, tt: 280, cct: 0, cwt: 0, rt: 0}, aggregate)
 
       # Receipt events are not local, but they are receipt evidence.
-      local = Chat.provenance_token_totals(parent, scope: :local)
+      local = Chat.provenance_token_totals(parent, scope: :chat_evidence)
       assert_equal({pt: 60, ct: 40, tt: 100, cct: 0, cwt: 0, rt: 0}, local)
 
-      receipt = Chat.provenance_token_totals(parent, scope: :receipt)
+      receipt = Chat.provenance_token_totals(parent, scope: :receipt_evidence)
       assert_equal({pt: 120, ct: 60, tt: 180, cct: 0, cwt: 0, rt: 0}, receipt)
 
       # Totals keep working with a restricted traversal (no jobs to follow).
@@ -154,8 +154,8 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
       assert_equal ['w1'], shared.collect { |event| event[:inference_id] }
 
       # local and receipt both include the shared event; aggregate counts it once.
-      local = Chat.provenance_token_totals(parent, scope: :local)
-      receipt = Chat.provenance_token_totals(parent, scope: :receipt)
+      local = Chat.provenance_token_totals(parent, scope: :chat_evidence)
+      receipt = Chat.provenance_token_totals(parent, scope: :receipt_evidence)
       aggregate = Chat.provenance_token_totals(parent)
       shared_tokens = shared.first[:tokens]
 
@@ -464,11 +464,120 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
                         receipt_chat_text({'b1' => 'not-an-array'},
                                           extra: ['meta: pt=5 tt=6 inference_id=ok1']))
 
-      error = assert_raise(Chat::AgentMetaError) do
+      error = assert_raise(ScoutException) do
         Chat.provenance_token_events(chat)
       end
       assert_match(/not_an_array/, error.message)
       assert_match(/#{Regexp.escape(chat)}/, error.message)
+    end
+  end
+
+  ## Reviewer cases: multi-location evidence, shared-job receipts, strict mode
+
+  # The same inference_id persisted in three ordinary chat/log locations plus
+  # one receipt must produce ONE event whose evidence array keeps all four
+  # addresses, counted once.
+  def test_same_identity_in_three_chat_locations_and_one_receipt
+    Dir.mktmpdir do |dir|
+      shared = 'meta: pt=100 ct=40 tt=140 inference_id=shared1'
+      j1 = make_job(dir, 'J1/ask/Default_1', logs: {'agent.chat' => "user: w\n#{shared}\nassistant: done\n"})
+      j2 = make_job(dir, 'J2/ask/Default_2', logs: {'agent.chat' => "user: w\n#{shared}\nassistant: done\n"})
+      parent = write_chat(dir, 'parent.chat',
+                          receipt_chat_text(
+                            {'a1' => [meta_receipt('pt=100 ct=40 tt=140 inference_id=shared1')]},
+                            extra: [shared, "meta: job=#{j1}", "meta: job=#{j2}"]
+                          ))
+
+      events = Chat.provenance_token_events(parent).select { |event| event[:inference_id] == 'shared1' }
+
+      assert_equal 1, events.length
+      event = events.first
+      assert_equal 4, event[:evidence].length
+
+      chat_side = event[:evidence].select { |record| record[:origin] == :chat_meta }
+      assert_equal 3, chat_side.length
+      expected_sources = [parent,
+                          File.join(j1 + '.files', 'log', 'agent.chat'),
+                          File.join(j2 + '.files', 'log', 'agent.chat')].collect(&:to_s).sort
+      assert_equal expected_sources, chat_side.collect { |record| record[:source].to_s }.sort
+
+      receipt_side = event[:evidence].select { |record| record[:origin] == :agent_meta }
+      assert_equal 1, receipt_side.length
+      assert_equal 'a1', receipt_side.first[:call_id]
+      assert !event[:conflict]
+
+      # Counted exactly once.
+      assert_equal({pt: 100, ct: 40, tt: 140, cct: 0, cwt: 0, rt: 0},
+                   Chat.provenance_token_totals(parent))
+    end
+  end
+
+  # Two separate ask receipts pointing at the same job= keep both edge details
+  # (distinct call ids and receipt addresses) while the Step is visited once.
+  def test_two_receipts_to_the_same_job_keep_both_edge_details
+    Dir.mktmpdir do |dir|
+      worker = make_job(dir, 'Worker/ask/Default_w',
+                        logs: {'agent.chat' => "user: w\nmeta: pt=1 tt=2 inference_id=wonly\nassistant: done\n"})
+      parent = write_chat(dir, 'parent.chat',
+                          receipt_chat_text(
+                            {'a1' => [meta_receipt("job=#{worker}")],
+                             'a2' => [meta_receipt("job=#{worker}")]}
+                          ))
+
+      edges = Chat.provenance_edges(parent).select { |edge| edge[:relation] == :agent_job }
+      assert_equal 2, edges.length
+      details = edges.collect { |edge| edge[:detail] }
+      assert_equal %w[a1 a2], details.collect { |detail| detail[:call_id] }.sort
+      assert_equal 2, details.collect { |detail| detail[:evidence_address] }.uniq.length
+      assert(edges.all? { |edge| edge[:to].path.to_s == worker.to_s })
+      assert(edges.all? { |edge| edge[:from].to_s == parent.to_s })
+
+      # One unique Step node; each edge visits it, only the first expands it.
+      assert_equal 1, Chat.provenance_jobs(parent).length
+      job_visits = Chat.traverse_provenance(parent).to_a
+                       .select { |kind, object, *_rest| kind == :job && object.path.to_s == worker.to_s }
+      assert_equal 2, job_visits.length
+      assert_equal 1, job_visits.count { |visit| visit[5] }
+    end
+  end
+
+  def test_strict_mode_raises_on_identity_conflict
+    Dir.mktmpdir do |dir|
+      parent = write_chat(dir, 'p5.chat',
+                          receipt_chat_text(
+                            {'a1' => [meta_receipt('pt=1 tt=2 inference_id=g1'),
+                                      meta_receipt('pt=1 tt=9 inference_id=g1')]}
+                          ))
+
+      assert_raise(ScoutException) do
+        Chat.provenance_token_events(parent, strict: true)
+      end
+    end
+  end
+
+  # A provider_response_id present in one copy and absent in another is
+  # incomplete evidence (migration), never a conflict.
+  def test_missing_provider_response_id_is_incomplete_not_conflict
+    Dir.mktmpdir do |dir|
+      worker = make_job(dir, 'W4/ask/Default_4',
+                        logs: {'agent.chat' => "user: w\nmeta: pt=3 tt=4 inference_id=h1 provider_response_id=rq\nassistant: done\n"})
+      parent = write_chat(dir, 'p6.chat',
+                          receipt_chat_text(
+                            {'a1' => [meta_receipt('pt=3 tt=4 inference_id=h1')]},
+                            extra: ["meta: job=#{worker}"]
+                          ))
+
+      warnings = []
+      events = Chat.provenance_token_events(parent, warnings: warnings)
+
+      event = events.find { |item| item[:inference_id] == 'h1' }
+      assert event
+      assert_equal 2, event[:evidence].length
+      assert event[:incomplete_evidence]
+      assert !event[:conflict]
+      assert_empty warnings.select { |warning| warning[:reason] == :identity_conflict }
+      assert_equal({pt: 3, ct: 0, tt: 4, cct: 0, cwt: 0, rt: 0},
+                   Chat.provenance_token_totals(parent))
     end
   end
 
