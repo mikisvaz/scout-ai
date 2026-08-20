@@ -33,7 +33,18 @@ class TestLLMTools < Test::Unit::TestCase
     LLM.task_tool_definition(m, :step_time)
 
     tool_definitions = LLM.workflow_tools(m)
-    ppp JSON.pretty_generate tool_definitions
+
+    # workflow_tools returns {task => [workflow, definition]}; full end-to-end
+    # coverage (including call_workflow) lives in
+    # test/scout/llm/tools/test_workflow.rb
+    assert_equal %i(recipe_steps step_time).sort, tool_definitions.keys.sort
+    assert_equal m, tool_definitions[:recipe_steps].first
+
+    definition = tool_definitions[:recipe_steps].last
+    assert_equal :recipe_steps, definition[:name]
+    assert_equal 'List the steps to cook a recipe', definition[:description]
+    assert_equal :string, definition[:parameters][:properties][:recipe][:type]
+    assert_equal 'Recipe for which to extract steps', definition[:parameters][:properties][:recipe][:description]
   end
 
   def test_knowledbase_definition

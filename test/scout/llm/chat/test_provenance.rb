@@ -1,10 +1,9 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
-require 'tmpdir'
 require 'scout/llm/chat'
 
 class TestChatProvenance < Test::Unit::TestCase
   def test_does_not_follow_imports
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       imported = File.join(dir, 'imported.chat')
       root = File.join(dir, 'root.chat')
       File.write(imported, "user: Imported\n")
@@ -20,7 +19,7 @@ class TestChatProvenance < Test::Unit::TestCase
   end
 
   def test_does_not_follow_continue_or_last
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       continued = File.join(dir, 'continued.chat')
       last_chat = File.join(dir, 'last_chat.chat')
       root = File.join(dir, 'root.chat')
@@ -44,7 +43,7 @@ class TestChatProvenance < Test::Unit::TestCase
   end
 
   def test_traverses_job_and_log_relations
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       root = File.join(dir, 'root.chat')
       # A chat with a job reference. The job will not be loadable, so use on_error.
       File.write(root, "user: Root\njob: Agent/Worker/ask/Default_abcd1234\n")
@@ -58,7 +57,7 @@ class TestChatProvenance < Test::Unit::TestCase
   end
 
   def test_imports_in_chat_do_not_produce_warnings
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       root = File.join(dir, 'root.chat')
       File.write(root, "import: nonexistent.chat\nuser: Root\n")
 

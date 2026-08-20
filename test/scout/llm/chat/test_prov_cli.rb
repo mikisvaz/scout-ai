@@ -1,6 +1,5 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require 'scout/llm/chat'
-require 'tmpdir'
 require 'json'
 require 'open3'
 require 'rbconfig'
@@ -62,7 +61,7 @@ class TestProvCLI < Test::Unit::TestCase
   end
 
   def test_tree_aggregate_matches_token_collector
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, _worker = fixture_b(dir)
       expected = Chat.provenance_token_totals(parent)
 
@@ -84,7 +83,7 @@ class TestProvCLI < Test::Unit::TestCase
   end
 
   def test_evidence_lists_events_addresses_and_call_ids
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, _worker = fixture_b(dir)
 
       out, _err, status = prov('--evidence', parent)
@@ -113,7 +112,7 @@ class TestProvCLI < Test::Unit::TestCase
   end
 
   def test_tree_marks_delegated_jobs_only
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, _worker, _critic, _dep = fixture_c(dir)
 
       out, _err, status = prov(parent)
@@ -132,7 +131,7 @@ class TestProvCLI < Test::Unit::TestCase
   end
 
   def test_flow_and_dot_render_delegated_result_without_extra_nodes
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, _worker, _critic, _dep = fixture_c(dir)
 
       out, _err, status = prov('--flow', parent)
@@ -156,7 +155,7 @@ class TestProvCLI < Test::Unit::TestCase
   end
 
   def test_component_mode_prints_scopes_only_with_receipts
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, _worker = fixture_b(dir)
 
       out, _err, status = prov('--component', parent)
@@ -178,7 +177,7 @@ class TestProvCLI < Test::Unit::TestCase
       assert_not_include out, 'not exact', out
     end
 
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       plain = write_chat(dir, 'plain.chat',
                          "user: hi\nmeta: pt=1 ct=1 tt=2 inference_id=x1\nassistant: done\n")
 
@@ -193,7 +192,7 @@ class TestProvCLI < Test::Unit::TestCase
   end
 
   def test_malformed_receipt_renders_with_warning
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       payload = {'id' => 'bad1', 'result' => 'x', 'agent_meta' => 'oops'}
       text = "user: hi\n" +
              'function_call: ' + %({"name":"ask","arguments":{},"id":"bad1"}) + "\n" +
@@ -216,7 +215,7 @@ class TestProvCLI < Test::Unit::TestCase
   end
 
   def test_evidence_compact_legacy_ids_and_zero_scope
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       # Receipt-only chat with a legacy (no inference_id) meta: local scope has
       # no events at all.
       legacy = write_chat(dir, 'legacy.chat',

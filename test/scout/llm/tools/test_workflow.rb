@@ -31,9 +31,30 @@ class TestLLMToolWorkflow < Test::Unit::TestCase
     LLM.task_tool_definition(m, :step_time)
 
     tool_definitions = LLM.workflow_tools(m)
-    ppp JSON.pretty_generate tool_definitions
 
-    assert_equal ["prepare batter", "bake"], LLM.call_workflow(m, :recipe_steps)
+    # workflow_tools returns {task => [workflow, definition]}
+    assert_equal %i(recipe_steps step_time).sort, tool_definitions.keys.sort
+    assert_equal m, tool_definitions[:recipe_steps].first
+
+    definition = tool_definitions[:recipe_steps].last
+    assert_equal :recipe_steps, definition[:name]
+    assert definition[:parameters][:properties].include?('recipe') || definition[:parameters][:properties].include?(:recipe)
+
+    # ScoutCoder: call_workflow returns a Step (the job) for regular tasks; the
+    # caller is expected to produce/read it. Only exec exports (or
+    # exec_type: 'exec') return the literal job result inline.
+    job = LLM.call_workflow(m, :recipe_steps)
+    assert(Step === job)
+    job.produce
+    assert_equal ["prepare batter", "bake"], job.load
+
+    exec_result = LLM.call_workflow(m, :recipe_steps, exec_type: 'exec')
+    assert_equal ["prepare batter", "bake"], exec_result
+
+    path = LLM.call_workflow(m, :recipe_steps, return_path: true)
+    assert_equal ["prepare batter", "bake"], Open.read(path).split("\n")
+
+    assert_equal "30 minutes", LLM.call_workflow(m, :step_time, step: 'bake', exec_type: 'exec')
   end
 end
 

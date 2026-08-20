@@ -13,7 +13,6 @@ class TestLLMToolKB < Test::Unit::TestCase
       assert_equal Person, kb.target_type(:parents)
 
       knowledge_base_definition = LLM.knowledge_base_tool_definition(kb)
-      ppp JSON.pretty_generate knowledge_base_definition
 
       assert_equal ['Isa~Miki', 'Miki~Isa', 'Guille~Clei'], LLM.call_knowledge_base(kb, :brothers, entities: %w(Isa Miki Guille))
     end

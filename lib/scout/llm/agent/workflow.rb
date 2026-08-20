@@ -114,7 +114,7 @@ module Workflow
 
         result = if LLM::Agent === response
           agent = response
-          if agent.current_chat.last[:role].to_s == 'user'
+          if agent.current_chat.last[:role].to_s != 'assistant'
             agent.chat(return_messages: true)
           else
             agent.current_chat - agent.start_chat

@@ -1,0 +1,33 @@
+{
+  "id": "resp_mock_001",
+  "object": "response",
+  "created_at": 1700000000,
+  "model": "gpt-5-nano",
+  "status": "completed",
+  "output": [
+    {
+      "type": "message",
+      "id": "msg_mock_001",
+      "role": "assistant",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Mock answer from the Responses API",
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 8,
+    "total_tokens": 20,
+    "input_tokens_details": {
+      "cached_tokens": 4
+    },
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  }
+}

@@ -34,7 +34,10 @@ class TestClass < Test::Unit::TestCase
     assert_equal [4, 8], model.eval_list([1, 2])
   end
 
-  def test_R_model
+  # Real R + e1071 version moved to test/integration/scout/model/test_base.rb
+  # (installs the R package online); the trivial ScoutModel tests above stay
+  # unit-side.
+  def _test_R_model
     require 'rbbt-util'
     require 'rbbt/util/R'
 
@@ -114,4 +117,3 @@ cat(label, file="#{results}");
     end
   end
 end
-

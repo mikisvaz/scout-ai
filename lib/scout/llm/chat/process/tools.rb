@@ -178,7 +178,7 @@ module Chat
         end
         next
       elsif role == 'introduce'
-        workflow_name = message[:content]
+        workflow_name = message[:content].to_s
         next if introduced_workflows.include? workflow_name
         introduced_workflows << workflow_name
         workflow = begin

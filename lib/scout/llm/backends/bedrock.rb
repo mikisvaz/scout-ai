@@ -13,6 +13,15 @@ module LLM
       Aws::BedrockRuntime::Client.new(options)
     end
 
+    # ScoutCoder: Bedrock/Anthropic style payloads wrap the individual calls in
+    # a content entry ({"type" => "tool_use", "tool_calls" => [...]}). The ask
+    # loop used to pass that wrapper itself to LLM.tool_response, which then
+    # found neither 'function' nor 'name'/'arguments' and called the tool block
+    # with (nil, nil). Unwrap and return the inner tool call entries.
+    def self.tool_calls(message)
+      [message.dig('content')].compact.flatten.select{|m| m['tool_calls']}.collect{|m| m['tool_calls']}.flatten
+    end
+
     def self.messages_to_prompt(messages)
       system = []
       user = []
@@ -44,7 +53,10 @@ module LLM
       type ||= Scout::Config.get(:type, model, default: :messages)
 
       role, previous_response_id, tools = IndiferentHash.process_options options, :role, :previous_response_id, :tools
-      messages = LLM.parse(question, role)
+      # ScoutCoder: LLM.parse does not exist (the parser lives in Chat and is
+      # exposed as LLM.messages, which delegates to Chat.parse); this call
+      # raised NoMethodError on every ask. Use the LLM.messages delegation.
+      messages = LLM.messages(question, role)
 
       case type.to_sym 
       when :messages
@@ -72,7 +84,7 @@ module LLM
       result = JSON.parse(response.body.string)
       Log.debug "Response: #{Log.fingerprint result}"
       message = result
-      tool_calls = message.dig('content').select{|m| m['tool_calls']}
+      tool_calls = self.tool_calls message
 
       while tool_calls && tool_calls.any?
         messages << message
@@ -94,7 +106,7 @@ module LLM
         Log.debug "Response: #{Log.fingerprint result}"
 
         message = result
-        tool_calls = message.dig('content').select{|m| m['tool_calls']}
+        tool_calls = self.tool_calls message
       end
 
       message.dig('content').collect{|m|

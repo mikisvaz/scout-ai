@@ -1,0 +1,24 @@
+{
+  "id": "msg_mock_anthropic_002",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-5",
+  "stop_reason": "tool_use",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_mock_1",
+      "name": "get_current_temperature",
+      "input": {
+        "location": "London",
+        "unit": "Celsius"
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 30,
+    "output_tokens": 14,
+    "cache_read_input_tokens": 2,
+    "cache_creation_input_tokens": 1
+  }
+}

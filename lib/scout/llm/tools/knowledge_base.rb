@@ -85,7 +85,7 @@ Returns a list in the format source~target.
 
     if fields.length > 1
       description = <<-EOF
-Return details of association as a dictionary object.
+Return details of a given list of association pairs as a dictionary object. Use the function #{database} to find the associations pairs. 
 Each key is an association and the value is an array with the values of the different fields you asked for, or for all fields otherwise.
 The fields are: #{fields * ', '}.
 Multiple values may be present and use the charater ";" to separate them.

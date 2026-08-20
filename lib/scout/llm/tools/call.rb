@@ -1,3 +1,11 @@
+# LLM::Agent is referenced below in content dispatch, but the require chain
+# chat -> tools -> tools/call does not pull in scout/llm/agent (agent.rb
+# requires ask.rb, which requires chat.rb, so loading agent from chat would
+# be circular). Load it lazily on first use instead of at file load time.
+module LLM
+  require 'scout/llm/agent' unless defined?(LLM::Agent)
+end
+
 module LLM
   @max_content_length = Scout::Config.get(:max_content_length, :llm_tools, :tools, :llm, :ask, default: 100_000)
   self.singleton_class.attr_accessor :max_content_length

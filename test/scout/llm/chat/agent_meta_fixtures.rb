@@ -1,6 +1,6 @@
 # Reusable offline fixtures for agent_meta provenance tests (plan fixtures C,
 # D, E; also intended for the later token-collector rounds).  Everything runs
-# on Dir.mktmpdir directories plus persisted-style chat text; no providers.
+# on TmpFile.with_dir directories plus persisted-style chat text; no providers.
 #
 # Helpers provided:
 #   write_chat(dir, name, text)                         -> chat file path

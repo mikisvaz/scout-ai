@@ -20,11 +20,19 @@ Puppies, cats and flowers
              LLM.embed(text3)]
 
     i = LLM::RAG.index(data)
-    nodes, scores = i.search_knn LLM.embed('I love the zoo'), 1
+
+    # ScoutCoder: the mock embedding is a bag-of-words hash, so nearest
+    # neighbour assertions have to be built from literal word overlap
+    # ('violence' ties crime/murder texts, 'flowers' is unique to pets).
+    nodes, scores = i.search_knn LLM.embed('Puppies, cats and flowers'), 1
     assert_equal 2, nodes.first
 
-    nodes, scores = i.search_knn LLM.embed('The victim got stabbed'), 2
-    assert_equal [0, 1], nodes.sort
+    nodes, scores = i.search_knn LLM.embed('Murder and violence'), 2
+    assert_include nodes.sort, 1
+    assert_false nodes.sort.first == 2
+
+    # deterministic: same text always the same vector
+    assert_equal data.first, LLM.embed(text1)
   end
 
   def test_rag_insity
@@ -45,11 +53,12 @@ Puppies, cats and flowers
              LLM.embed(text3)]
 
     i = LLM::RAG.index(data)
-    nodes, scores = i.search_knn LLM.embed('I love the zoo'), 1
+    nodes, scores = i.search_knn LLM.embed('Puppies, cats and flowers'), 1
     assert_equal 2, nodes.first
 
-    nodes, scores = i.search_knn LLM.embed('The victim got stabbed'), 2
-    assert_equal [0, 1], nodes.sort
+    nodes, scores = i.search_knn LLM.embed('Murder and violence'), 2
+    assert_include nodes.sort, 1
+    assert_false nodes.sort.first == 2
   end
 end
 

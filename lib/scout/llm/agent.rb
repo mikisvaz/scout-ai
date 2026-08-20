@@ -71,24 +71,7 @@ module LLM
       no_ask_override = @other_options[:no_ask_override]
 
       messages.delete_if{|info| info[:role] == 'agent' }
-      if (list = messages.select{|info| info[:role] == 'socialize'}).any?
-        socialize = list.last[:content]
-        messages.delete_if{|info| info[:role] == 'socialize' }
-        self.socialize(options.dup) if socialize && %w(true TRUE True T 1).include?(socialize.to_s)
-      end
-
-      tools = options[:tools] || {}
-      if other_tools = @other_options[:tools]
-        other_tools = JSON.parse other_tools if String === other_tools
-        tools = tools.merge other_tools
-      end
-
       begin
-
-        if workflow || knowledge_base
-          tools.merge!(LLM.workflow_tools(workflow)) if workflow && workflow.tasks.any?
-          tools.merge!(LLM.knowledge_base_tool_definition(knowledge_base)) if knowledge_base and knowledge_base.all_databases.any?
-        end
 
         if workflow && workflow.tasks.include?(:ask) && ! no_ask_override
           other_options.each do |key,value|
@@ -112,6 +95,25 @@ module LLM
             Chat.setup(messages).answer
           end
         else
+
+          if (list = messages.select{|info| info[:role] == 'socialize'}).any?
+            socialize = list.last[:content]
+            messages.delete_if{|info| info[:role] == 'socialize' }
+            self.socialize(options.dup) if socialize && %w(true TRUE True T 1).include?(socialize.to_s)
+          end
+
+          tools = options[:tools] || {}
+          if other_tools = @other_options[:tools]
+            other_tools = JSON.parse other_tools if String === other_tools
+            tools = tools.merge other_tools
+          end
+
+
+          if workflow || knowledge_base
+            tools.merge!(LLM.workflow_tools(workflow)) if workflow && workflow.tasks.any?
+            tools.merge!(LLM.knowledge_base_tool_definition(knowledge_base)) if knowledge_base and knowledge_base.all_databases.any?
+          end
+
           options[:tools] = tools
           LLM.ask messages, @other_options.except(:no_ask_override).merge(log_errors: true).merge(options).merge(agent: false)
         end

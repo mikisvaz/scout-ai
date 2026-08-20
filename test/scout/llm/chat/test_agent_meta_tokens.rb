@@ -1,6 +1,5 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require 'scout/llm/chat'
-require 'tmpdir'
 require 'json'
 require_relative 'agent_meta_fixtures'
 
@@ -14,7 +13,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   ## Fixture A - receipt-only delegation
 
   def test_receipt_only_events_are_counted_once
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent = write_chat(dir, 'parent.chat',
                           receipt_chat_text(
                             {'a1' => [meta_receipt('pt=100 ct=50 tt=150 inference_id=w1'),
@@ -35,7 +34,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_receipt_only_evidence_addresses_and_call_ids
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent = write_chat(dir, 'parent.chat',
                           receipt_chat_text(
                             {'a1' => [meta_receipt('pt=100 ct=50 tt=150 inference_id=w1'),
@@ -56,7 +55,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_receipt_only_scopes_and_follow_option
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent = write_chat(dir, 'parent.chat',
                           receipt_chat_text(
                             {'a1' => [meta_receipt('pt=100 ct=50 tt=150 inference_id=w1'),
@@ -85,7 +84,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   ## Fixture B - receipt plus saved worker log
 
   def test_receipt_and_log_evidence_merge_into_one_event
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       worker_log = "user: work\n" +
                    "meta: pt=100 ct=50 tt=150 inference_id=w1\n" +
                    "meta: pt=20 ct=10 tt=30 inference_id=w2\n" +
@@ -134,7 +133,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_scope_selection_with_shared_evidence
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       worker_log = "user: work\n" +
                    "meta: pt=100 ct=50 tt=150 inference_id=w1\n" +
                    "meta: pt=5 ct=5 tt=10 inference_id=w3\n" +
@@ -171,7 +170,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   ## Fixture D - aggregate over the nested chain
 
   def test_fixture_d_every_direct_event_counted_once
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, _worker, _critic, _dep = fixture_c(dir)
 
       events = Chat.provenance_token_events(parent)
@@ -191,7 +190,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   ## Fixture F - identity conflicts
 
   def test_conflicting_token_fields_count_only_canonical_evidence
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       log = "user: work\nmeta: pt=10 ct=5 tt=99 inference_id=f1\nassistant: done\n"
       worker = make_job(dir, 'Worker/ask/Default_w', logs: {'agent.chat' => log})
 
@@ -230,7 +229,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_provider_response_id_disagreement_is_a_conflict
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent = write_chat(dir, 'p2.chat',
                           receipt_chat_text(
                             {'a1' => [meta_receipt('pt=1 tt=2 inference_id=g1 provider_response_id=ra'),
@@ -250,7 +249,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_provider_response_id_groups_receipt_and_log_without_inference_id
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       worker = make_job(dir, 'W3/ask/Default_3',
                         logs: {'agent.chat' => "user: w\nmeta: pt=1 tt=2 provider_response_id=rx\nassistant: done\n"})
       parent = write_chat(dir, 'p4.chat',
@@ -271,7 +270,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_conflicts_do_not_raise_without_a_warnings_array
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent = write_chat(dir, 'p2.chat',
                           receipt_chat_text(
                             {'a1' => [meta_receipt('pt=1 tt=2 inference_id=g1'),
@@ -288,7 +287,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   ## Fixture G - legacy records without inference_id
 
   def test_legacy_chat_metas_keep_lineage_dedup
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       legacy = "user: w\nmeta: pt=7 ct=3 tt=10\nassistant: done\n"
       j1 = make_job(dir, 'J1/ask/Default_1', logs: {'agent.chat' => legacy})
       j2 = make_job(dir, 'J2/ask/Default_2', logs: {'agent.chat' => legacy})
@@ -306,7 +305,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_legacy_receipt_metas_are_never_merged
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       twice = write_chat(dir, 'twice.chat',
                          receipt_chat_text(
                            {'r1' => [meta_receipt('pt=5 tt=6')],
@@ -326,7 +325,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_legacy_receipt_and_log_stay_two_events
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       worker = make_job(dir, 'LG/ask/Default_1',
                         logs: {'agent.chat' => "user: w\nmeta: pt=8 tt=9\nassistant: done\n"})
       mixed = write_chat(dir, 'mixed.chat',
@@ -347,7 +346,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_chat_without_agent_meta_keeps_token_totals_semantics
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       path = write_chat(dir, 'plain.chat',
                         "user: hi\nmeta: pt=1 tt=2\nmeta: pt=3 tt=4\nassistant: done\n")
 
@@ -360,7 +359,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   ## Fixture H - truncated parent output
 
   def test_truncated_output_keeps_receipt_events
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent = write_chat(dir, 'parent.chat',
                           truncated_receipt_chat(
                             'a1', [meta_receipt('pt=200 ct=100 tt=300 inference_id=t1')]
@@ -387,7 +386,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   ## Canonical rule
 
   def test_canonical_evidence_prefers_chat_side_then_discovery_order
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       worker = make_job(dir, 'W/ask/Default_w',
                         logs: {'agent.chat' => "user: w\nmeta: pt=11 ct=7 tt=18 inference_id=k1\nassistant: done\n"})
       parent = write_chat(dir, 'parent.chat',
@@ -417,7 +416,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   ## Traversal-stage receipt problems vs the warnings Array
 
   def test_traversal_stage_receipt_problems_go_to_the_warnings_array
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       missing = File.join(dir, 'Missing/ask/Default_zzz')
       chat = write_chat(dir, 'bad.chat',
                         receipt_chat_text(
@@ -459,7 +458,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_traversal_stage_receipt_problems_raise_without_warnings_array
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       chat = write_chat(dir, 'bad.chat',
                         receipt_chat_text({'b1' => 'not-an-array'},
                                           extra: ['meta: pt=5 tt=6 inference_id=ok1']))
@@ -478,7 +477,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   # one receipt must produce ONE event whose evidence array keeps all four
   # addresses, counted once.
   def test_same_identity_in_three_chat_locations_and_one_receipt
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       shared = 'meta: pt=100 ct=40 tt=140 inference_id=shared1'
       j1 = make_job(dir, 'J1/ask/Default_1', logs: {'agent.chat' => "user: w\n#{shared}\nassistant: done\n"})
       j2 = make_job(dir, 'J2/ask/Default_2', logs: {'agent.chat' => "user: w\n#{shared}\nassistant: done\n"})
@@ -515,7 +514,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   # Two separate ask receipts pointing at the same job= keep both edge details
   # (distinct call ids and receipt addresses) while the Step is visited once.
   def test_two_receipts_to_the_same_job_keep_both_edge_details
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       worker = make_job(dir, 'Worker/ask/Default_w',
                         logs: {'agent.chat' => "user: w\nmeta: pt=1 tt=2 inference_id=wonly\nassistant: done\n"})
       parent = write_chat(dir, 'parent.chat',
@@ -542,7 +541,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   end
 
   def test_strict_mode_raises_on_identity_conflict
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent = write_chat(dir, 'p5.chat',
                           receipt_chat_text(
                             {'a1' => [meta_receipt('pt=1 tt=2 inference_id=g1'),
@@ -558,7 +557,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   # A provider_response_id present in one copy and absent in another is
   # incomplete evidence (migration), never a conflict.
   def test_missing_provider_response_id_is_incomplete_not_conflict
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       worker = make_job(dir, 'W4/ask/Default_4',
                         logs: {'agent.chat' => "user: w\nmeta: pt=3 tt=4 inference_id=h1 provider_response_id=rq\nassistant: done\n"})
       parent = write_chat(dir, 'p6.chat',
@@ -584,7 +583,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
   ## Scope validation
 
   def test_unknown_scope_raises
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       path = write_chat(dir, 'any.chat', "user: hi\nassistant: done\n")
 
       assert_raise(ParameterException) do

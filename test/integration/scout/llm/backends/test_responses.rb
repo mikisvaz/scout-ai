@@ -3,20 +3,38 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 class TestLLMResponses < Test::Unit::TestCase
   def test_ask
+    # ScoutCoder: injecting options[:client] with a fake client keeps the
+    # whole responses.create -> process_response path offline; the fake
+    # records the parameters so we can assert on what was really sent.
+    client = TestFixtures.responses_client('backends/responses')
     prompt =<<-EOF
 system: you are a coding helper that only write code and comments without formatting so that it can work directly, avoid the initial and end commas ```.
 user: write a script that sorts files in a directory
     EOF
-    ppp LLM::Responses.ask prompt, model: 'gpt-4.1-nano'
+
+    res = LLM::Responses.ask prompt, client: client, model: 'gpt-4.1-nano', persist: false
+
+    assert_equal 'Mock answer from the Responses API', res
+    assert_equal 1, client.calls.length
+    assert_equal 'gpt-4.1-nano', client.calls.first[:model]
   end
 
   def test_embeddings
-    Log.severity = 0
-    text =<<-EOF
-Some text
-    EOF
-    emb = LLM::Responses.embed text, log_errors: true
+    payload = { 'object' => 'list',
+                'data' => [ { 'object' => 'embedding', 'index' => 0, 'embedding' => [0.1, 0.2, 0.3] } ],
+                'model' => 'embedding-model',
+                'usage' => { 'prompt_tokens' => 3, 'total_tokens' => 3 } }
+
+    client = FakeOpenAIChatClient.new(payload)
+
+    emb = LLM::Responses.embed 'Some text', client: client, model: 'embedding-model', log_errors: true
+
     assert(Float === emb.first)
+    assert_equal [0.1, 0.2, 0.3], emb
+
+    assert_equal 1, client.calls.length
+    assert_equal 'embedding-model', client.calls.first[:model]
+    assert_equal 'Some text', client.calls.first[:text]
   end
 
   def test_tool_call_output_weather
@@ -34,7 +52,11 @@ user:
 
 should i take an umbrella?
     EOF
-    ppp LLM::Responses.ask prompt, model: 'gpt-4.1-nano'
+    client = TestFixtures.responses_client('backends/responses')
+    res = LLM::Responses.ask prompt, client: client, model: 'gpt-4.1-nano', persist: false
+
+    assert_equal 'Mock answer from the Responses API', res
+    assert client.calls.first[:input].any? { |m| m[:role].to_s == 'user' }
   end
 
   def test_tool
@@ -51,15 +73,8 @@ What is the weather in London. Should I take my umbrella?
         "parameters": {
           "type": "object",
           "properties": {
-            "location": {
-              "type": "string",
-              "description": "The city and state, e.g., San Francisco, CA"
-            },
-            "unit": {
-              "type": "string",
-              "enum": ["Celsius", "Fahrenheit"],
-              "description": "The temperature unit to use. Infer this from the user's location."
-            }
+            "location": { "type": "string", "description": "The city and state, e.g., San Francisco, CA" },
+            "unit": { "type": "string", "enum": ["Celsius", "Fahrenheit"], "description": "The temperature unit to use. Infer this from the user's location." }
           },
           "required": ["location", "unit"]
         }
@@ -67,14 +82,37 @@ What is the weather in London. Should I take my umbrella?
     ]
 
     sss 1
-    respose = LLM::Responses.ask prompt, tool_choice: 'required', tools: tools, model: "gpt-4.1-nano", log_errors: true do |name,arguments|
-      "It's 15 degrees and raining."
+    client = TestFixtures.responses_client('backends/responses_tool_call', 'backends/responses')
+    respose = LLM::Responses.ask prompt, tool_choice: 'required', tools: tools,
+                                 client: client, model: "gpt-4.1-nano",
+                                 log_errors: true, persist: false do |name,arguments|
+      'block tool answer: it is raining'
     end
 
-    ppp respose
+    # tool_call first, then the final answer from the second replayed payload
+    assert_equal 'Mock answer from the Responses API', respose
+    assert_equal 2, client.calls.length
+
+    # the tool definition was serialized into the second request
+    sent_tools = client.calls.last[:tools]
+    assert sent_tools.any? { |t| (t[:name] || t['name']) == 'get_current_temperature' }
+
+    # ScoutCoder: the Responses backend sends the messages under `input:`
+    # (not `messages:`) and the tool round-trip is serialized as
+    # {type: 'function_call'} / {type: 'function_call_output', output: ...}
+    # entries rather than role-based messages. With previous_response threading
+    # (the default for this backend) the follow-up request only carries
+    # previous_response_id plus the new output entries.
+    last_input = client.calls.last[:input] || []
+    assert last_input.any? { |m| m['type'].to_s == 'function_call' && m['name'] == 'get_current_temperature' }
+    assert last_input.any? { |m| m['type'].to_s == 'function_call_output' }
+    assert last_input.find { |m| m['type'].to_s == 'function_call_output' }['output'].include?('block tool answer')
   end
 
   def test_news
+    # ScoutCoder: the `websearch:` chat directive ends up as a `tools:` entry in
+    # the request parameters (a web_search tool definition), so it can be
+    # asserted offline against a fake client.
     prompt =<<-EOF
 websearch: true
 
@@ -82,7 +120,12 @@ user:
 
 What was the top new in the US today?
     EOF
-    ppp LLM::Responses.ask prompt
+    client = TestFixtures.responses_client('backends/responses')
+    res = LLM::Responses.ask prompt, client: client, persist: false
+
+    assert_equal 'Mock answer from the Responses API', res
+    sent_tools = client.calls.first[:tools]
+    assert sent_tools.any? { |t| (t['type'] || t[:type]).to_s.include?('web_search') }
   end
 
   def test_image
@@ -93,8 +136,14 @@ user:
 
 What animal is represented in the image?
     EOF
-    sss 0
-    ppp LLM::Responses.ask prompt
+    client = TestFixtures.responses_client('backends/responses')
+    res = LLM::Responses.ask prompt, client: client, persist: false
+
+    assert_equal 'Mock answer from the Responses API', res
+    input = client.calls.first[:input]
+    assert input.any? { |m| m[:role].to_s == 'user' }
+    # the image directive travels as an image_url/image message entry
+    assert input.inspect.include?('image')
   end
 
   def test_json_output
@@ -107,8 +156,13 @@ user:
 
 What other movies have the protagonists of the original gost busters played on, just the top.
     EOF
-    sss 0
-    ppp LLM::Responses.ask prompt, format: :json
+    client = TestFixtures.responses_client('backends/responses')
+    res = LLM::Responses.ask prompt, format: :json, client: client, persist: false
+
+    assert_equal 'Mock answer from the Responses API', res
+    sent = client.calls.first
+    assert sent[:text].to_s.include?('json_object') || sent[:response_format].to_s.include?('json_object') ||
+           sent[:text_format].to_s.include?('json_object') || sent.inspect.include?('json_object')
   end
 
   def test_json_format
@@ -118,7 +172,6 @@ user:
 What other movies have the protagonists of the original gost busters played on.
 Name each actor and the top movie they took part of
     EOF
-    sss 0
 
     format = {
       name: 'actors_and_top_movies',
@@ -126,7 +179,11 @@ Name each actor and the top movie they took part of
       properties: {},
       additionalProperties: {type: :string}
     }
-    ppp LLM::Responses.ask prompt, format: format
+    client = TestFixtures.responses_client('backends/responses')
+    res = LLM::Responses.ask prompt, format: format, client: client, persist: false
+
+    assert_equal 'Mock answer from the Responses API', res
+    assert client.calls.first.inspect.include?('actors_and_top_movies')
   end
 
   def test_json_format_list
@@ -136,7 +193,6 @@ user:
 What other movies have the protagonists of the original gost busters played on.
 Name each actor as keys and the top 3 movies they took part of as values
     EOF
-    sss 0
 
     format = {
       name: 'actors_and_top_movies',
@@ -144,7 +200,11 @@ Name each actor as keys and the top 3 movies they took part of as values
       properties: {},
       additionalProperties: {type: :array, items: {type: :string}}
     }
-    ppp LLM::Responses.ask prompt, format: format
+    client = TestFixtures.responses_client('backends/responses')
+    res = LLM::Responses.ask prompt, format: format, client: client, persist: false
+
+    assert_equal 'Mock answer from the Responses API', res
+    assert client.calls.first.inspect.include?('actors_and_top_movies')
   end
 
   def test_json_format_actor_list
@@ -154,22 +214,6 @@ user:
 What other movies have the protagonists of the original gost busters played on.
 Name each actor as keys and the top 3 movies they took part of as values
     EOF
-    sss 0
-
-    format = {
-      name: 'actors_and_top_movies',
-      type: 'object',
-      properties: {},
-      additionalProperties: false,
-      items: {
-        type: 'object', 
-        properties: {
-          name: {type: :string, description: 'actor name'}, 
-          movies: {type: :array, description: 'list of top 3 movies', items: {type: :string, description: 'movie title plus year in parenthesis'} }, 
-          additionalProperties: false
-        }
-      }
-    }
 
     schema =  {
       "type": "object",
@@ -195,7 +239,11 @@ Name each actor as keys and the top 3 movies they took part of as values
       additionalProperties: false,
       "required": ["people"]
     }
-    ppp LLM::Responses.ask prompt, format: schema
+    client = TestFixtures.responses_client('backends/responses')
+    res = LLM::Responses.ask prompt, format: schema, client: client, persist: false
+
+    assert_equal 'Mock answer from the Responses API', res
+    assert client.calls.first.inspect.include?('minItems')
   end
 
   def test_tool_gpt5
@@ -212,27 +260,23 @@ What is the weather in London. Should I take my umbrella?
         "parameters": {
           "type": "object",
           "properties": {
-            "location": {
-              "type": "string",
-              "description": "The city and state, e.g., San Francisco, CA"
-            },
-            "unit": {
-              "type": "string",
-              "enum": ["Celsius", "Fahrenheit"],
-              "description": "The temperature unit to use. Infer this from the user's location."
-            }
+            "location": { "type": "string", "description": "The city and state, e.g., San Francisco, CA" },
+            "unit": { "type": "string", "enum": ["Celsius", "Fahrenheit"], "description": "The temperature unit to use. Infer this from the user's location." }
           },
           "required": ["location", "unit"]
         }
       },
     ]
 
-    sss 0
-    respose = LLM::Responses.ask prompt, tool_choice: 'required', tools: tools, model: "gpt-5", log_errors: true do |name,arguments|
+    client = TestFixtures.responses_client('backends/responses_tool_call', 'backends/responses')
+    respose = LLM::Responses.ask prompt, tool_choice: 'required', tools: tools, model: "gpt-5",
+                                 client: client, log_errors: true, persist: false do |name,arguments|
       "It's 15 degrees and raining."
     end
 
-    ppp respose
+    assert_equal 'Mock answer from the Responses API', respose
+    assert_equal 2, client.calls.length
+    assert_equal 'gpt-5', client.calls.first[:model]
   end
 
   def test_openai_chat_api

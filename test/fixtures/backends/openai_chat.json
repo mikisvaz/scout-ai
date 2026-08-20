@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-mock-001",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "gpt-5-nano",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Mock answer from Chat Completions"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 11,
+    "completion_tokens": 7,
+    "total_tokens": 18
+  }
+}

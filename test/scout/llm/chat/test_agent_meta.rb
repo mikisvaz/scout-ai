@@ -1,6 +1,5 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require 'scout/llm/chat'
-require 'tmpdir'
 
 class TestChatAgentMeta < Test::Unit::TestCase
   def chat(text)
@@ -51,7 +50,7 @@ function_call_output: #{envelope.to_json}
   end
 
   def test_extracts_receipt_entries_from_persisted_file_with_source
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       path = File.join(dir, 'parent.chat')
       Open.write(path, valid_receipt)
       conversation = Chat.load(path)
@@ -173,7 +172,7 @@ assistant: Hi
   end
 
   def test_meta_evidence_preserves_source_addresses
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       path = File.join(dir, 'parent.chat')
       Open.write(path, valid_receipt + "\nmeta: pt=10 tt=12 inference_id=local1\nassistant: done\n")
       conversation = Chat.load(path)
@@ -216,7 +215,7 @@ assistant: Hi
     assert_equal 1, reference[:agent_meta_index]
     assert_equal [3, :agent_meta, 1], reference[:evidence_address]
 
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       path = File.join(dir, 'parent.chat')
       Open.write(path, valid_receipt)
       with_source = Chat.agent_meta_job_references(Chat.load(path), source: path)

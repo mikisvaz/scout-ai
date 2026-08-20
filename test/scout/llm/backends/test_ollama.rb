@@ -3,14 +3,72 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 class TestLLMOllama < Test::Unit::TestCase
 
-  def _test_ask
-    Log.severity = 0
+  def test_ask
+    client = TestFixtures.ollama_client('backends/ollama')
+    res = LLM::OLlama.ask 'user: write a script that sorts files in a directory',
+                          client: client, model: 'mistral', mode: 'chat', persist: false
+
+    assert_equal 'Mock answer from Ollama', res
+    assert_equal 1, client.calls.length
+    assert_equal 'mistral', client.calls.first[:model]
+    assert client.calls.first[:messages].any? { |m| m[:role].to_s == 'user' }
+  end
+
+  def test_tool
     prompt =<<-EOF
-system: you are a coding helper that only write code and inline comments. No extra explanations or comentary
-system: Avoid using backticks ``` to format code.
-user: write a script that sorts files in a directory 
+What is the weather in London. Should I take an umbrella?
     EOF
-    ppp LLM::OLlama.ask prompt, model: 'mistral', mode: 'chat'
+
+    tools = [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_current_temperature",
+          "description": "Get the current temperature for a specific location",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "The city and state, e.g., San Francisco, CA"
+              },
+              "unit": {
+                "type": "string",
+                "enum": ["Celsius", "Fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the user's location."
+              }
+            },
+            "required": ["location", "unit"]
+          }
+        }
+      },
+    ]
+
+    client = TestFixtures.ollama_client('backends/ollama_tool_call', 'backends/ollama')
+    respose = LLM::OLlama.ask prompt, model: 'gpt-oss',
+                              client: client, tool_choice: 'required',
+                              tools: tools, persist: false do |name,arguments|
+      "It's raining cats and dogs"
+    end
+
+    assert_equal 'Mock answer from Ollama', respose
+    assert_equal 2, client.calls.length
+
+    # ScoutCoder: LLM::OLlama#query calls client.chat(parameters) positionally
+    # (no `parameters:` kwarg) and the API returns an Array of chunk hashes.
+    sent_tools = client.calls.first[:tools]
+    assert sent_tools.any? { |t| (t.dig(:function, :name) || t.dig('function', 'name')) == 'get_current_temperature' }
+  end
+
+  def test_embeddings
+    payload = [{ 'embeddings' => [[0.1, 0.2, 0.3]] }]
+    client = FakeOllamaClient.new(payload)
+
+    emb = LLM::OLlama.embed 'Some text', client: client, model: 'mxbai-embed-large'
+
+    assert(Float === emb.first)
+    assert_equal [0.1, 0.2, 0.3], emb
+    assert_equal 'Some text', client.calls.first[:input]
   end
 
   def _test_tool_call_output
@@ -89,22 +147,14 @@ What is the weather in London. Should I take an umbrella?
     ppp respose
   end
 
-  def _test_embeddings
-    Log.severity = 0
-    text =<<-EOF
-Some text
-    EOF
-    emb = LLM::OLlama.embed text, model: 'mxbai-embed-large', url: 'localhost:3331' 
-    assert(Float === emb.first)
-  end
-
   def test_embedding_array
-    Log.severity = 0
-    text =<<-EOF
-Some text
-    EOF
-    emb = LLM::OLlama.embed [text], model: 'mxbai-embed-large', url: 'localhost:3331' 
+    payload = [{ 'embeddings' => [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]] }]
+    client = FakeOllamaClient.new(payload)
+
+    emb = LLM::OLlama.embed ['Some text', 'More text'], client: client, model: 'mxbai-embed-large'
+
     assert(Float === emb.first.first)
+    assert_equal [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], emb
   end
 end
 

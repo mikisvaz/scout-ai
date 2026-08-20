@@ -1,3 +1,11 @@
+# query() calls ScoutPython.dict2hash, which is defined by the scout/python
+# support (scout-rig), not by this repo: require it up-front so the tool loop
+# path does not hit NameError.
+# ScoutCoder: 'scout/python' alone loads the module but PyCall::List (needed by
+# ScoutPython.py2ruby_a inside dict2hash) is only defined by pycall/list, so
+# require that too, otherwise the offline tool-loop path raises NameError.
+require 'scout/python'
+require 'pycall/list'
 require_relative 'default'
 
 module LLM
@@ -58,7 +66,11 @@ module LLM
       parameters[:chat_template] ||= IndiferentHash.pull_keys parameters, :chat_template
       parameters = parameters.keys_to_sym 
       response = client.chat(messages, formatted_tools, parameters)
-      response = ScoutPython.dict2hash(response)
+      # ScoutCoder: ScoutPython.dict2hash only works on real PyCall dicts; fake
+      # clients in tests replay plain Ruby Hashes (which have no #get), so only
+      # convert when the object actually is a python wrapper.
+      response = ScoutPython.dict2hash(response) if defined?(PyCall) && PyCall === response
+      response = response.to_h if defined?(PyCall) && (PyCall::Dict === response rescue false)
       IndiferentHash.setup({message: response})
     rescue
       Log.debug 'Input parameters: ' + "\n" + JSON.pretty_generate(parameters.except(:tools))

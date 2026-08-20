@@ -31,7 +31,12 @@ module LLM
       require_relative 'backends/relay'
       LLM::Relay.embed(text, options)
     else
-      raise "Unknown backend: #{backend}"
+      # Fall back to the runtime backend registry (mirrors LLM.ask) so
+      # test-only or plugin backends registered with LLM.register_backend
+      # work for embeddings too, instead of only for ask.
+      mod = LLM::BACKENDS[backend]
+      raise "Unknown backend: #{backend}" if mod.nil?
+      mod.embed(text, options)
     end
   end
 end

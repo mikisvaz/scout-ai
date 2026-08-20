@@ -21,7 +21,15 @@ module LLM
       url, key = IndiferentHash.process_options options,
         :url, :key
 
-      Object::Anthropic::Client.new(access_token: key)
+      # ScoutCoder: the anthropic gem (>= 1.x, e.g. 1.17.0) Client#initialize
+      # accepts api_key: / auth_token: / base_url:, NOT access_token: (that
+      # is ruby-openai's keyword). Passing access_token: raises
+      # ArgumentError: unknown keyword. Verify kwargs against the installed
+      # gem's lib/anthropic/client.rb when touching this.
+      Object::Anthropic::Client.new(
+        api_key: key,
+        base_url: url
+      )
     end
 
     def query(client, messages, tools = [], parameters = {})

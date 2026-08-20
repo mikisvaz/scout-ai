@@ -115,7 +115,13 @@ module LLM
       info
     end
 
+    # ScoutCoder: Backend::ClassMethods#ask assigns into the meta hash
+    # (meta['timestamp'] = ...) right after update_meta, so a backend override
+    # MUST return a Hash; returning nil crashes the request when log_response
+    # is on (the default). Ollama does not report OpenAI-style usage here, so an
+    # empty hash keeps the request working.
     def update_meta(response, current_meta = nil)
+      {}
     end
 
     def reasoning(response, current_meta = nil)

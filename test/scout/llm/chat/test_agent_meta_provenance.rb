@@ -1,6 +1,5 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require 'scout/llm/chat'
-require 'tmpdir'
 require_relative 'agent_meta_fixtures'
 
 # Structure-level tests for the :agent_job provenance relation (plan fixtures
@@ -12,7 +11,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
   ## Fixture C
 
   def test_agent_job_edge_links_receipt_job_to_enclosing_chat
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, worker, _critic, _dep = fixture_c(dir)
 
       errors = []
@@ -47,7 +46,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
   end
 
   def test_follow_job_excludes_the_agent_job_edge
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, _worker, _critic, _dep = fixture_c(dir)
 
       signature = visit_signature(Chat.traverse_provenance(parent, follow: [:job]).to_a)
@@ -60,7 +59,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
   end
 
   def test_follow_agent_job_includes_only_the_agent_job_edge
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, worker, _critic, _dep = fixture_c(dir)
 
       signature = visit_signature(Chat.traverse_provenance(parent, follow: [:agent_job]).to_a)
@@ -77,7 +76,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
   end
 
   def test_chat_without_agent_meta_traverses_as_before
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       critic = make_job(dir, 'Critic/ask/Default_c')
       plain = write_chat(dir, 'plain.chat', plain_delegation_chat(critic))
 
@@ -96,7 +95,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
   ## Fixture D (structure)
 
   def test_nested_receipt_chain_terminates_with_both_delegation_edges
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, worker, critic, _dep = fixture_c(dir)
 
       errors = []
@@ -126,7 +125,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
   end
 
   def test_deliberate_receipt_cycle_does_not_hang
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       parent, worker, critic, _dep = fixture_c(dir)
 
       # Self reference plus a reference back to the already-visited Worker:
@@ -158,7 +157,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
   ## Fixture E
 
   def test_malformed_receipts_become_agent_job_warnings
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       # Output indexes after the doubled inline user line: b1 -> 3, b2 -> 5,
       # b3 -> 7.
       chat = write_chat(dir, 'bad.chat',
@@ -215,7 +214,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
   # Hashes carrying an explicit `agent_meta` key.  Raw output text that merely
   # mentions the word must never produce a warning (or a strict-mode raise).
   def test_unparseable_output_mentioning_agent_meta_is_ignored
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       chat = write_chat(dir, 'broken.chat', <<TXT)
 user: Run
 function_call: {"name":"chat_task","arguments":{},"id":"u1"}
@@ -241,7 +240,7 @@ TXT
   # An explicit agent_meta key with a non-Array value is a malformed receipt
   # (present, not absent) and must warn through the normal path.
   def test_explicit_non_array_agent_meta_warns
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       chat = write_chat(dir, 'explicit.chat',
                         receipt_chat_text({'x1' => [meta_receipt('pt=1 tt=2 inference_id=e1')]}))
 
@@ -252,7 +251,7 @@ TXT
   end
 
   def test_unresolved_job_reference_warns_and_is_not_enqueued
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       missing = File.join(dir, 'Missing/ask/Default_zzz')
       chat = write_chat(dir, 'unresolved.chat',
                         receipt_chat_text({'u1' => [meta_receipt("job=#{missing}")]},
@@ -282,7 +281,7 @@ TXT
   end
 
   def test_malformed_receipt_does_not_hide_other_provenance
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       ordinary = make_job(dir, 'Ordinary/ask/Default_o')
       chat = write_chat(dir, 'mixed.chat',
                         receipt_chat_text({'m1' => 'not-an-array'},
@@ -303,7 +302,7 @@ TXT
   end
 
   def test_strict_mode_raises_on_unresolved_reference
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       missing = File.join(dir, 'Missing/ask/Default_zzz')
       chat = write_chat(dir, 'strict.chat',
                         receipt_chat_text({'s1' => [meta_receipt("job=#{missing}")]}))
@@ -318,7 +317,7 @@ TXT
   end
 
   def test_strict_mode_raises_on_malformed_receipt
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       chat = write_chat(dir, 'strict-bad.chat',
                         receipt_chat_text({'s1' => [{role: 'assistant', content: 'x'}]}))
 
@@ -330,7 +329,7 @@ TXT
   end
 
   def test_no_warnings_without_receipts
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       plain = write_chat(dir, 'plain.chat',
                          "user: hi\nmeta: pt=1 tt=2 inference_id=p1\nassistant: done\n")
 
@@ -351,7 +350,7 @@ TXT
   end
 
   def test_unknown_relation_still_raises
-    Dir.mktmpdir do |dir|
+    TmpFile.with_dir do |dir|
       chat = write_chat(dir, 'any.chat', "user: hi\nassistant: done\n")
 
       assert_raise(ParameterException) do

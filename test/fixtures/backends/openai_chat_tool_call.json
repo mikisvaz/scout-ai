@@ -1,0 +1,31 @@
+{
+  "id": "chatcmpl-mock-002",
+  "object": "chat.completion",
+  "created": 1700000001,
+  "model": "gpt-5-nano",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_mock_1",
+            "type": "function",
+            "function": {
+              "name": "get_current_temperature",
+              "arguments": "{\"location\":\"London\",\"unit\":\"Celsius\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 20,
+    "completion_tokens": 13,
+    "total_tokens": 33
+  }
+}

@@ -26,7 +26,20 @@ Juwelier::RubygemsDotOrgTasks.new
 require 'rake/testtask'
 Rake::TestTask.new(:test) do |test|
   test.libs << 'lib' << 'test'
-  test.pattern = 'test/**/test_*.rb'
+  # Unit tests only: real-infrastructure tests live under test/integration
+  # and are collected by the separate :test_integration task.
+  # ScoutCoder: Rake::TestTask#file_list concatenates pattern and test_files,
+  # so setting pattern here would leak test/integration/** into `rake test`;
+  # assigning only the already-excluded FileList to test_files keeps the
+  # default suite unit-only.
+  test.test_files = FileList['test/**/test_*.rb'].exclude('test/integration/**/test_*.rb')
+  test.verbose = true
+end
+
+desc "Run integration tests (test/integration/**/test_*.rb)"
+Rake::TestTask.new(:test_integration) do |test|
+  test.libs << 'lib' << 'test'
+  test.pattern = 'test/integration/**/test_*.rb'
   test.verbose = true
 end
 

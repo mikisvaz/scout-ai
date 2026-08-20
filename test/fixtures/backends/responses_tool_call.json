@@ -1,0 +1,28 @@
+{
+  "id": "resp_mock_002",
+  "object": "response",
+  "created_at": 1700000001,
+  "model": "gpt-5-nano",
+  "status": "completed",
+  "output": [
+    {
+      "type": "function_call",
+      "id": "fc_mock_1",
+      "call_id": "call_mock_1",
+      "name": "get_current_temperature",
+      "arguments": "{\"location\":\"London\",\"unit\":\"Celsius\"}",
+      "status": "completed"
+    }
+  ],
+  "usage": {
+    "input_tokens": 24,
+    "output_tokens": 16,
+    "total_tokens": 40,
+    "input_tokens_details": {
+      "cached_tokens": 6
+    },
+    "output_tokens_details": {
+      "reasoning_tokens": 2
+    }
+  }
+}

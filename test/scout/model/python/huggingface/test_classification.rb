@@ -1,17 +1,26 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
+MODEL = 'bert-base-uncased'
+
 class TestSequenceClassification < Test::Unit::TestCase
   def _test_eval_sequence_classification
-    model = SequenceClassificationModel.new 'bert-base-uncased', nil,
+    model = SequenceClassificationModel.new MODEL, nil,
       class_labels: %w(Bad Good)
 
     assert_include ["Bad", "Good"], model.eval("This is dog")
     assert_include ["Bad", "Good"], model.eval_list(["This is dog", "This is cat"]).first
   end
 
+  # Conditional omission: the probe only checks the local huggingface cache
+  # (never downloads) and that transformers/datasets are importable, so this
+  # runs whenever the environment can actually serve it.
   def test_train_sequence_classification
-    model = SequenceClassificationModel.new 'bert-base-uncased', nil,
+    reason = Availability.python_modules_reason('transformers', 'datasets')
+    omit "python infrastructure missing: #{reason}" if reason
+    omit "huggingface model #{MODEL}: #{Availability.hf_model_reason(MODEL)}" unless Availability.hf_model_cached?(MODEL)
+
+    model = SequenceClassificationModel.new MODEL, nil,
       class_labels: %w(Bad Good)
 
     model.init
