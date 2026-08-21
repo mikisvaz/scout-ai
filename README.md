@@ -1,356 +1,200 @@
-# scout-ai
+# Scout-AI
 
-Agentic AI and machine‑learning for Scout: a compact layer to train/evaluate models (Ruby, Python/PyTorch, Hugging Face), talk to LLMs across multiple backends, wire Workflow tasks as tools, and build persistent, declarative conversations and agents.
+Scout-AI is a programmable agent harness: it supplies the machinery — persistent
+conversations, real tools, context management, delegation, workflow-based
+orchestration, provenance, and swappable inference backends — that turns an
+LLM's reasoning into inspectable, reproducible agents. The model provides the
+reasoning; Scout-AI provides everything else, and all of it is programmable.
 
-This package sits on top of the Scout stack:
+Scout-AI is reasoning layered onto Scout's computational model: Scout turns
+computation into persistent, composable, inspectable work; Scout-AI extends
+that model to reasoning. It is an agent and LLM layer built on top of
+[Scout](https://github.com/mikisvaz/scout-gear): tool calls run as real
+workflow jobs, multi-agent orchestration as typed, inspectable workflow
+tasks. New here? Start at **[doc/StartHere.md](doc/StartHere.md)**.
 
-- scout-essentials — low level functionality (Open, TSV, Persist, Path, ConcurrentStream, Log, etc.)
-- scout-gear — core data modules (TSV, KnowledgeBase, Entity, Association, Workflow, WorkQueue, etc.)
-- scout-rig — language bridges (notably Python via PyCall)
-- scout-camp — remote servers, cloud deployments, web interfaces
-- scout-ai — LLMs, agents and model wrappers (this repository)
+## The problem
 
-All packages are available under github.com/mikisvaz:
-- https://github.com/mikisvaz/scout-essentials
-- https://github.com/mikisvaz/scout-gear
-- https://github.com/mikisvaz/scout-rig
-- https://github.com/mikisvaz/scout-camp
-- https://github.com/mikisvaz/scout-ai
+An LLM call is not an agent: a raw API call produces one answer and leaves
+nothing behind — no conversation to inspect, no grounding in your data, no
+tools, no record of what ran. An agent needs machinery around the model:
+**state** that persists and can be versioned, **context** as a view not a
+destructive edit, **tools** that query real data and run real code,
+**provenance** for the calls, jobs, and tokens behind an answer,
+**iteration** so tool calls loop to a final answer, **orchestration** to
+compose agents and jobs into pipelines. Scout-AI supplies each as a
+first-class object.
 
-Scout originates from the Rbbt ecosystem (bioinformatics workflows). Numerous end‑to‑end examples live in the Rbbt‑Workflows organization:
-- https://github.com/Rbbt-Workflows
+None of that machinery is invented here: Scout already gives deterministic
+computation persistence and provenance — a workflow runs as jobs, jobs
+produce artifacts, steps record what ran. Scout-AI brings reasoning into
+the same model — the agent's reasoning runs as a workflow job, its
+conversation is a persisted artifact, and the next tool call or your own
+code picks up from there.
 
-The sections below summarize the main components (LLM, Chat, Agent, Model), quick starts, and the command‑line interface. For full APIs, see the doc/ directory.
+## The four building blocks
 
-- doc/USER_GUIDE.md — practical first guide to endpoints, chat files, agents, workflow toolkits, and simple multi-agent patterns
-- doc/LLM.md — multi‑backend LLM orchestration, tool calling, endpoints, CLI
-- doc/Chat.md — chat files: roles/options, compilation pipeline, persistence
-- doc/Agent.md — stateful agents wired to Workflows and KnowledgeBases
-- python/README.md — Python SDK for Scout-AI chats and agents
-- doc/PythonAgentTasks.md — writing agent tasks in Python with PythonWorkflow auto-loading
-- doc/Model.md — model wrappers (ScoutModel, Python/Torch/Hugging Face)
+| Concept | What it is | What problem it solves |
+|---------|-----------|----------------------|
+| **Chat** | A conversation format (plain text on disk, Array of hashes in memory) | Reproducibility: every conversation is inspectable, editable, and versionable |
+| **Agent** | A stateful wrapper around a Chat with persistent defaults and tools | Persistence: your agent keeps its system prompt, tools, and options across conversations |
+| **Tools** | Callable functions the LLM can invoke during inference | Grounding: the model can query real data and run real code instead of hallucinating |
+| **Inference Endpoint** | A named configuration for a provider + model + credentials | Portability: switch provider or model without changing application code |
 
-## Start here
+They compose: an agent holds a chat, carries tools, and sends the chat to a named
+endpoint — [CoreConcepts](doc/user/CoreConcepts.md).
 
-If you are new to Scout-AI, use this order:
+## What makes it different
 
-1. `doc/USER_GUIDE.md` — first practical walkthrough
-2. `doc/LLM.md` — backend, endpoint, and CLI details
-3. `doc/Chat.md` — full chat role reference
-4. `doc/Agent.md` — stateful agents, tool wiring, delegation, workflow-backed `ask`
-5. `python/README.md` — use Scout-AI chats and agents from Python
-6. `doc/PythonAgentTasks.md` — package Python-backed tasks inside an agent directory
+**Conversations are plain data.** A Chat is a plain-text file on disk and an Array of message
+hashes in memory; `Chat` is an annotation over Array (`chat.class # => Array`), so standard
+Array operations work and every conversation serializes to the same diffable format. Context
+management is ephemeral: strategies reshape what the model sees while the stored chat
+retains full-fidelity data.
+→ [WritingChats](doc/user/WritingChats.md) · [ManagingContext](doc/user/ManagingContext.md)
 
+**Tools are real Scout workflow jobs.** Tools come from three sources — Scout workflow
+tasks, knowledge base databases, MCP servers. A task's typed inputs and outputs become
+the tool parameter schema, the call runs as a real workflow job with dependency resolution
+and caching, and the tool-calling loop is automatic, including multi-tool iterations.
+→ [ToolCalling](doc/user/ToolCalling.md)
 
-## Installation and requirements
+**Agent architecture as code.** An agent is a named directory — `start_chat`, `workflow.rb`,
+`knowledge_base/`, `python/` — discovered by convention, no registration calls or plugin
+manifests. Agents delegate to each other: `socialize` exposes one generic `ask` tool where
+the model picks the specialist, `delegate` pre-registers named `hand_off_to_<name>` tools,
+and inheritance modes (`none`, `tools`, `conversation`) control how much caller context
+flows to the specialist; named conversations persist across calls.
+→ [BuildingAgents](doc/user/BuildingAgents.md) · [Delegation](doc/user/Delegation.md)
 
-Scout is a Ruby framework. Add scout-ai (and the other packages you need) to your project and require as needed.
+**Multi-agent orchestration as typed, inspectable workflow jobs.** Include the
+`AgentWorkflow` mixin and use `chat_task`: each agent run becomes a Scout workflow job
+with caching, provenance, and dependency tracking; documented patterns include linear
+pipelines, manager-worker, critic loops, branched exploration, and artifact-first
+collaboration.
+→ [MultiAgentWorkflows](doc/user/MultiAgentWorkflows.md)
 
-- Ruby 3.x recommended
-- For Python‑backed models (Torch/Hugging Face):
-  - Python 3 (installed and visible in PATH)
-  - pycall gem (Ruby ↔ Python bridge)
-  - Python packages: torch, transformers, numpy, pandas (as needed)
-- For OpenAI/Anthropic/etc backends: set API keys in environment or config (see `doc/LLM.md`)
+**Provenance and inspectable, reproducible runs.** Provenance is modeled over exactly two
+node kinds — chat files and workflow steps — traversed by `Chat.traverse_provenance`.
+Per-inference metadata records token usage with `inference_id`-based deduplication,
+delegated-agent receipts embed child inference evidence in parent tool outputs, and
+inference results are persisted by default; `scout-ai llm prov <chat>` renders tree, flow,
+DOT, and evidence views. The inspectability story is one chain: agent decision → tool call
+→ workflow job → dependent jobs → artifacts → provenance.
+→ [Provenance](doc/developer/Provenance.md)
 
-Typical Gemfile fragment:
+**Model independence as an architectural property.** Backends are stateless module
+adapters composed with the shared inference pipeline — no abstract base class — and unknown
+backend names resolve as module names, so third-party backends load dynamically. Providers
+are addressed through named endpoints: your agent code and chat files stay the same across
+OpenAI, Anthropic, Ollama, vLLM and other OpenAI-compatible servers, AWS Bedrock, and more.
+→ [Backends](doc/developer/Backends.md) · [RunningInference](doc/user/RunningInference.md)
 
-```ruby
-gem 'scout-essentials', git: 'https://github.com/mikisvaz/scout-essentials'
-gem 'scout-gear',       git: 'https://github.com/mikisvaz/scout-gear'
-gem 'scout-rig',        git: 'https://github.com/mikisvaz/scout-rig'
-gem 'scout-ai',         git: 'https://github.com/mikisvaz/scout-ai'
+```text
+The Scout stack (each layer sits on the one below):
+  scout-ai          chats, agents, tools, orchestration
+  scout-gear        workflow engine, knowledge bases, TSV
+  scout-essentials  paths, IO, persistence, caching, log
+
+Inside scout-ai:
+  LLM.ask     LLM.chat     LLM.load_agent
+    |            |               |
+ Backend     LLM::Agent       Tools
+(adapter)    (stateful)    (WF/KB/MCP)
+               | holds         | task tools
+               v               v
+          Chat <--------- Workflow jobs
+    (Array + Annotation)     as tools
 ```
 
-### Endpoints (recommended)
+Dependency direction is Agent → Chat → Annotation: Chat and backends work without an
+agent, agents without the workflow mixin — [Architecture](doc/developer/Architecture.md).
 
-Backends and endpoints can be configured via:
-
-- per-endpoint YAML files (recommended): `~/.scout/etc/AI/<endpoint>`
-- environment variables per backend (see `doc/LLM.md`)
-
-Most teams create a few named endpoints (e.g. `nano`, `deep`, `ollama`) and then reference them with:
-
-- Ruby: `endpoint: :nano`
-- CLI: `-e nano`
-
-
-## Quick starts
-
-### Configure an endpoint (once)
-
-Create `~/.scout/etc/AI/nano`:
-
-```yaml
-backend: responses
-model: gpt-5-nano
-```
-
-Or a higher-effort endpoint `~/.scout/etc/AI/deep`:
-
-```yaml
-backend: responses
-model: gpt-5
-reasoning_effort: high
-text_verbosity: high
-```
-
-Keys beyond `backend/url/model` are passed through to the backend.
-
-### Ask a model
-
-Ruby:
-
-```ruby
-require 'scout-ai'
-answer = LLM.ask "What is the capital of France?", endpoint: :nano
-puts answer
-```
-
-CLI:
+## Quick taste
 
 ```bash
-scout-ai llm ask -e nano "What is the capital of France?"
+scout-ai llm ask "What is the capital of France?"   # one question
+scout-ai llm ask -c hello.chat                      # or a saved conversation
 ```
 
-Chat builder:
+A chat file — write it by hand, run it, edit it, diff it:
+
+```text
+system:
+
+You are a friendly assistant.
+
+user:
+
+What is 2 + 2?
+```
+
+An agent is a directory, invoked by name
+(`scout-ai agent ask Greeter "Hi, I'm Alice!"`):
+
+```text
+Agent/Greeter/
+  start_chat   # system prompt + tool declarations
+  workflow.rb  # optional Scout workflow providing tools
+```
+
+A multi-agent pipeline is an ordinary Scout workflow (module with
+`extend Workflow; include AgentWorkflow`); more recipes in
+[Cookbook](doc/user/Cookbook.md):
 
 ```ruby
-chat = Chat.setup []
-chat.system "You are a terse assistant"
-chat.user   "List three colors"
-puts chat.ask(endpoint: :nano)
-```
-
-### Use Scout-AI from Python
-
-The Python package under `python/scout_ai` is a thin wrapper around the Ruby runtime. It builds chats and agents in Python, but still uses Ruby for parsing, printing, and execution.
-
-```python
-from scout_ai import load_agent
-
-agent = load_agent("Planner", endpoint="nano")
-agent.file("README.md")
-agent.user("Summarize this repository")
-message = agent.chat()
-print(message.content)
-```
-
-See `python/README.md` for the Python-side API and `doc/PythonAgentTasks.md` for writing Python-backed workflow tasks.
-
-### Tool calling with a Workflow
-
-Export Workflow tasks as callable tools—let the model call them functionally.
-
-```ruby
-require 'scout-gear'  # defines Workflow
-
-m = Module.new do
-  extend Workflow
-  self.name = "Registration"
-
-  input :name, :string
-  input :age, :integer
-  input :gender, :select, nil, select_options: %w(male female)
-  task :person => :yaml do
-    inputs.to_hash
-  end
-end
-
-puts LLM.workflow_ask(m, "Register Eduard Smith, a 25 yo male, using a tool call",
-                      endpoint: :nano)
-```
-
-### Stateful agent with a KnowledgeBase
-
-```ruby
-require 'scout-gear'  # defines KnowledgeBase
-
-TmpFile.with_dir do |dir|
-  kb = KnowledgeBase.new dir
-  kb.register :brothers, datafile_test(:person).brothers, undirected: true
-  kb.register :marriages, datafile_test(:person).marriages,
-             undirected: true, source: "=>Alias", target: "=>Alias"
-  kb.register :parents, datafile_test(:person).parents
-
-  agent = LLM::Agent.new(knowledge_base: kb, endpoint: :nano)
+chat_task :analyze do |input|
+  agent = self.agent('Analyst', chat: chat)
+  agent.socialize    # may delegate to specialists
   agent.start
-  agent.user "Who is Miki's brother in law?"
-  puts agent.chat
+  agent.user input
+  agent.chat
 end
 ```
 
-### Structured iteration
+## Installation
 
-```ruby
-agent = LLM::Agent.new(endpoint: :nano)
-agent.iterate("List three steps to bake bread") { |step| puts "- #{step}" }
-
-agent.iterate_dictionary("Give capital cities for FR, ES, IT") do |country, capital|
-  puts "#{country}: #{capital}"
-end
+```bash
+gem install scout-ai
+export OPENAI_API_KEY="sk-..."
+scout-ai config set openai model=gpt-4o
 ```
 
-### Use a Hugging Face classifier inside a Workflow
+Requires Ruby 3.0+. Endpoints, providers, CLI:
+[RunningInference](doc/user/RunningInference.md); first-run walkthrough:
+[GettingStarted](doc/user/GettingStarted.md).
 
-From the ExTRI2 workflow (see below):
+## Python
 
-```ruby
-model = HuggingfaceModel.new 'SequenceClassification', tri_model_dir, nil,
-  tokenizer_args: { model_max_length: 512, truncation: true },
-  return_logits: true
-
-model.extract_features do |_, rows|
-  rows.map do |text, tf, tg|
-    text.sub("[TF]", "<TF>#{tf}</TF>").sub("[TG]", "<TG>#{tg}</TG>")
-  end
-end
-
-model.init
-preds = model.eval_list tsv.slice(%w(Text TF Gene)).values
-tsv.add_field "Valid score" do
-  non_valid, valid = preds.shift
-  Misc.softmax([valid, non_valid]).first rescue 0
-end
-```
-
-
-## Components overview
-
-### LLM (doc/LLM.md)
-
-A compact, multi‑backend layer to ask LLMs, wire function‑calling tools, parse/print chats, and compute embeddings.
-
-- `LLM.ask(question, options={}, &block)` — compile `question` via `LLM.chat`, merge endpoint/model/format options, call backend
-- Backends: Responses, OpenAI, Anthropic, Ollama, vLLM, OpenWebUI, AWS Bedrock, Relay
-- Tools: export Workflow tasks and KnowledgeBase databases as function tools
-- Chat compilation pipeline: imports, clear/skip, tasks/jobs, files/directories
-- Endpoint configuration: `~/.scout/etc/AI/<endpoint>`
-
-### Chat (doc/Chat.md)
-
-Chat is both:
-
-- a builder over an Array of `{role:, content:}` messages
-- a stable on-disk “chat file” format used by the CLI
-
-See `doc/Chat.md` for the full list of special roles (options, tools, imports, files, tasks, MCP, KB).
-
-### Agent (doc/Agent.md)
-
-An Agent is a stateful wrapper around Chat and LLM:
-
-- maintains a current conversation (`start_chat`, `start`, `current_chat`)
-- auto-exports Workflow tasks and KnowledgeBase databases as tools
-- provides `chat/json/json_format/iterate` helpers
-
-### Model (doc/Model.md)
-
-A composable framework to wrap models with a consistent API:
-
-- ScoutModel — base: define init/eval/eval_list/extract_features/post_process/train; persist behavior and state to a directory
-- PythonModel — initialize and drive a Python class via ScoutPython
-- TorchModel — helpers for PyTorch: training loop, tensors, save/load state, layer introspection
-- HuggingfaceModel — Transformers convenience; specializations:
-  - SequenceClassificationModel — text classification, logits→labels
-  - CausalModel — chat/causal generation (supports apply_chat_template)
-  - NextTokenModel — simple next‑token fine‑tuning loop
-
-
-## Example: ExTRI2 workflow (models in practice)
-
-The ExTRI2 Workflow (Rbbt‑Workflows) uses HuggingfaceModel to score TRI sentences and determine Mode of Regulation (MoR):
-
-- Feature extraction marks [TF]/[TG] spans as inline tags for the model
-- Batch evaluation over a TSV (“Text”, “TF”, “Gene” columns)
-- Adds fields “Valid score” and “Valid” to the TSV
-- Runs a second SequenceClassification model to produce “MoR” and “MoR scores”
-
-See workflow.rb in that repository for the full implementation. http://github.com/Rbbt-Workflows/ExTRI2
-
-
-## Command‑Line Interface
-
-The bin/scout dispatcher locates scripts under scout_commands across installed packages and workflows using the Path subsystem.
-
-You can run it as:
-
-- `scout ...` (the standard Scout CLI), or
-- `scout-ai ...` (a thin wrapper that loads Scout with `scout-ai` available)
-
-### scout llm …
-
-Ask an LLM, manage chat files, run a minimal web UI, or process queued requests. Scripts live under scout_commands/llm.
-
-- Ask
-  - `scout llm ask [options] [question]`
-  - `scout-ai llm ask [options] [question]`
-    - -t|--template <file_or_key> — load a prompt template; substitutes “???” or appends
-    - -c|--chat <chat_file> — load/extend a conversation (appends the reply)
-    - -i|--inline <file> — answer “# ask: …” directives inline in a source file
-    - -f|--file <file> — prepend file content or substitute where “...” appears
-    - -m|--model, -e|--endpoint, -b|--backend — select backend/model; merged with endpoint configs
-    - -d|--dry_run — expand and print the conversation (no ask)
-
-- Relay processor (for the Relay backend)
-  - `scout llm process [directory]` — watches a queue directory and answers ask JSONs
-
-- Web UI server
-  - `scout llm server` — static chat UI over ./chats with a small JSON API
-
-- Templates
-  - `scout llm template` — list installed prompt templates (Scout.questions)
-
-Run `scout llm` alone to see available subcommands.
-
-### scout agent …
-
-Stateful agents with Workflow and KnowledgeBase tooled up. Scripts live under scout_commands/agent.
-
-- Ask via an Agent
-  - `scout agent ask [options] [agent_name] [question]`
-  - `scout-ai agent ask [options] [agent_name] [question]`
-    - -l|--log <level> — set log severity
-    - -t|--template <file_or_key>
-    - -c|--chat <chat_file>
-    - -m|--model, -e|--endpoint
-    - -f|--file <path>
-    - -wt|--workflow_tasks <comma_list> — export only selected tasks
-    - agent_name resolves via Scout.workflows[agent_name] (a workflow) or Scout.chats[agent_name] (an agent directory with workflow.rb/knowledge_base/start_chat)
-
-- KnowledgeBase passthrough
-  - `scout agent kb <agent_name> <kb subcommand...>`
-
-Note: Workflows also have extensive CLI commands (`scout workflow …`) for job execution, provenance, orchestration, and queue processing.
-
-
-## Configuration, persistence and reproducibility
-
-- Endpoint presets: place YAML under `~/.scout/etc/AI/<endpoint>` to preconfigure url/model/backend and backend-specific knobs
-- Tool calling: Workflow tasks are exported as JSON schemas per backend; results are serialized back to the model as tool replies
-- Caching: `LLM.ask` persists responses (by default) using `Persist.persist`; disable with `persist: false`
-- Chats: save printable conversations with Chat#save; reuse with `scout-ai llm ask -c <file>`
-
+Use chats and agents from Python through the thin SDK in
+[python/README.md](python/README.md) (`from scout_ai import load_agent`),
+which delegates execution to the Ruby runtime; and write agent tools in Python — a `python/` subdirectory of an agent directory is auto-loaded as workflow tasks ([doc/user/Python.md](doc/user/Python.md)).
 
 ## Where to go next
 
-- Explore the API docs shipped in this repository:
-  - doc/LLM.md — orchestration, endpoints, backends, tools, CLI
-  - doc/Chat.md — chat files: roles/options and compilation behavior
-  - doc/Agent.md — stateful agents, Workflow/KB wiring, delegation, iterate helpers
-  - doc/Model.md — model wrappers; ScoutModel, Python/Torch/Hugging Face
+[doc/StartHere.md](doc/StartHere.md) is the documentation entry point:
 
-- Browse real‑world workflows (including ExTRI2) in Rbbt‑Workflows:
-  - https://github.com/Rbbt-Workflows
+| Task | Reading path |
+|---|---|
+| Build my first agent | [GettingStarted](doc/user/GettingStarted.md) → [CoreConcepts](doc/user/CoreConcepts.md) → [BuildingAgents](doc/user/BuildingAgents.md) |
+| Wire up tools | [ToolCalling](doc/user/ToolCalling.md) → [Python](doc/user/Python.md) |
+| Configure inference | [RunningInference](doc/user/RunningInference.md) → [ManagingContext](doc/user/ManagingContext.md) |
+| Build multi-agent systems | [Delegation](doc/user/Delegation.md) → [MultiAgentWorkflows](doc/user/MultiAgentWorkflows.md) → [DelegationInternals](doc/developer/DelegationInternals.md) |
+| Understand the internals | [Architecture](doc/developer/Architecture.md) → [ChatLifecycle](doc/developer/ChatLifecycle.md) → [Backends](doc/developer/Backends.md) |
+| Track provenance | [Provenance](doc/developer/Provenance.md) |
+| Deep code investigations | [research/](research/) (unmaintained reports) |
 
-- Learn core building blocks (TSV, KnowledgeBase, Workflow, etc.) in scout-gear and scout-essentials:
-  - https://github.com/mikisvaz/scout-gear
-  - https://github.com/mikisvaz/scout-essentials
+## Ecosystem
 
-- Integrate Python with scout-rig:
-  - https://github.com/mikisvaz/scout-rig
+Scout-AI is part of the Scout stack, all under
+[github.com/mikisvaz](https://github.com/mikisvaz): the two layers shown above, plus
+[scout-rig](https://github.com/mikisvaz/scout-rig) (language bridges, Python) and
+[scout-camp](https://github.com/mikisvaz/scout-camp) (servers, cloud, web). Scout
+originates from the Rbbt ecosystem; example workflows live in
+[Rbbt-Workflows](https://github.com/Rbbt-Workflows). The machine-learning model
+subsystem is documented separately in [doc/Model.md](doc/Model.md) and is intentionally
+standalone from the agent layer.
 
+## License
 
-## License and contributions
-
-Issues and PRs are welcome across the Scout repositories. Please open tickets in the relevant package (e.g., scout-ai for LLM/Agent/Model topics).
+MIT-style, see [LICENSE.txt](LICENSE.txt). Issues and PRs welcome.
