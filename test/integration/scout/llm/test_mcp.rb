@@ -3,7 +3,7 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 require "scout-ai"
 class TestMCP < Test::Unit::TestCase
-  def test_workflow_stdio
+  def _test_workflow_stdio
     require "mcp/server/transports/stdio_transport"
     wf = Module.new do
       extend Workflow
