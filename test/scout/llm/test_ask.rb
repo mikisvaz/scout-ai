@@ -30,7 +30,7 @@ class TestLLMAsk < Test::Unit::TestCase
         'Guille is Miki\'s brother in law'
       )
 
-      res = LLM.knowledge_base_ask(kb, "Who is Miki's brother in law? call the tool marriages and then brothers, ignore the tolls that return association_details", endpoint: 'test', persist: false)
+      res = LLM.knowledge_base_ask(kb, "Who is Miki's brother in law? call the tool marriages and then brothers, ignore the tolls that return association_details", persist: false, endpoint: :mock)
 
       assert_include res, 'Guille'
 
@@ -72,7 +72,7 @@ association: marriages #{datafile_test(:person).marriages} undirected=true sourc
       'Guille is Miki\'s brother in law'
     )
 
-    res = LLM.ask question, endpoint: 'test', persist: false
+    res = LLM.ask question, persist: false, endpoint: :mock
 
     assert_include res, 'Guille'
 

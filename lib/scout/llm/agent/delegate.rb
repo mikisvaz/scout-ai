@@ -251,7 +251,7 @@ The specialist's own start_chat is always applied first.
       agent = clone_social_agent(template)
       initial_chat = social_chat_copy(agent.start_chat)
       initial_chat.follow(social_inherited_context(inherit))
-      agent.start_chat.follow(initial_chat)
+      agent.start(initial_chat)
       agent
     end
 

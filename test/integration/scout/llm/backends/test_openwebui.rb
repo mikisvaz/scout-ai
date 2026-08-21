@@ -2,16 +2,15 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 
 require 'scout/llm/backends/openwebui'
 
-# Integration (real infrastructure) copy of test/scout/llm/backends/test_openwebui.rb:
-# the gepeto test talks to https://gepeto.bsc.es/api. The unit file keeps an
-# offline request-construction test that stubs RestClient.post instead.
-# Run with `rake test_integration`.
+# Infrastructure suite for the OpenWebUI backend.
 #
-# Conditional omission: the endpoint is only exercised when a key is
-# configured for it (config/env) AND the service answers a trivial request
-# without an authorization error; otherwise the test omits with the detected
-# reason. TCP reachability alone is not enough: this host answers 401 for
-# every unauthenticated call, which used to surface as a test error.
+# Per-backend endpoint probes (same-named endpoint) live in test_endpoints.rb;
+# this file keeps the historically separate direct-URL check against the
+# gepeto service, which is not configured through an endpoint yaml.
+#
+# Conditional omission: only runs when a key is configured for the service
+# (config/env) AND a trivial authenticated request succeeds; otherwise the
+# test omits with the detected reason.
 
 class TestOpenWebUI < Test::Unit::TestCase
   URL = 'https://gepeto.bsc.es/api'

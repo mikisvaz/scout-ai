@@ -62,7 +62,7 @@ tool: TestBaking bake_muffin_tray
     LLM::Mock.script 'The instructions say: bake the muffin tray'
 
     TmpFile.with_file question do |file|
-      res = LLM.ask file, endpoint: 'test', persist: false
+      res = LLM.ask file, persist: false, endpoint: :mock
       assert_equal 'The instructions say: bake the muffin tray', res
 
       # the tool:/directive reached the backend as a workflow tool definition
@@ -95,7 +95,7 @@ tool: TestBaking bake_muffin_tray
     )
 
     TmpFile.with_file question do |file|
-      res = LLM.ask file, endpoint: 'test', persist: false
+      res = LLM.ask file, persist: false, endpoint: :mock
       assert_equal 'The instructions say: bake the muffin tray', res
 
       # the scripted tool call actually ran the workflow task: the mock
@@ -128,7 +128,7 @@ association: marriages #{datafile_test(:person).marriages} undirected=true sourc
     LLM::Mock.script 'Guille is Miki\'s brother in law'
 
     TmpFile.with_file question do |file|
-      res = LLM.ask file, endpoint: 'test', persist: false
+      res = LLM.ask file, persist: false, endpoint: :mock
       assert_equal "Guille is Miki's brother in law", res
 
       # the association: directives produced knowledge base tool definitions
@@ -162,7 +162,7 @@ association: marriages #{datafile_test(:person).marriages} undirected=true sourc
       "Guille is Miki's brother in law"
     )
 
-    res = LLM.ask question, endpoint: 'test', persist: false
+    res = LLM.ask question, persist: false, endpoint: :mock
     assert_include res, 'Guille'
     assert_include LLM::Mock.tool_definitions.keys, 'brothers'
 

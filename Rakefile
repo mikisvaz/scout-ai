@@ -36,12 +36,15 @@ Rake::TestTask.new(:test) do |test|
   test.verbose = true
 end
 
-desc "Run integration tests (test/integration/**/test_*.rb)"
-Rake::TestTask.new(:test_integration) do |test|
+desc "Run infrastructure tests (test/integration/**/test_*.rb): real inference through the 'test' endpoint or the default, plus per-backend endpoint probes"
+Rake::TestTask.new(:test_infrastructure) do |test|
   test.libs << 'lib' << 'test'
   test.pattern = 'test/integration/**/test_*.rb'
   test.verbose = true
 end
+
+desc "Alias of test_infrastructure"
+task :test_integration => :test_infrastructure
 
 desc "Code coverage detail"
 task :simplecov do

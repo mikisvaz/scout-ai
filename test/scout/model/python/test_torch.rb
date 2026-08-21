@@ -3,6 +3,8 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 
 class TestTorch < Test::Unit::TestCase
   def test_linear
+    omit "No python environment" unless Availability.python?
+    omit "Torch not installed" unless Availability.python_modules?(:torch)
     model = nil
 
     TmpFile.with_dir do |dir|

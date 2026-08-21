@@ -337,6 +337,13 @@ lib=lib {
     }
    }
   }
+  support=support{
+   availability.rb
+   fake_clients.rb
+   fixtures.rb
+   infrastructure_probes.rb
+   mock_backend.rb
+  }
   test_helper.rb
  }
  bin=bin filter="*"{

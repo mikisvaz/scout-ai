@@ -82,7 +82,7 @@ module LLM
                 when nil
                   "success"
                 when Exception
-                  {exception: function_response.message, stack: function_response.backtrace }.to_json
+                  function_response
                 else
                   begin
                     function_response.to_json
@@ -135,6 +135,8 @@ module LLM
     end
 
     tool_call_content.collect do |function_name,function_arguments,tool_call_id,tool_call,content|
+      error = false
+      stack = nil
       agent_meta = []
       if Step === content
         step = content
@@ -155,9 +157,10 @@ module LLM
             content = content.run
             content = content.to_s if TSV === content
             content = content.to_json unless String === content
-          rescue
+          rescue Exception
             error = :error
-            content = {exception: $!.message, stack: $!.backtrace }.to_json
+            stack = $!.backtrace
+            content = {exception: $!.message, exception_line: $!.backtrace&.first}.to_json
           end
         end
       elsif LLM::Agent === content
@@ -171,6 +174,10 @@ module LLM
         content.current_chat.follow(res)
         agent_meta = Chat.find_role(res, :meta)
         content = content.answer
+      elsif Exception === content
+        error = :error
+        stack = content.backtrace
+        content = {exception: content.message, exception_line: content.backtrace&.first}.to_json
       else
         step = nil
       end
@@ -192,6 +199,7 @@ module LLM
       }
 
       response_message[:error] = error if error
+      response_message[:stack] = stack if stack
       response_message[:agent_meta] = agent_meta if agent_meta && agent_meta.any?
 
       if step

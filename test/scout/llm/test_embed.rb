@@ -9,8 +9,8 @@ class TestLLMEmbed < Test::Unit::TestCase
     # LLM::Mock backend (Scout::Config.set({backend: :mock}, :embed, :llm) in
     # test_helper), so LLM.embed resolves through the LLM::BACKENDS registry
     # fallback and never touches the network.
-    v1 = LLM.embed('a text')
-    v2 = LLM.embed('a text')
+    v1 = LLM.embed('a text', endpoint: :mock)
+    v2 = LLM.embed('a text', endpoint: :mock)
 
     assert_instance_of Array, v1
     assert_equal LLM::Mock::DIMENSIONS, v1.length
@@ -19,11 +19,11 @@ class TestLLMEmbed < Test::Unit::TestCase
   end
 
   def test_embed_array_input
-    vectors = LLM.embed(['one two', 'two three'])
+    vectors = LLM.embed(['one two', 'two three'], endpoint: :mock)
 
     assert_equal 2, vectors.length
     assert_equal [LLM::Mock::DIMENSIONS, LLM::Mock::DIMENSIONS], vectors.collect(&:length)
-    assert_equal LLM.embed('one two'), vectors.first
+    assert_equal LLM.embed('one two', endpoint: :mock), vectors.first
   end
 
   def test_embed_shared_words_closer
@@ -35,14 +35,14 @@ class TestLLMEmbed < Test::Unit::TestCase
       dot / (na * nb)
     end
 
-    shared  = LLM.embed('crime and theft')
-    similar = LLM.embed('crime theft violence')
-    other   = LLM.embed('puppies and flowers')
+    shared  = LLM.embed('crime and theft', endpoint: :mock)
+    similar = LLM.embed('crime theft violence', endpoint: :mock)
+    other   = LLM.embed('puppies and flowers', endpoint: :mock)
 
     assert cos(shared, similar) > cos(shared, other)
   end
 
   def test_embed_explicit_backend
-    assert_equal LLM::Mock.embed('a text'), LLM.embed('a text', backend: :mock)
+    assert_equal LLM::Mock.embed('a text', endpoint: :mock), LLM.embed('a text', backend: :mock)
   end
 end

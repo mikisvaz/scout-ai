@@ -12,20 +12,25 @@ require File.join(File.dirname(__FILE__), 'support', 'mock_backend')
 require File.join(File.dirname(__FILE__), 'support', 'fake_clients')
 require File.join(File.dirname(__FILE__), 'support', 'availability')
 
-# ScoutCoder: Scout.etc.AI['test'] resolves through the Scout path maps, and
+# ScoutCoder: Scout.etc.AI['name'] resolves through the Scout path maps, and
 # the first map in Scout.map_order wins. Scout.prepend_path(:name, map) adds
 # the map AND unshifts it into map_order, which is what makes the repo-local
 # test/etc tree take precedence over ~/.scout/etc. Note the map must include
 # the literal '{TOPLEVEL}/{SUBPATH}' suffix and, because the path is 'etc/AI'
 # (TOPLEVEL 'etc', SUBPATH 'AI'), the map root must be the test directory so
 # it expands to <repo>/test/etc/AI/... .
+#
+# Only the offline 'mock' endpoint lives here. In particular the repo does
+# NOT define a 'test' endpoint: 'test' is expected to be provided at
+# installation level (~/.scout/etc/AI/test.yaml) and is consumed by the
+# infrastructure suite (`rake test_infrastructure`), never by `rake test`.
 Scout.prepend_path :test_etc, File.join(File.expand_path(File.dirname(__FILE__)), '{TOPLEVEL}/{SUBPATH}')
 
-# Default offline LLM configuration: ask/embed go through endpoint 'test'
-# (test/etc/AI/test.yaml -> backend: mock, model: mock-model) unless a test
-# overrides it explicitly.
-Scout::Config.set({endpoint: 'test'}, :llm)
-Scout::Config.set({endpoint: 'test'}, :embed, :llm)
+# Default offline LLM configuration for the unit tests: backend is the
+# registered LLM::Mock (test/support/mock_backend.rb). No endpoint is set
+# at all, so no endpoint yaml is ever resolved on the unit path and no real
+# inference service can be reached from `rake test`.
+Scout::Config.set({backend: :mock}, :ask, :llm)
 Scout::Config.set({backend: :mock}, :embed, :llm)
 
 class Test::Unit::TestCase
@@ -54,7 +59,7 @@ class Test::Unit::TestCase
     Entity.entity_property_cache = tmpdir.entity_properties if defined?(Entity)
     LLM::Mock.reset! if defined?(LLM::Mock)
   end
-  
+
   teardown do
     Open.rm_rf tmpdir
   end
@@ -77,7 +82,6 @@ class Test::Unit::TestCase
 
   def agent(name = nil, options = {})
     require 'scout/llm/agent'
-    options[:endpoint] = Scout::Config.get(:endpoint, :test)
     if name.nil?
       LLM::Agent.new(**options)
     else

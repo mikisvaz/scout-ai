@@ -174,7 +174,7 @@ module Availability
     # mock one defined by this test suite).
     def real_endpoints
       memo(:real_endpoints) do
-        configured_endpoints.reject { |e| e == 'test' }
+        configured_endpoints.reject { |e| e == 'mock' }
       end
     end
 

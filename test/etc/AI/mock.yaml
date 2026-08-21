@@ -1,0 +1,11 @@
+# Offline endpoint used by the unit tests when an endpoint name is convenient:
+# everything resolves to the registered LLM::Mock backend (see
+# test/support/mock_backend.rb), so `rake test` never reaches a real
+# inference service.
+#
+# ScoutCoder: this is the ONLY endpoint defined inside the repo. The 'test'
+# endpoint is expected to be provided at installation level
+# (~/.scout/etc/AI/test.yaml) and is consumed exclusively by the
+# infrastructure suite (`rake test_infrastructure`).
+backend: mock
+model: mock-model

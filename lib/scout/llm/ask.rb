@@ -44,10 +44,19 @@ module LLM
       options.delete :previous_response_id
     end
 
-    Log.high Log.color :green, "Asking #{endpoint || options[:endpoint] || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages)
     tools = options[:tools]
-    Log.medium "Tools: #{Log.fingerprint tools.keys}" if tools
-    Log.debug "#{Log.fingerprint tools}}" if tools
+    if tools
+      # ScoutCoder: options[:tools] may be either the internal Hash shape
+      # ({name => [obj, definition]}) or a plain Array of provider-style
+      # definitions (as in the tests and InfrastructureProbes); only the
+      # Hash shape has #keys, so fingerprint accordingly.
+      tool_names = Hash === tools ? tools.keys : tools.collect { |t| t[:name] || t.dig(:function, :name) }
+      Log.high Log.color :green, "Asking #{endpoint || options[:endpoint] || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages)
+      Log.medium "Tools: #{Log.fingerprint tool_names}"
+      Log.debug "#{Log.fingerprint tools}}"
+    else
+      Log.high Log.color :green, "Asking #{endpoint || options[:endpoint] || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages)
+    end
 
     persist = false if persist.to_s.downcase == 'false'
     res = Persist.persist(endpoint, :json, prefix: "LLM ask", other: options.merge(messages: messages), persist: persist, dir: Scout.var.cache.ask) do
