@@ -83,6 +83,8 @@ module LLM
                   "success"
                 when Exception
                   function_response
+                when Hash
+                  IndiferentHash.setup(function_response)
                 else
                   begin
                     function_response.to_json
@@ -141,22 +143,17 @@ module LLM
       if Step === content
         step = content
         if content.done?
-          error = false
-          content = content.load if content.done?
-          content = content.to_s if TSV === content
-          content = content.to_json unless String === content
+          content = content.load
         elsif content.error? && content.exception
           error = :error
           content = if String === content.exception
                       {exception: content.exception}.to_json
                     else
-                      {exception: content.exception.message, stack: content.exception.backtrace }.to_json
+                      content = {exception: content.message, exception_line: content.backtrace&.first}.to_json
                     end
         else
           begin
             content = content.run
-            content = content.to_s if TSV === content
-            content = content.to_json unless String === content
           rescue Exception
             error = :error
             stack = $!.backtrace
@@ -182,6 +179,23 @@ module LLM
         step = nil
       end
 
+      content = case content
+                when Hash
+                  content = IndiferentHash.setup(content)
+                  if content[:agent_meta]
+                    agent_meta, content = content.values_at :agent_meta, :content
+                    content
+                  else
+                    content.to_json
+                  end
+                when TSV
+                  content.to_s
+                when String
+                  content
+                else
+                  content.to_json
+                end
+
       if (String === content) && content.length > max_content_length
         exception_msg = "Function #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}) was executed successfully, but it returned #{content.length} characters, which is more than the maximum of #{max_content_length}. To protect the model context window this result was not returned. Here is a fingerprint of the content #{Log.fingerprint(content)}."
         exception_msg += " The results was persisted at '#{step.path}'." if step
@@ -200,6 +214,7 @@ module LLM
 
       response_message[:error] = error if error
       response_message[:stack] = stack if stack
+      agent_meta = [agent_meta] if Hash === agent_meta
       response_message[:agent_meta] = agent_meta if agent_meta && agent_meta.any?
 
       if step
