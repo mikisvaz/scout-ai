@@ -192,7 +192,7 @@ module Chat
           if new_content != content
             tool_call['content'] = new_content
             new_json = tool_call.to_json
-            Log.medium "Epoch: truncated tool output #{id} #{name} #{json.length} to #{new_json.length}"
+            Log.low "Epoch: truncated tool output #{id} #{name} #{json.length} to #{new_json.length}"
             new_msg = msg.dup
             new_msg[:content] = new_json
             kept_messages << new_msg
@@ -202,7 +202,7 @@ module Chat
           end
         else
           # beyond compacted → drop
-          Log.medium "Epoch: dropped tool output #{id} #{name} #{json.length}"
+          Log.low "Epoch: dropped tool output #{id} #{name} #{json.length}"
           dropped_count += 1
         end
 
@@ -236,7 +236,7 @@ module Chat
             if arguments.values != new_arguments.values
               tool_call['arguments'] = new_arguments
               new_json = tool_call.to_json
-              Log.medium "Epoch: truncated tool call #{id} #{name} #{json.length} to #{new_json.length}"
+              Log.low "Epoch: truncated tool call #{id} #{name} #{json.length} to #{new_json.length}"
               new_msg = msg.dup
               new_msg[:content] = new_json
               kept_messages << new_msg
@@ -249,7 +249,7 @@ module Chat
           end
         else
           # beyond compacted → drop
-          Log.medium "Epoch: dropped tool call #{id} #{name} #{json.length}"
+          Log.low "Epoch: dropped tool call #{id} #{name} #{json.length}"
           dropped_count += 1
         end
       else
@@ -258,19 +258,19 @@ module Chat
       end
     end
 
-    Log.medium "Epoch strategy: pinned_total=#{pinned_total} new_calls=#{new_calls} " \
-               "full=#{full} compacted=#{compacted} truncated=#{truncated_count} dropped=#{dropped_count} " \
-               "protected=#{protected_positions.length}"
-
     kept_messages = kept_messages.reverse
 
 	if dropped_count > 0 || truncated_count > 0
+      Log.medium "Epoch strategy: pinned_total=#{pinned_total} new_calls=#{new_calls} " \
+        "full=#{full} compacted=#{compacted} truncated=#{truncated_count} dropped=#{dropped_count} " \
+        "protected=#{protected_positions.length}"
+
 	  compaction_message = {
 		role: :user,
 		content: <<~TEXT.chomp
 	  === Context Management ===
 
-      To fit within the model context window, this conversation has been compacted: some tool calls arguments and tool call outputs have been truncated, and some have been removed entirely.
+      To fit within the model context window, this conversation has been compacted: some tool calls arguments and tool call outputs have been truncated, and some have been removed entirely. Truncated content is show as 'Truncated (<original number of characters>) <start-of-content snippet> (...<original number of characters> - <digest>...) <end-of-content snippet>'.
 
       Compacted: #{truncated_count}
       Removed: #{dropped_count}
@@ -342,7 +342,7 @@ module Chat
     end
 
     unless protected.empty?
-      Log.medium "Epoch: protecting #{protected.length} repeated call(s) from dropping"
+      Log.low "Epoch: protecting #{protected.length} repeated call(s) from dropping"
     end
 
     protected

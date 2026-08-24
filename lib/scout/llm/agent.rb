@@ -90,7 +90,7 @@ module LLM
           
           messages = Chat.project(job.short_path, LLM.chat(job.path))
           if options[:return_messages]
-            messages
+            Chat.setup(messages)
           else
             Chat.setup(messages).answer
           end

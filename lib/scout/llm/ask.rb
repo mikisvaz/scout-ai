@@ -51,8 +51,9 @@ module LLM
       # definitions (as in the tests and InfrastructureProbes); only the
       # Hash shape has #keys, so fingerprint accordingly.
       tool_names = Hash === tools ? tools.keys : tools.collect { |t| t[:name] || t.dig(:function, :name) }
-      Log.high Log.color :green, "Asking #{endpoint || options[:endpoint] || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages)
-      Log.medium "Tools: #{Log.fingerprint tool_names}"
+
+      Log.high Log.color(:green, "Asking #{endpoint || options[:endpoint] || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages))
+      Log.medium "Tools: #{Log.fingerprint tool_names}" if tool_names&.any?
       Log.debug "#{Log.fingerprint tools}}"
     else
       Log.high Log.color :green, "Asking #{endpoint || options[:endpoint] || 'client'}: #{options[:previous_response_id]}\n" + Chat.print_brief(messages)

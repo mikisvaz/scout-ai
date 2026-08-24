@@ -185,7 +185,7 @@ module Chat
   # Read a persisted chat without compiling it. Provenance inspection must not
   # execute task, job, file, or import roles again.
   def self.load(file)
-    Chat.setup(LLM.messages(Open.read(file.to_s)))
+    Chat.setup(Chat.parse(Open.read(file)))
   end
 
   def self.job_agent_chat_files(job)

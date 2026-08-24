@@ -46,7 +46,6 @@ module AgentWorkflow
     agent.start_chat.system <<-EOF
 Your current working directory is #{Dir.pwd}.
 You are working through an ask job with path #{self.path} and files_dir #{self.files_dir}.
-Tool call content may be truncated after #{Chat.full_tool_calls}, and forgoten after #{Chat.max_tool_outputs}.
     EOF
 
     if dependencies.any?

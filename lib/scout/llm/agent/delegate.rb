@@ -60,7 +60,7 @@ module LLM
               end
 
       agent.user(prompt)
-      #agent.chat
+
       agent
     end
 
@@ -141,7 +141,7 @@ The specialist's own start_chat is always applied first.
         Log.medium "Delegated to #{agent}: " + Log.fingerprint(message)
         agent.start if new_conversation
         agent.user message
-        agent.chat
+        agent
       end
 
       properties = {
