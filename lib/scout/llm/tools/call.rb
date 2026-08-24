@@ -149,7 +149,7 @@ module LLM
           content = if String === content.exception
                       {exception: content.exception}.to_json
                     else
-                      content = {exception: content.message, exception_line: content.backtrace&.first}.to_json
+                      content = {exception: content.exception.message, exception_line: content.exception.backtrace&.first}.to_json
                     end
         else
           begin
