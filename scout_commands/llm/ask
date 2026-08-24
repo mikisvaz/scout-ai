@@ -75,7 +75,7 @@ elsif file
 end
 
 if chat
-  conversation = Open.exist?(chat)? LLM.chat(chat) : Chat.setup([])
+  conversation = Open.exist?(chat)? Chat.load(chat) : Chat.setup([])
   imports.each{|import| conversation.import import } if imports
   convo_options = LLM.options conversation
   conversation = question.empty? ? conversation : conversation +  LLM.chat(question)
