@@ -138,8 +138,19 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   ask_meta_critic
 
   rake_tests
+
+		README_doc
+
+  provenance_issue
+
+  project_issues
+  project_issues.analysis
+
+  manager_test
+  manager_test_2
+  manager_test_3
  }
-lib=lib {
+ lib=lib {
   scout-ai.rb
   scout=scout{
    network=network{
@@ -160,9 +171,9 @@ lib=lib {
      parse.rb
      persist.rb
      process.rb
-     prompt.rb
      provenance.rb
      tool_calls.rb
+     prompt.rb
      prompt=prompt{
       shorten_tools.rb
       shorten_tools_epoch.rb
@@ -183,9 +194,10 @@ lib=lib {
      workflow.rb
     }
     backends=backends{
+     default.rb
+
      anthropic.rb
      bedrock.rb
-     default.rb
      huggingface.rb
      ollama.rb
      openai.rb

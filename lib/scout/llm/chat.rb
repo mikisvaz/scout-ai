@@ -31,6 +31,16 @@ module LLM
     original ||= (String === file and Open.exists?(file)) ? file : Path.setup($0.dup)
     caller_lib_dir = Path.caller_lib_dir(nil, 'chats')
 
+    # ScoutCoder: anchor point for per-project library stores. The chat file
+    # is the object of the ask, so its libdir — not the framework's stack —
+    # defines "the project this chat belongs to". Guard against marker climbs
+    # that overshoot to nil/''/'/', and never clobber an explicit value: ENV
+    # propagates into job subprocesses (bwrap) while Dir.pwd under exec is the
+    # workflow's own directory, so ENV is the only reliable channel.
+    if ENV['SCOUT_CHAT_DIR'].to_s.empty? && caller_lib_dir && ! ['', '/'].include?(caller_lib_dir)
+      ENV['SCOUT_CHAT_DIR'] = Path.caller_lib_dir(original)
+    end
+
     if Path.is_filename? file
       messages = self.messages Open.read(file), file
     else

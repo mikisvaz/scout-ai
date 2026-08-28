@@ -563,7 +563,31 @@ module LLM
 
         output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta, relay: relay)
 
-        output.unshift({role: :meta, content: Chat.serialize_meta(meta)}) if log_response && meta && meta.any?
+        if log_response && meta && meta.any?
+          # The meta is about to become the first message of a segment that
+          # runs until the next meta (a chained tool-call ask, whose own meta
+          # was already unshifted inside `output` by the recursive call) or
+          # the end of the response.  A reasoning-only request produces no
+          # message at all, so its meta covers zero messages: `output` is
+          # empty, or starts with the nested meta.  Such rounds are real cost
+          # (~7% of prompt tokens in one measured agent log) with nothing to
+          # show for it, so mark them explicitly instead of leaving a bare
+          # meta for the reader to puzzle over.  `Chat.trace_indices` derives
+          # the same fact independently; the marker only makes the persisted
+          # meta self-explanatory and is inert for accounting.
+          #
+          # ScoutCoder: orphan is only meaningful for the meta that opens a
+          # segment. Chained tool calls recurse into `ask`, and their metas
+          # were already unshifted onto `output` before this point, so the
+          # first message of `output` decides: an empty list, or one starting
+          # with the nested meta, means this round covered nothing. Do not
+          # recompute this from `trace_indices` here: that helper sees the
+          # whole chat (parent copies included) and does not exist on this
+          # path.
+          meta['orphan'] = true if output.empty? || output.first[:role].to_s == 'meta'
+
+          output.unshift({role: :meta, content: Chat.serialize_meta(meta)})
+        end
 
         if output.last[:role] != :previous_response_id && options[:previous_response_id]
           output << { role: :previous_response_id, content: options[:previous_response_id] }

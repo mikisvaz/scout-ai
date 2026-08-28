@@ -127,7 +127,7 @@ user: Next request
     assert !trace.first[:orphan]
   end
 
-  def test_project_marks_the_whole_response_with_one_job_meta
+  def test_project_keeps_inference_meta_inline_with_one_job_marker
     response = [
       { role: :meta, content: 'tt=2' },
       { role: :function_call, content: '{"name":"write"}' },
@@ -137,13 +137,81 @@ user: Next request
     ]
 
     projected = Chat.project('WF/ask/work.chat', response)
-    assert_equal %i[meta function_call function_call_output assistant], projected.collect { |m| m[:role] }
-    assert_equal 'WF/ask/work.chat', Chat.parse_meta(projected.first[:content])[:job]
+    assert_equal %i[meta meta function_call function_call_output meta assistant], projected.collect { |m| m[:role] }
+
+    marker = Chat.parse_meta(projected.first[:content])
+    assert_equal 'WF/ask/work.chat', marker[:job]
+    assert Chat::TOKEN_KEYS.none? { |key| marker.include?(key) }
+
+    assert_equal 2, Chat.parse_meta(projected[1][:content])[:tt]
+    assert_equal :function_call, projected[2][:role], 'first inference meta stays adjacent to the call it produced'
+    assert_equal 7, Chat.parse_meta(projected[4][:content])[:tt]
+
     trace = Chat.trace_chats([Chat.setup(projected)])
-    assert_equal 1, trace.length
-    assert_equal 3, trace.first[:messages].length
+    assert_equal 3, trace.length
+    assert trace.first[:orphan]
+    assert_equal [2, 7], trace[1..-1].collect { |entry| entry[:meta][:tt] }
+    assert_equal [2, 1], trace[1..-1].collect { |entry| entry[:messages].length }
+    assert trace[1..-1].none? { |entry| entry[:orphan] }
+
+    assert_equal 2, Chat.direct_entries([Chat.setup(projected)]).length
+    totals = Chat.token_totals([Chat.setup(projected)])
+    assert_equal 9, totals[:tt]
   end
 
+  # Legacy chats carry no inference_id, so Chat.trace_indices falls back to the
+  # digest-based lineage id.  The lineage id is computed from the preceding
+  # messages, and a projected copy sits behind a leading `job=` marker, so the
+  # projected and original copies of the same legacy inference get DIFFERENT
+  # lineage ids and are both counted.  This is the documented legacy behaviour:
+  # precise deduplication requires inference_id, which every new inference has.
+  def test_project_legacy_meta_without_inference_id_is_not_deduplicated_across_chats
+    original = chat <<-EOF
+user: Work
+meta: pt=2 ct=1 tt=3
+assistant: Done
+    EOF
+
+    projected = Chat.project('WF/ask/work.chat', [
+      { role: :meta, content: 'pt=2 ct=1 tt=3' },
+      { role: :assistant, content: 'Done' }
+    ])
+
+    trace = Chat.trace_chats([Chat.setup(projected), original])
+    assert_equal 3, trace.length, 'job marker + two non-merged legacy lineages'
+    assert trace.all? { |entry| entry[:deduplication] == :legacy_lineage }
+    assert_not_equal trace.first[:lineage_id], trace.last[:lineage_id]
+
+    projected_totals = Chat.token_totals([Chat.setup(projected)])
+    assert_equal 3, projected_totals[:tt]
+    assert_equal 3, Chat.token_totals([original])[:tt]
+    assert_equal 6, Chat.token_totals([Chat.setup(projected), original])[:tt]
+  end
+
+  def test_project_consumption_path_does_not_double_count_a_saved_projection
+    TmpFile.with_file(nil, false, :persistent => true) do |file|
+      original = chat <<-EOF
+user: Work
+meta: inference_id=request-one pt=10 ct=5 tt=15
+assistant: Done
+      EOF
+
+      # chat_task: the job result chat is the projection; the log keeps the
+      # original metas.
+      projected = Chat.project('WF/ask/work.chat', [
+        { role: :meta, content: 'inference_id=request-one pt=10 ct=5 tt=15' },
+        { role: :assistant, content: 'Done' }
+      ])
+      Open.write(file, Chat.print(Chat.setup(projected)))
+
+      # LLM::Agent#ask consumption path: load the persisted job chat and
+      # re-project it before counting.
+      loaded = Chat.load(file)
+      reprojected = Chat.project('WF/ask/work.chat', loaded)
+
+      assert_equal Chat.token_totals([original]), Chat.token_totals([Chat.setup(reprojected), original])
+    end
+  end
   def test_trace_keeps_distinct_segments_for_direct_and_projected_metadata
     direct = chat <<-EOF
 user: Work

@@ -88,7 +88,14 @@ A meta message has role `meta` and content serialized as key/value pairs. Two im
 1. **Direct inference metadata**, containing fields such as `pt`, `ct`, and `tt`.
 2. **Job projection metadata**, containing `job=<path>` and no direct inference cost.
 
-`Chat.project(job, messages)` removes direct inference metadata from projected output and adds one producer marker. The original agent log retains actual inference usage.
+`Chat.project(job, messages)` prepends exactly one producer marker (`job=<path>`, no token fields) and then keeps the response messages in their original order, with the per-inference metas inline, adjacent to the function calls they produced. The projected copy is therefore self-contained for attribution: it carries the same `inference_id` and token fields as the agent log, so a reader does not need to go back to the log to know what a delegated response cost.
+
+Consequences of this contract:
+
+- Duplicated evidence is the norm. The same inference appears in the agent log, in the job result chat, and in any parent conversation that consumed the job chat. `Chat.trace_indices` collapses the copies by `inference_id` (falling back to the digest-based lineage id for legacy metas without `inference_id`), so `Chat.token_totals` counts each inference once. Legacy lineages cannot always be merged across chats; precise deduplication relies on `inference_id`, which every new inference carries.
+- The marker is deliberately **separate** from the inference metas: `Chat.direct_entries` excludes metas carrying `job=`, so folding the producer path into an inference meta would silently drop that segment from direct token counting.
+- `reas` (reasoning summaries) are stripped from projected copies by default, keeping `inference_id` and the token fields while avoiding the bulk of the projection size cost. Set `chat.project.keep_reas` (env `CHAT_PROJECT_KEEP_REAS`) to keep them.
+- Projection is idempotent: re-projecting an already-projected chat (the consumption path in `LLM::Agent#ask`) keeps exactly one `job=` marker and never duplicates inference metas.
 
 ### Token fields
 
@@ -101,7 +108,8 @@ A meta message has role `meta` and content serialized as key/value pairs. Two im
 | `inference_id` | Scout-generated identity for one actual backend request. |
 | `provider_response_id` | Provider response identity when available. |
 | `job` | Producer Step for a projected response segment. |
-| `reas` | Optional reasoning summary. |
+| `orphan` | Request produced no persisted message (reasoning-only round; its segment covers zero messages). Real cost, marked explicitly at meta-creation time by the backend. |
+| `reas` | Optional reasoning summary; stripped from projected copies unless `chat.project.keep_reas` is set. |
 
 Every new direct inference receives a locally generated `inference_id`. This distinguishes genuinely repeated requests even when their conversation, response, and token counts are identical. Copied chat history retains the original ID and is counted once.
 
@@ -134,6 +142,8 @@ Use lineage IDs for detecting copied history. Use addresses to retrieve exact pe
 - covered `message_addresses`;
 - parsed metadata;
 - orphan status.
+
+An orphan segment covers zero messages: the request produced no persisted message (typically a reasoning-only round whose output was consumed internally before the meta was written). Such metas are marked `orphan=true` at creation time by the backend, so the persisted meta is self-explanatory; `trace_indices` derives the same fact independently. The marker is inert for accounting — orphan requests still carry real token cost.
 
 `Chat.direct_entries(chats)` selects direct inference segments. `Chat.token_totals(chats)` sums all canonical direct token fields.
 

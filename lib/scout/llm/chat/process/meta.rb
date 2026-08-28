@@ -373,11 +373,57 @@ module Chat
     parts * ' '
   end
 
-  # A chat-task response is one segment projected from a job. The original
-  # agent chat retains direct token metadata; the returned segment gets one
-  # producer marker at its beginning.
+  # Project a chat-task response from the job that produced it. The response
+  # gets exactly one producer marker ({job: <path>}) at its beginning, and the
+  # per-inference meta messages are kept inline, adjacent to the function
+  # calls they account for, so a projected chat carries the same token
+  # provenance as the original agent log.
+  #
+  # The marker and the inference metas are intentionally separate messages:
+  # direct_entries and token_totals exclude any meta carrying +job+, so
+  # merging the marker into an inference meta would drop that inference from
+  # direct accounting. Keeping both means the same inference can be seen twice
+  # in a parent chat (projected copy + agent log); trace_indices dedups those
+  # copies by inference_id.
+  #
+  # +reas+ (reasoning summaries) are dropped from projected copies unless
+  # Scout::Config key `chat.project.keep_reas` is truthy: they dominate the
+  # size of a projected chat while token attribution and deduplication only
+  # need inference_id and the token fields.
+  #
+  # The projection is idempotent: re-projecting an already projected response
+  # of the same job yields the same segments and token totals, without
+  # duplicating the marker or any inference meta.
+  #
+  # ScoutCoder: re-projection is not a corner case. `LLM::Agent#ask` feeds
+  # every consumed dependency job chat back through Chat.project, so a chat
+  # that has already been projected once is projected again when its parent
+  # answer is consumed. The seen_inference guard below is what keeps that
+  # path from emitting the same inference twice.
   def self.project(job, messages)
-    projected = Array(messages).reject { |message| message[:role].to_s == 'meta' }.collect(&:dup)
+    return [] if Array(messages).empty?
+    keep_reas = %w(true TRUE True T 1).include?(Scout::Config.get(:keep_reas, :project, :chat, env: 'CHAT_PROJECT_KEEP_REAS').to_s)
+
+    seen_inference = {}
+    projected = Array(messages).collect do |message|
+      next message.dup unless message[:role].to_s == 'meta'
+
+      meta = parse_meta(message[:content])
+      if meta[:job]
+        next nil
+      end
+
+      identity = meta[:inference_id] || message[:content]
+      next nil if seen_inference.key?(identity)
+      seen_inference[identity] = true
+
+      if keep_reas
+        message.dup
+      else
+        { role: :meta, content: serialize_meta(meta.except(:reas)) }
+      end
+    end.compact
+
     return [] if projected.empty?
     [{ role: :meta, content: serialize_meta(job: job.to_s) }] + projected
   end
