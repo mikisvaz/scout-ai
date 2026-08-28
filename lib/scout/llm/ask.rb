@@ -11,7 +11,7 @@ module LLM
 
   def self.ask(question, options = {}, &block)
     messages = LLM.chat(question)
-    options = IndiferentHash.add_defaults LLM.options(messages), options
+    options = IndiferentHash.add_defaults options, LLM.options(messages)
 
     endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
 

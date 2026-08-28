@@ -109,6 +109,8 @@ module Workflow
     input :chat, :text, 'Chat in Scout-AI chat-file format'
     task task_name => :chat do |chat|
       begin
+        Open.mkdir files_dir
+        Chat.allow_path files_dir
         response = self.instance_exec(&block)
 
         result = if LLM::Agent === response

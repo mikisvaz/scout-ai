@@ -84,8 +84,10 @@ module LLM
 
           job = workflow.job(:ask, chat: Chat.print(messages))
           self.job = job
+          Open.mkdir job.files_dir
           Chat.allow_job job
           job.clean if ENV['SCOUT_NO_ASK_CACHE'] == 'true'
+          job.recursive_clean if ENV['SCOUT_NO_ASK_CACHE'] == 'recursive'
           job.produce
           
           messages = Chat.project(job.short_path, LLM.chat(job.path))
