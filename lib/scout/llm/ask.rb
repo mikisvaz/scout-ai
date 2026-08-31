@@ -105,6 +105,9 @@ module LLM
       when :bedrock, "bedrock"
         require_relative 'backends/bedrock'
         LLM::Bedrock.ask(messages, options, &block)
+      when :glm, "glm"
+        require_relative 'backends/glm'
+        LLM::GLM.ask(messages, options, &block)
       else
         mod = BACKENDS[backend]
         raise "Unknown backend: #{backend}" if mod.nil?
