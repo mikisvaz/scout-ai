@@ -140,9 +140,6 @@ module LLM
       end
     end
 
-    def save_state
-    end
-
     def prompt(messages, options = {})
       messages = LLM.chat messages if String === messages
       messages = Chat.follow start_chat, messages
@@ -222,4 +219,5 @@ end
 require_relative 'agent/chat'
 require_relative 'agent/iterate'
 require_relative 'agent/delegate'
+require_relative 'agent/save'
 require_relative 'agent/workflow'

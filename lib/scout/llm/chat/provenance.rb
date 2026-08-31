@@ -77,7 +77,8 @@ module Chat
   # Diagnostics for agent_meta receipt problems found while expanding one chat
   # node: malformed receipts collected by Chat.agent_meta_job_references.
   # Provenance is only ever extracted from parsed function_call_output JSON
-  # Hashes carrying an explicit `agent_meta` key; raw output text is never
+  # Hashes carrying an explicit receipt key (current `meta`, legacy
+  # `agent_meta`); raw output text is never
   # inspected, so output content that merely mentions "agent_meta" cannot
   # produce a warning.  Each malformed record becomes one Chat.provenance_error
   # call with relation :agent_job and kind/object :chat + the chat path, so

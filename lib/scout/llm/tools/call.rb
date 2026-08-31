@@ -25,6 +25,26 @@ module LLM
     [tool_call_id, function_name, function_arguments]
   end
 
+  # Normalize serialized meta messages (the chat-message shape
+  # {role: 'meta', content: 'k=v k=v ...'}) into the receipt format: an Array
+  # of DESERIALIZED field Hashes, as emitted under the `meta` key of
+  # function_call_output envelopes.
+  #
+  # Non-Hash entries, non-meta roles, non-String contents and entries that
+  # parse to no fields at all are dropped.  The reader side keeps the full
+  # malformed-entry warning taxonomy; the writer side simply never emits an
+  # entry that carries no evidence.
+  def self.meta_receipt_from_messages(messages)
+    Array(messages).collect do |msg|
+      next nil unless Hash === msg
+      role = msg[:role] || msg['role']
+      content = msg[:content] || msg['content']
+      next nil unless role.to_s == 'meta' && String === content
+      fields = Chat.parse_meta(content)
+      fields.empty? ? nil : fields
+    end.compact
+  end
+
   def self.process_calls(tools, calls, &block)
     max_content_length = LLM.max_content_length
     IndiferentHash.setup tools
@@ -139,7 +159,7 @@ module LLM
     tool_call_content.collect do |function_name,function_arguments,tool_call_id,tool_call,content|
       error = false
       stack = nil
-      agent_meta = []
+      meta = []
       if Step === content
         step = content
         if content.done?
@@ -169,7 +189,12 @@ module LLM
         end if path
 
         content.current_chat.follow(res)
-        agent_meta = Chat.find_role(res, :meta)
+        # Receipt format: the child agent's meta messages are DESERIALIZED
+        # into plain field Hashes and emitted under the `meta` key (the
+        # legacy serialized `agent_meta` array is no longer written).
+        # Entries that parse to no fields are dropped: a receipt entry
+        # exists to carry evidence fields, and an empty one carries none.
+        meta = LLM.meta_receipt_from_messages(Chat.find_role(res, :meta))
         content = content.answer
       elsif Exception === content
         error = :error
@@ -182,9 +207,16 @@ module LLM
       content = case content
                 when Hash
                   content = IndiferentHash.setup(content)
-                  if content[:agent_meta]
-                    agent_meta, content = content.values_at :agent_meta, :content
+                  if content[:meta]
+                    # New inbound shape: `meta` is already the deserialized
+                    # receipt array; pass it through verbatim.
+                    meta, content = content.values_at :meta, :content
                     content
+                  elsif content[:agent_meta]
+                    # Legacy inbound shape: serialized meta messages;
+                    # normalize them into the new deserialized form.
+                    meta = LLM.meta_receipt_from_messages(content[:agent_meta])
+                    content = content[:content]
                   else
                     content.to_json
                   end
@@ -214,8 +246,8 @@ module LLM
 
       response_message[:error] = error if error
       response_message[:stack] = stack if stack
-      agent_meta = [agent_meta] if Hash === agent_meta
-      response_message[:agent_meta] = agent_meta if agent_meta && agent_meta.any?
+      meta = [meta] if Hash === meta
+      response_message[:meta] = meta if meta && meta.any?
 
       if step
         response_message.merge!(

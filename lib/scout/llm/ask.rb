@@ -13,7 +13,7 @@ module LLM
     messages = LLM.chat(question)
     options = IndiferentHash.add_defaults options, LLM.options(messages)
 
-    endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
+    endpoint, persist, agent_save_file = IndiferentHash.process_options options, :endpoint, :persist, :agent_save_file, persist: true
 
     persist ||= Scout::Config.get :persist, :ask, :llm, env: 'ASK_PERSIST,LLM_PERSIST,PERSIST'
     endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT,ENDPOINT,LLM,ASK'
@@ -29,7 +29,7 @@ module LLM
       options[:endpoint] ||= endpoint
       agent = LLM::Agent.load_agent agent_name
       agent.follow messages
-      res = agent.ask options
+      res = agent.chat options
       return res
     end
 

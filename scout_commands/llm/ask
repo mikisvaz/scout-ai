@@ -88,7 +88,8 @@ if chat
     exit 0
   end
 
-  new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true)))
+  agent_save_file = chat + '.files/log/agent.chat'
+  new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true, agent_save_file: agent_save_file)))
   Open.open(chat, mode: 'a') do |f|
     f.puts LLM.print([{role: :user, content: question}]) unless question.empty?
     f.puts LLM.print(new)

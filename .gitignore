@@ -6,3 +6,5 @@ pkg
 chats
 __pycache__
 tmp
+var
+sandbox

@@ -149,6 +149,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   manager_test
   manager_test_2
   manager_test_3
+
+  save_ask
  }
  lib=lib {
   scout-ai.rb
@@ -196,6 +198,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     backends=backends{
      default.rb
 
+     glm.rb
      anthropic.rb
      bedrock.rb
      huggingface.rb
@@ -211,6 +214,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      chat.rb
      delegate.rb
      iterate.rb
+     save.rb
      workflow.rb
     }
    }

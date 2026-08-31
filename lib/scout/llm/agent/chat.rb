@@ -5,6 +5,15 @@ module LLM
     end
 
     def start(chat=nil)
+      # Restart hook: keep the pre-restart conversation recoverable before it
+      # is replaced. Lazy (only with a prior non-empty chat + configured
+      # save_file) and never fatal.
+      begin
+        save_restart_snapshot
+      rescue
+        Log.warn "Agent restart snapshot failed: #{$!.message}"
+      end
+
       if chat
         (@current_chat || start_chat).annotate chat unless Chat === chat
         @current_chat = chat
@@ -39,6 +48,14 @@ module LLM
       else
         current_chat.push({role: :assistant, content: response})
         response
+      end
+    ensure
+      # Auto-save once the conversation has been updated by this chat round.
+      # Non-fatal by design: a save problem must never break the agent run.
+      begin
+        save_if_configured
+      rescue
+        Log.warn "Agent auto-save after chat failed: #{$!.message}"
       end
     end
 

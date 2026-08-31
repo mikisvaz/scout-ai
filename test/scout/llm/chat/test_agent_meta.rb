@@ -7,15 +7,27 @@ class TestChatAgentMeta < Test::Unit::TestCase
   end
 
   # Build persisted-style chat text with one paired tool call whose output
-  # envelope carries an agent_meta receipt.
-  def receipt_text(agent_meta: nil, name: 'ask', call_id: 'call-1', content: 'child answer')
+  # envelope carries a receipt.  Legacy format uses the `agent_meta` key with
+  # serialized meta messages; the current format uses the `meta` key with an
+  # array of already-deserialized field Hashes (as LLM.process_calls now
+  # writes for delegated agents).
+  def receipt_text(agent_meta: nil, meta: nil, name: 'ask', call_id: 'call-1', content: 'child answer')
     envelope = {name: name, content: content, id: call_id}
     envelope[:agent_meta] = agent_meta unless agent_meta.nil?
+    envelope[:meta] = meta unless meta.nil?
     <<-EOF
 user: Run the worker
 function_call: {"name":"#{name}","arguments":{"agent":"Worker"},"id":"#{call_id}"}
 function_call_output: #{envelope.to_json}
     EOF
+  end
+
+  # Current-format equivalent of `valid_receipt`
+  def valid_meta_receipt
+    receipt_text(meta: [
+      {'pt' => 100, 'ct' => 50, 'tt' => 150, 'inference_id' => 'aaa'},
+      {'job' => 'Worker/ask/Default_x'}
+    ])
   end
 
   def valid_receipt
@@ -253,5 +265,93 @@ assistant: Hi
     assert_equal 1, evidence.length
     assert_equal 'chat_task', evidence.first[:tool_name]
     assert_equal 'call-9', evidence.first[:call_id]
+  end
+
+  ## Current-format (`meta` key) receipts ##
+
+  def test_deserialized_meta_receipt_produces_evidence
+    evidence = Chat.agent_meta_evidence(chat(valid_meta_receipt))
+    assert_equal 2, evidence.length
+
+    first = evidence.first
+    assert_equal :agent_meta, first[:origin]
+    assert_equal({'pt' => 100, 'ct' => 50, 'tt' => 150, 'inference_id' => 'aaa'}, first[:meta].to_hash)
+    # Already deserialized: no re-parse of any role/content wrapper happened
+    assert_nil first[:raw_message]
+    # Address suffix mirrors the persisted key
+    assert_equal [first[:output_address], :meta, 0], first[:evidence_address]
+    assert_equal 0, first[:agent_meta_index]
+
+    assert_equal 'Worker/ask/Default_x', evidence.last[:meta][:job]
+    assert_equal [evidence.last[:output_address], :meta, 1], evidence.last[:evidence_address]
+  end
+
+  def test_deserialized_meta_receipt_job_references
+    references = Chat.agent_meta_job_references(chat(valid_meta_receipt))
+    assert_equal 1, references.length
+    assert_equal 'Worker/ask/Default_x', references.first[:job]
+    assert_equal :agent_meta, references.first[:origin]
+  end
+
+  def test_mixed_keys_meta_wins
+    text = receipt_text(meta: [{'tt' => 1}],
+                        agent_meta: [{role: 'meta', content: 'tt=2'}])
+    evidence = Chat.agent_meta_evidence(chat(text))
+    assert_equal 1, evidence.length
+    assert_equal 1, evidence.first[:meta][:tt]
+    assert_equal :meta, evidence.first[:evidence_address][1]
+  end
+
+  def test_malformed_deserialized_meta_entries_warn_not_raise
+    warnings = []
+    text = receipt_text(meta: [{'pt' => 5}, 'nonsense', {}, nil])
+    evidence = Chat.agent_meta_evidence(chat(text), warnings: warnings)
+
+    assert_equal 1, evidence.length
+    assert_equal 5, evidence.first[:meta][:pt]
+
+    reasons = warnings.collect { |warning| [warning[:reason], warning[:agent_meta_index]] }
+    assert_include reasons, [:not_a_hash, 1]
+    assert_include reasons, [:empty_meta, 2]
+    assert_include reasons, [:not_a_hash, 3]
+    warnings.each do |warning|
+      assert_equal :agent_meta, warning[:origin]
+      assert_equal 'call-1', warning[:call_id]
+      assert_equal :meta, warning[:evidence_address][1] if warning[:evidence_address]
+    end
+  end
+
+  # End-to-end through the collector: a current-format receipt in a chat FILE
+  # feeds token events (origin :agent_meta) and job relations.  The job=
+  # target is materialized on disk so the reference resolves.
+  def test_deserialized_receipt_feeds_token_events_and_problems
+    TmpFile.with_dir do |dir|
+      # Same layout as AgentMetaFixtures#make_job: the worker job file plus
+      # its .info sidecar exist on disk, so the receipt job= reference
+      # resolves through Chat.load_job_reference.
+      worker = File.join(dir, 'Worker', 'ask', 'Default_w')
+      Open.mkdir File.dirname(worker)
+      Open.write(worker, 'answer')
+      Open.write(worker + '.info', '{}')
+
+      parent = File.join(dir, 'parent.chat')
+      # Absolute job reference, as the fixtures suite writes it
+      Open.write(parent, receipt_text(
+        meta: [{'pt' => 100, 'ct' => 50, 'tt' => 150, 'inference_id' => 'aaa'},
+               {'job' => worker}],
+        call_id: 'call-1'))
+
+      warnings = []
+      events = Chat.provenance_token_events(parent, warnings: warnings)
+      receipt_events = events.select { |event| event[:evidence].any? { |item| item[:origin] == :agent_meta } }
+      assert_equal 1, receipt_events.length
+      assert_equal 'aaa', receipt_events.first[:inference_id]
+      assert_empty warnings
+
+      references = Chat.report_agent_meta_problems(Chat.load(parent), parent)
+      assert_equal 1, references.length
+      # The reference is kept verbatim (absolute, as written into the receipt)
+      assert_equal worker, references.first[:job]
+    end
   end
 end

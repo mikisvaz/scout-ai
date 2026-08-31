@@ -95,7 +95,9 @@ if chat
     exit 0
   end
 
-  new = agent.ask(agent.current_chat, convo_options.merge(options.merge(return_messages: true)))
+  agent.save_file = chat + '.files/log/agent.chat'
+  #new = agent.ask(agent.current_chat, convo_options.merge(options.merge(return_messages: true)))
+  new = agent.chat(convo_options.merge(options.merge(return_messages: true)))
   conversation += LLM.chat(question) if question
   conversation += new
 
