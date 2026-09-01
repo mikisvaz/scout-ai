@@ -93,11 +93,17 @@ There are other jobs found in this chat:
   helper :log_agent do |agent, agent_name=nil|
     # Delegate to the Agent#save machinery so every path that saves an agent
     # (chat_task jobs, CLI, plain agent.save) writes the identical canonical
-    # layout: this agent's FULL chat at log/agent.chat and every nested
-    # conversation under log/society/<agent>/<conversation>/agent.chat.
-    # `agent_name` is kept for call-site compatibility but no longer changes
-    # the layout: the canonical tree is the only supported one.
-    agent.save_file = file('log')['agent.chat'].find if agent.save_file.nil?
+    # layout: this agent's FULL chat at <files_dir>/<agent_name>.chat and
+    # every nested conversation under
+    # <files_dir>/<agent_name>.society/<agent>/<conversation>/agent.chat.
+    #
+    # ScoutCoder: the save_file MUST be assigned BEFORE the first chat/start
+    # call (chat_task does it for us here, but any caller must too): the
+    # Agent#chat ensure-hook and the restart-snapshot hook in Agent#start
+    # both write through save_file, so assigning it late loses the
+    # intermediate turns. `agent_name` defaults to 'agent' and names the
+    # file, never a directory: worker.chat -> worker.society, no log/ level.
+    agent.save_file = files_dir["#{agent_name || 'agent'}.chat"] if agent.save_file.nil?
     agent.save
 
     update_info :dependencies, dependencies.collect { |dependency| dependency.path.find }

@@ -16,7 +16,10 @@ module LLM
     def load_agent(agent_name, options = {})
       agent_name = normalize_social_agent_name(agent_name)
       @society ||= {}
-      @society[agent_name] ||= LLM.load_agent(agent_name, social_agent_options(options))
+      @society[agent_name] ||= begin
+                                 agent = LLM.load_agent(agent_name, social_agent_options(options))
+                                 agent
+                               end
     end
 
     # Return a persistent specialist conversation. Conversation identifiers are
@@ -29,7 +32,12 @@ module LLM
 
       @chats ||= {}
       key = social_chat_key(agent_name, conversation)
-      @chats[key] ||= start_social_chat(agent_name, options, inherit)
+      @chats[key] ||= begin 
+                        agent = start_social_chat(agent_name, options, inherit)
+                        agent.save_file = society_save_file(agent_name, conversation)
+                        agent
+                      end
+
     end
 
     # Ask a specialist using a plain-text prompt.
@@ -203,6 +211,27 @@ The specialist's own start_chat is always applied first.
 
     def social_chat_key(agent_name, conversation)
       "#{agent_name}/#{conversation}"
+    end
+
+    def society_save_file(agent_name, conversation)
+      # ScoutCoder: the society directory is derived with the CANONICAL rule
+      # (Agent.society_dir_for / Agent#society_dir), never by string
+      # substitution here. An earlier version did
+      # `save_file.sub(/\.chat/, '.society')`: the sub had no anchor, so it
+      # replaced the FIRST '.chat' occurrence and a CLI-shaped save_file like
+      # `cli.chat.files/agent.chat` turned into
+      # `cli.society.files/agent.chat/...`, growing a second `.files` tree
+      # instead of `cli.chat.files/agent.society/...`.
+      # society_dir_for is the single source of truth for the root
+      # (name-derived) rule; society_dir adds the location rule for nested
+      # chats.
+      #
+      # save.rb simply does not auto-save without a save_file; mirror that
+      # here instead of raising on nil (a society conversation started by an
+      # agent with no save_file just never persists).
+      return nil if save_file.nil?
+
+      File.join(society_dir(save_file), agent_name.to_s, conversation.to_s, SOCIETY_CHAT_FILE)
     end
 
     # Provider session state and executable Ruby tool objects belong to the

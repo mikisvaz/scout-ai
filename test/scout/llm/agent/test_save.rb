@@ -19,10 +19,14 @@ class TestLLMAgentSave < Test::Unit::TestCase
   end
 
   def test_society_dir_for
-    assert_equal 'a/b/c.chat.files/log/society',
+    assert_equal 'a/b/c.society',
                  LLM::Agent.society_dir_for('a/b/c.chat')
+    assert_equal 'a/b/worker.society',
+                 LLM::Agent.society_dir_for('a/b/worker.chat')
+    assert_equal './c.society',
+                 LLM::Agent.society_dir_for('c.chat')
     agent = LLM::Agent.new
-    assert_equal 'a/b/c.chat.files/log/society',
+    assert_equal 'a/b/c.society',
                  agent.society_dir_for('a/b/c.chat')
   end
 
@@ -35,7 +39,7 @@ class TestLLMAgentSave < Test::Unit::TestCase
     assert_equal 'a/society/Worker/w_1/society', agent.society_dir(nested)
     assert agent.nested_save?(nested)
 
-    assert_equal 'a/b/c.chat.files/log/society', agent.society_dir('a/b/c.chat')
+    assert_equal 'a/b/c.society', agent.society_dir('a/b/c.chat')
     assert !agent.nested_save?('a/b/c.chat')
   end
 
@@ -94,8 +98,8 @@ class TestLLMAgentSave < Test::Unit::TestCase
       chat_file = File.join(dir, 'root.chat')
       written = root.save(chat_file)
 
-      expected_child = File.join(chat_file + '.files', 'log', 'society', 'Worker', 'w_A', 'agent.chat')
-      expected_grandchild = File.join(chat_file + '.files', 'log', 'society', 'Worker', 'w_A', 'society', 'Critic', 'c_1', 'agent.chat')
+      expected_child = File.join(chat_file.sub(/\.chat\z/, '.society'), 'Worker', 'w_A', 'agent.chat')
+      expected_grandchild = File.join(chat_file.sub(/\.chat\z/, '.society'), 'Worker', 'w_A', 'society', 'Critic', 'c_1', 'agent.chat')
 
       assert_equal [chat_file, expected_child, expected_grandchild].collect { |p| File.expand_path(p) }.sort, written
 
@@ -121,12 +125,12 @@ class TestLLMAgentSave < Test::Unit::TestCase
       chat_file = File.join(dir, 'cycle.chat')
       written = a.save(chat_file)
 
-      expected_b = File.join(chat_file + '.files', 'log', 'society', 'Other', 'current', 'agent.chat')
+      expected_b = File.join(chat_file.sub(/\.chat\z/, '.society'), 'Other', 'current', 'agent.chat')
       assert_equal [chat_file, expected_b].collect { |p| File.expand_path(p) }.sort, written
 
       # The tree is finite: b was saved once and going back to a was cut by
       # the seen-agent check, so nothing was written twice.
-      assert_equal 1, chat_files_under(chat_file + '.files').length
+      assert_equal 1, chat_files_under(chat_file.sub(/\.chat\z/, '.society')).length
     end
   end
 
@@ -155,7 +159,7 @@ class TestLLMAgentSave < Test::Unit::TestCase
 
       # '..' collapses to '_' and the '/' inside the conversation is
       # replaced, so the file stays inside the society directory
-      weird_file = File.join(chat_file + '.files', 'log', 'society', '__', 'evil_name', 'agent.chat')
+      weird_file = File.join(chat_file.sub(/\.chat\z/, '.society'), '__', 'evil_name', 'agent.chat')
       assert_include written.collect { |p| File.expand_path(p) },
                      File.expand_path(weird_file)
       assert !Open.exist?(File.join(dir, 'name', 'agent.chat'))
@@ -194,7 +198,7 @@ class TestLLMAgentSave < Test::Unit::TestCase
       chat_file = File.join(dir, 'root.chat')
       root.save(chat_file)
 
-      child_file = File.join(chat_file + '.files', 'log', 'society', 'Worker', 'w_A', 'agent.chat')
+      child_file = File.join(chat_file.sub(/\.chat\z/, '.society'), 'Worker', 'w_A', 'agent.chat')
       assert_equal child_file, child.save_file
 
       # The child runs its own turn later (its own auto-save, no parent save):
@@ -265,7 +269,7 @@ class TestLLMAgentSave < Test::Unit::TestCase
 
       # The delegated child conversation was saved with it, lazily, under the
       # canonical society layout
-      child_file = File.join(chat_file + '.files', 'log', 'society', 'Worker', 'default', 'agent.chat')
+      child_file = File.join(chat_file.sub(/\.chat\z/, '.society'), 'Worker', 'default', 'agent.chat')
       assert Open.exist?(child_file)
       assert_include Open.read(child_file), 'hi'
     end
@@ -316,6 +320,94 @@ class TestLLMAgentSave < Test::Unit::TestCase
 
       assert !Open.exist?(chat_file + '.files/resets')
       assert !Open.exist?(chat_file + '.files')
+    end
+  end
+end
+
+# Step 3b: Agent#society_save_file (private, delegate.rb) must derive the
+# society directory with the CANONICAL rule (Agent.society_dir_for /
+# Agent#society_dir), never by unanchored string substitution on save_file.
+#
+# The bug: `"cli.chat.files/agent.chat".sub(/\.chat/, '.society')` replaces
+# the FIRST '.chat' and yields `cli.society.files/agent.chat/...`, growing a
+# second `.files` tree instead of `cli.chat.files/agent.society/...`.
+class TestLLMAgentSocietySaveFile < Test::Unit::TestCase
+  def simple_agent(content = 'you are a robot')
+    agent = LLM::Agent.new
+    agent.start_chat.system content
+    agent
+  end
+
+  # --- direct (private method, called through send) -----------------------
+
+  def test_society_save_file_is_nil_without_save_file
+    agent = LLM::Agent.new
+    # save.rb simply does not auto-save without a save_file; the delegation
+    # must mirror that instead of raising on nil (assigning nil to
+    # agent.save_file is harmless: it means "no auto-save").
+    assert_nil agent.send(:society_save_file, 'Direct', 'harness_test')
+  end
+
+  def test_society_save_file_cli_shaped_save_file
+    agent = LLM::Agent.new
+    agent.save_file = 'dir/cli.chat.files/agent.chat'
+    assert_equal 'dir/cli.chat.files/agent.society/Direct/harness_test/agent.chat',
+                 agent.send(:society_save_file, 'Direct', 'harness_test')
+  end
+
+  def test_society_save_file_cli_shaped_named_agent
+    agent = LLM::Agent.new
+    agent.save_file = 'dir/job.chat.files/worker.chat'
+    assert_equal 'dir/job.chat.files/worker.society/Direct/harness_test/agent.chat',
+                 agent.send(:society_save_file, 'Direct', 'harness_test')
+  end
+
+  def test_society_save_file_plain_root_chat
+    agent = LLM::Agent.new
+    agent.save_file = 'dir/root.chat'
+    assert_equal 'dir/root.society/Direct/harness_test/agent.chat',
+                 agent.send(:society_save_file, 'Direct', 'harness_test')
+  end
+
+  def test_society_save_file_nested_child_save_file
+    agent = LLM::Agent.new
+    # A child chat already living inside a society tree resolves through the
+    # location rule: the society of a nested chat is a SIBLING 'society' dir.
+    agent.save_file = 'dir/root.chat.files/root.society/Direct/harness_test/agent.chat'
+    assert_equal 'dir/root.chat.files/root.society/Direct/harness_test/society/Nested/default/agent.chat',
+                 agent.send(:society_save_file, 'Nested', 'default')
+  end
+
+  # --- public behavior ----------------------------------------------------
+
+  # load_chat hands the specialist its save_file derived from the PARENT's
+  # save_file: this is the path the CLI and chat_task jobs take.
+  def test_load_chat_assigns_canonical_child_save_file
+    TmpFile.with_dir do |dir|
+      root = simple_agent('root')
+      worker = simple_agent('worker')
+      root.society = {'Worker' => worker}
+      root.socialize
+
+      root.save_file = File.join(dir, 'cli.chat.files', 'agent.chat')
+      child = root.load_chat('Worker', {}, 'harness_test')
+
+      expected = File.join(dir, 'cli.chat.files', 'agent.society',
+                           'Worker', 'harness_test', 'agent.chat')
+      assert_equal expected, child.save_file
+
+      # Writing through the child must not grow any second `.files` tree and
+      # must not leave a stray `cli.society.files` directory behind.
+      LLM::Mock.script('mock answer')
+      child.user 'child question'
+      child.chat persist: false, endpoint: 'mock'
+
+      assert_include Open.read(expected), 'mock answer'
+      assert_empty Dir.glob(File.join(dir, '**', '*.society.files*'))
+      assert_empty Dir.glob(File.join(dir, '**', 'cli.society*'))
+      # The child auto-save is the only writer here (the root itself never
+      # ran a round), so the canonical child file is the ONLY chat file.
+      assert_equal [expected], Dir.glob(File.join(dir, '**', '*.chat')).sort
     end
   end
 end

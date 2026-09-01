@@ -20,18 +20,24 @@ The structural relations are:
 | chat | `job` | job | A projected response was produced by a Workflow job. |
 | chat | `agent_job` | job | A delegated tool call returned an agent whose `job=` receipt names the producer job. |
 | job | `dependency` | job | A normal Scout Workflow dependency. |
-| job | `log` | chat | A persisted agent conversation under `.files/log/**/*.chat`. |
-| chat | `log` | chat | A saved agent conversation under the chat's own `.files/log/**/*.chat` sidecar. |
+| job | `log` | chat | A persisted agent conversation under `.files/*.chat`, `.files/*.society/**/*.chat`, or the legacy `.files/log/**/*.chat`. |
+| chat | `log` | chat | A saved agent conversation under the chat's own `.files` sidecar, same three families (root copy excluded). |
 | job | `result` | chat | The job result is itself a chat file. |
 
 Relations describe root-outward discovery. A renderer may reverse `job` or `dependency` when drawing natural data flow.
 
-The `log` relation only ever covers files under a `log/` directory (`.files/log/**/*.chat`), never anything else under `.files`. Restart snapshots written by `Agent#start` live under `.files/resets/<timestamp>.chat`, directly under `.files` and **outside** `log/`: they are recovery artifacts, not logs, and provenance traversal does not follow them, for jobs and for chats alike.
+The `log` relation covers exactly three file families under `.files`, nothing else:
+
+- `.files/*.chat` — the new top-level chat files (`agent.chat` by default, `worker.chat`/`critic.chat` for named agents);
+- `.files/*.society/**/*.chat` — the new society tree (nested societies keep the plain `society` basename deeper down);
+- `.files/log/**/*.chat` — the **legacy** layout, still read for back-compat; nothing writes it anymore and old files are never migrated.
+
+Restart snapshots written by `Agent#start` live under `.files/resets/<timestamp>.chat`, directly under `.files` and **outside** all three families: they are recovery artifacts, not logs, and provenance traversal does not follow them, for jobs and for chats alike. Results of both layouts are de-duplicated and sorted, so a files dir holding both layouts is visited exactly once per chat.
 
 The two `log` parents are deliberately asymmetric:
 
-- a **job** root includes its own `<job>.files/log/agent.chat` as a real log node, like any other file under `log/`;
-- a **chat** root excludes its root copy at `<save_file>.files/log/agent.chat`, because the save mechanism writes a full copy of the root conversation there and including it would duplicate the root as its own child. The exclusion is for that exact path only: society conversations under `log/society/<agent>/<conversation>/agent.chat` are also named `agent.chat` and **are** included.
+- a **job** root includes its own top-level `<job>.files/<name>.chat` (`agent.chat` and friends, and the legacy `<job>.files/log/agent.chat`) as a real log node; renderers such as `scout-ai llm prov` hide it from the tree because it duplicates the job node itself;
+- a **chat** root excludes its root copy — every top-level `<save_file>.files/<name>.chat` and the legacy `<save_file>.files/log/agent.chat` — because the save mechanism writes a full copy of the root conversation there and including it would duplicate the root as its own child. The exclusion is for the **top level** only: society conversations under `<name>.society/<agent>/<conversation>/agent.chat` (and the legacy `log/society/<agent>/<conversation>/agent.chat`) are also named `agent.chat` and **are** included.
 
 Imported and continued chats are **not** provenance relations. They are a chat-compilation concern resolved during `Chat.parse` and `LLM.chat`. The persisted `.chat` file already contains the full inlined conversation. Provenance traversal therefore never follows `import`, `continue`, or `last` chat references.
 
@@ -89,7 +95,7 @@ Thin collectors use the same traversal:
 Direct readers do not recurse:
 
 - `Chat.direct_job_chat_files(job)` returns chat logs owned directly by a job;
-- `Chat.direct_chat_sidecar_files(path)` returns chat logs owned directly by a persisted chat's `.files` sidecar, excluding the root copy `<save_file>.files/log/agent.chat`;
+- `Chat.direct_chat_sidecar_files(path)` returns chat logs owned directly by a persisted chat's `.files` sidecar (all three families above), excluding the top-level root copies `<save_file>.files/<name>.chat` and the legacy `<save_file>.files/log/agent.chat`;
 - `Chat.job_result_chat_file(job)` returns a chat result when present.
 
 Recursion belongs only to `traverse_provenance`.

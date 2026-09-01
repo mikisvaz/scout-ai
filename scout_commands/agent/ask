@@ -95,7 +95,13 @@ if chat
     exit 0
   end
 
-  agent.save_file = chat + '.files/log/agent.chat'
+  # ScoutCoder: named-file rule, same as AgentWorkflow#log_agent: the agent
+  # chat is named after the agent ('agent.chat' by default, but
+  # worker.chat/critic.chat when the CLI is invoked for a named agent), and
+  # the society tree is the sibling <name>.society (see
+  # LLM::Agent.society_dir_for). Must be set before the first chat call so
+  # the Agent#chat ensure-hook and the restart snapshot see it.
+  agent.save_file = chat + ".files/#{agent_name || 'agent'}.chat"
   #new = agent.ask(agent.current_chat, convo_options.merge(options.merge(return_messages: true)))
   new = agent.chat(convo_options.merge(options.merge(return_messages: true)))
   conversation += LLM.chat(question) if question

@@ -88,20 +88,33 @@ created until an agent actually saves. `Agent#save` decides the canonical
 location from the save target of the *parent* agent:
 
 - The root chat saved at `p.chat` produces a society tree rooted at
-  `p.chat.files/log/society/<agent_name>/<conversation>/agent.chat`.
+  `p.chat.files/agent.society/<agent_name>/<conversation>/agent.chat`
+  (named agents use `<name>.society`, e.g. `worker.society`).
 - A nested chat already stored at
   `.../society/<a>/<c>/<file>` makes the society of *its* children the
   **sibling** directory `.../society/<a>/<c>/society/...`. A nested
-  `agent.chat` never grows a second `.files` tree of its own.
+  `agent.chat` never grows a second `.files` tree of its own. Only the
+  depth-0 society directory is named after the chat (`<name>.society`);
+  every deeper level keeps the plain `society` basename.
 - `chat_task` jobs and the `scout-ai agent ask` CLI always write the agent's
-  own chat at `<chat_or_job_path>.files/log/agent.chat`.
+  own chat at `<chat_or_job_path>.files/<name>.chat`: `agent.chat` for an
+  unnamed/`agent` agent, `worker.chat`/`critic.chat` for named ones.
 - For a persisted **chat** root that file is a full copy of the root
   conversation; provenance scanning of the sidecar excludes exactly that
-  copy, while the society conversations under
-  `<chat>.files/log/society/<agent_name>/<conversation>/agent.chat` are
+  top-level copy, while the society conversations under
+  `<chat>.files/<name>.society/<agent_name>/<conversation>/agent.chat` are
   included even though they are also named `agent.chat`. Job roots keep
-  `log/agent.chat` as a normal log node, and `log/` is the scan root for
-  both, so `resets/` snapshots stay out.
+  their own top-level `<name>.chat` as a normal log node (renderers hide
+  it), and the `:log` relation covers exactly
+  `*.files/*.chat`, `*.files/*.society/**/*.chat` and the legacy
+  `*.files/log/**/*.chat`, so `resets/` snapshots stay out.
+
+**Legacy layout (read-only).** Older scout-ai wrote
+`<chat>.files/log/agent.chat` and the society tree under
+`<chat>.files/log/society/<agent_name>/<conversation>/agent.chat`. Nothing
+writes there anymore, old files are never migrated, and provenance
+traversal still globs `log/**/*.chat` so chats saved by those versions
+remain visible.
 
 An agent with no live society writes only its own chat file and creates no
 `.files` tree at all; parent directories are created on demand by

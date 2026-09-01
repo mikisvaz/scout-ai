@@ -56,20 +56,20 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
     # The unified provenance save ALWAYS writes this job agent's own chat at
     # `<path>.files/log/agent.chat` (that is the point of the mechanism);
     # only the society subtree stays lazy and appears with a live society.
-    assert File.exist?("#{path}.files/log/agent.chat")
-    assert !File.exist?("#{path}.files/log/society")
+    assert File.exist?("#{path}.files/agent.chat")
+    assert !File.exist?("#{path}.files/agent.society")
   end
 
   def test_canonical_layout_no_society
     job = run_job(TmpFile.tmpdir, :with_chat)
     path = job.path
     # files_dir is the SUFFIXED sibling `<path>.files`, not a subdirectory
-    agent_chat = File.join("#{path}.files", 'log', 'agent.chat')
+    agent_chat = File.join("#{path}.files", 'agent.chat')
     assert Open.exist?(agent_chat)
     saved = LLM.chat(agent_chat)
     assert_equal 'You are a helper.', saved.first[:content]
     assert saved.any? { |m| m[:role] == 'assistant' && m[:content] == 'answer one' }
-    assert !File.exist?(File.join("#{path}.files", 'log', 'society'))
+    assert !File.exist?(File.join("#{path}.files", 'agent.society'))
   end
 
   def test_nested_society_layout
@@ -90,7 +90,7 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
       written = agent.save
       # ask_agent without a conversation argument lands in the 'default'
       # conversation slot
-      nested = File.join(dir, 'agent.chat.files', 'log', 'society', 'Worker', 'default', 'agent.chat')
+      nested = File.join(dir, 'agent.society', 'Worker', 'default', 'agent.chat')
       assert_include written, File.expand_path(nested)
       assert Open.exist?(nested)
       assert !File.exist?(File.join(dir, 'nested.files'))

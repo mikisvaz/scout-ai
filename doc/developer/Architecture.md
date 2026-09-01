@@ -43,7 +43,7 @@ For deeper investigation of any subsystem, see the corresponding
 |---|---|---|
 | **Chat** | `Chat` module (Annotation on Array) | A conversation: a plain Array of message Hashes, annotated with DSL methods. |
 | **Agent** | `LLM::Agent` class | A stateful conversation holder with tools, a workflow, knowledge bases, and delegation capabilities. |
-| **AgentWorkflow** | `AgentWorkflow` mixin | A `Workflow` mixin that adds `chat_task`, `helper :agent`, and `helper :log_agent` for multi-agent strategies. `log_agent` delegates to `Agent#save`, so workflow jobs and manual agents write to one canonical layout (`<job>.files/log/agent.chat` plus the lazy `log/society/…` tree). |
+| **AgentWorkflow** | `AgentWorkflow` mixin | A `Workflow` mixin that adds `chat_task`, `helper :agent`, and `helper :log_agent` for multi-agent strategies. `log_agent` delegates to `Agent#save`, so workflow jobs and manual agents write to one canonical layout (`<job>.files/<name>.chat` — `agent.chat` by default, `worker.chat`/`critic.chat` for named agents — plus the lazy `<name>.society/<Agent>/<conversation>/…` tree). |
 | **Backend** | `LLM::Backend` module + provider modules | Stateless adapter to a specific LLM provider API. Shares logic via `Backend::ClassMethods`, overrides via `prepend`. |
 | **Tools** | `LLM` module methods | Definition and execution of callable tools: workflow tasks, KB queries, MCP servers. |
 | **Annotation** | `Annotation` (from scout-essentials) | Non-invasive metadata injection onto existing objects without subclassing or wrapping. |

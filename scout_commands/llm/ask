@@ -88,7 +88,13 @@ if chat
     exit 0
   end
 
-  agent_save_file = chat + '.files/log/agent.chat'
+  # ScoutCoder: named-file rule (AgentWorkflow#log_agent parity): the agent
+  # chat of this CLI conversation lands at <chat>.files/agent.chat, with the
+  # society tree at <chat>.files/agent.society (LLM::Agent.society_dir_for).
+  # This CLI has no agent option, so the name is always 'agent'; the
+  # `agent_save_file` option forwarded to LLM.ask is this very value and is
+  # honored verbatim by lib/scout/llm/ask.rb.
+  agent_save_file = chat + '.files/agent.chat'
   new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true, agent_save_file: agent_save_file)))
   Open.open(chat, mode: 'a') do |f|
     f.puts LLM.print([{role: :user, content: question}]) unless question.empty?

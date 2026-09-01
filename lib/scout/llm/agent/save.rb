@@ -25,27 +25,49 @@ module LLM
 
     class << self
       # Society directory of a ROOT chat saved at `chat_path`:
-      # `<chat_path>.files/log/society`.
+      # `.../<name>.society` for a chat file `.../<name>.chat`
+      # (`agent.chat` -> `agent.society`; `worker.chat` -> `worker.society`).
+      #
+      # ScoutCoder: this is the NAME-DERIVED rule, used at depth 0 only. A
+      # path that does not end in `.chat` is normalized by dropping its last
+      # component (defensive: `society_dir_for(dir)` still yields a directory
+      # sibling, never `<dir>.files/...`); both Path and String inputs are
+      # accepted and the result is always a plain String.
       #
       # This is the ROOT rule only. The general rule (Agent#society_dir) is
       # decided from the location of the chat being written, so a nested
       # agent.chat never grows a second `.files` tree of its own:
       #
       #   chat.chat
-      #   chat.chat.files/log/society/<agent>/<conversation>/agent.chat
-      #   chat.chat.files/log/society/<agent>/<conversation>/society/<agent>/<conversation>/agent.chat
+      #   chat.chat.society/<agent>/<conversation>/agent.chat
+      #   chat.chat.society/<agent>/<conversation>/society/<agent>/<conversation>/agent.chat
       def society_dir_for(chat_path)
+        p = chat_path.to_s
+        p = File.dirname(p) unless p =~ /\.chat\z/
+        File.join(File.dirname(p), File.basename(p).sub(/\.chat\z/, '.society'))
+      end
+
+      # ScoutCoder: LEGACY root society directory (`<path>.files/log/society`)
+      # from before the flat layout change. Kept read-only: nothing writes
+      # here anymore, but provenance traversal must still glob it so chats
+      # saved by older versions remain visible (see
+      # Chat.direct_chat_sidecar_files).
+      def legacy_society_dir_for(chat_path)
         "#{chat_path}.files/log/#{SOCIETY_DIR}"
       end
 
       # Is `path` the chat file of a NESTED conversation, i.e. does it already
-      # live inside a society tree as `.../society/<agent>/<conversation>/<file>`?
-      # The test is on the great-grandparent directory: a nested chat file sits
-      # at <society>/<agent>/<conversation>/<file>, so the directory three
-      # levels up from the file is the society directory itself.
+      # live inside a society tree? A nested chat file sits at
+      # <society>/<agent>/<conversation>/<file>, so the directory three levels
+      # up from the file is the society directory itself.
       # (Two levels up would be <agent>, one level up <conversation>.)
+      #
+      # The society directory of a depth-0 chat is named after it
+      # (<name>.society), while every deeper level keeps the plain 'society'
+      # sibling dir, so BOTH basenames count here.
       def nested_save?(path)
-        File.basename(File.dirname(File.dirname(File.dirname(path.to_s)))) == SOCIETY_DIR
+        parent = File.basename(File.dirname(File.dirname(File.dirname(path.to_s))))
+        parent == SOCIETY_DIR || parent.end_with?('.' + SOCIETY_DIR)
       end
     end
 
@@ -57,7 +79,7 @@ module LLM
     # point was (root save, recursion, or a later standalone auto-save of a
     # child that had its save_file assigned by a parent):
     #
-    # - root chat (`.../conversation.chat`):        `<path>.files/log/society`
+    # - root chat (`.../conversation.chat`):        sibling `<name>.society`
     # - nested chat (`.../society/<a>/<c>/<file>`): sibling `<dirname>/society`
     #
     # Deciding by LOCATION (not by recursion depth) is what keeps the layout
@@ -212,6 +234,7 @@ module LLM
         next if agent_name.nil? || conversation.nil?
 
         child_path = File.join(society_dir, agent_name, conversation, SOCIETY_CHAT_FILE)
+        next if Open.exists?(child_path) && Path.newer?(child_path, save_file)
         # The child remembers its own file so a later independent ask by that
         # child auto-saves in place instead of needing the parent save.
         agent.save_file = child_path

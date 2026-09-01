@@ -4,32 +4,75 @@ require 'time'
 module Chat
   PROVENANCE_RELATIONS = %i[job dependency log result agent_job].freeze
 
-  # Return only chat logs owned by this job. This method is deliberately not
-  # recursive; recursion belongs to traverse_provenance.
+  # ScoutCoder: DUAL-LAYOUT note. Two on-disk layouts must be globbed for a
+  # job's own chat logs and for a saved chat's .files sidecar:
+  #
+  #   new     <x>.files/<name>.chat                        (agent.chat, worker.chat, ...)
+  #   new     <x>.files/<name>.society/**/*.chat           (society tree; nested
+  #           societies keep the plain 'society' basename deeper down)
+  #   legacy  <x>.files/log/**/*.chat                      (written by older
+  #           scout-ai; read-only compatibility, never migrated)
+  #
+  # Exactly these three families may be swept: resets/, other *.files
+  # subdirectories and second-order .files trees stay invisible.  Files matched
+  # by more than one pattern are deduplicated and results are sorted so the
+  # traversal order is deterministic.
+  DIRECT_LOG_CHAT_GLOBS = ['*.chat', '*.society/**/*.chat', 'log/**/*.chat'].freeze
+
+  # Glob DIRECT_LOG_CHAT_GLOBS under `files_dir` and return a de-duplicated,
+  # sorted list of existing chat files (Path objects).  Both new and legacy
+  # layouts are returned together; callers that must exclude the root copy of
+  # the root conversation (Chat.direct_chat_sidecar_files) filter afterwards.
+  def self.direct_log_chat_glob(files_dir)
+    files_dir = files_dir.to_s
+    return [] unless File.directory?(files_dir)
+    DIRECT_LOG_CHAT_GLOBS
+      .flat_map { |pattern| Dir.glob(File.join(files_dir, pattern)) }
+      .collect { |file| File.expand_path(file) }
+      .select { |file| File.file?(file) }
+      .uniq
+      .sort
+      .collect { |file| Path.setup(file) }
+  end
+
+  # ScoutCoder: DUAL-LAYOUT globbing (see DIRECT_LOG_CHAT_GLOBS): a job's own
+  # chat logs live at <job>.files/<name>.chat (new), under
+  # <job>.files/<name>.society/** (new society tree) or under the legacy
+  # <job>.files/log/** (written by older scout-ai; read-only compatibility,
+  # never migrated).  This method is deliberately not recursive; recursion
+  # belongs to traverse_provenance.
   def self.direct_job_chat_files(job)
     job = Step.load(job) unless Step === job
-    log = job.file('log')
-    return [] unless log.directory?
-    log.glob('**/*.chat').sort.collect { |file| Path.setup(File.expand_path(file.to_s)) }
+    direct_log_chat_glob(job.files_dir)
   end
 
   # Return only chat logs owned by this persisted chat's .files sidecar.  The
-  # save mechanism writes saved agent conversations under
-  # <path>.files/log/... exactly like a job does, so a chat with a sidecar is
-  # scanned the same way a job is.  This method is deliberately not recursive;
-  # recursion belongs to traverse_provenance.  The root-copy
-  # <path>.files/log/agent.chat (a full copy of the root conversation written
-  # by the CLI save mechanism) is excluded: it would be a self-edge duplicating
-  # the root chat.
+  # save mechanism writes saved agent conversations into the chat's .files dir
+  # exactly like a job does, so a chat with a sidecar is scanned the same way a
+  # job is.  This method is deliberately not recursive; recursion belongs to
+  # traverse_provenance.
+  #
+  # ScoutCoder: DUAL-LAYOUT globbing (see DIRECT_LOG_CHAT_GLOBS) plus the
+  # root-copy exclusion.  The save mechanism writes a full copy of the ROOT
+  # conversation at the TOP LEVEL of the files dir in BOTH layouts:
+  #
+  #   new     <path>.files/<name>.chat   (agent.chat, worker.chat, ...)
+  #   legacy  <path>.files/log/agent.chat
+  #
+  # Those top-level copies must be excluded here or the chat would get a
+  # self-edge duplicating the root node.  Note the asymmetry with
+  # direct_job_chat_files: a JOB's own top-level agent.chat IS traversed
+  # (renderers hide it), a CHAT's root copy is NOT.  Only TOP-LEVEL *.chat
+  # files are excluded: society chats under <name>.society/ (new) and under
+  # log/society/ (legacy) are independent conversations and are included.
   def self.direct_chat_sidecar_files(path)
-    root_copy = File.expand_path(File.join(path.to_s + '.files', 'log', 'agent.chat'))
-    log = File.join(path.to_s + '.files', 'log')
-    return [] unless File.directory?(log)
-    Dir.glob(File.join(log, '**', '*.chat')).sort.collect do |file|
-      file = Path.setup(File.expand_path(file))
-      next if file.to_s == root_copy
-      file
-    end.compact
+    files_dir = path.to_s + '.files'
+    return [] unless File.directory?(files_dir)
+    top_level = Dir.glob(File.join(files_dir, '*.chat')).collect { |file| File.expand_path(file) }
+    root_copy_legacy = File.expand_path(File.join(files_dir, 'log', 'agent.chat'))
+    direct_log_chat_glob(files_dir).reject do |file|
+      top_level.include?(file.to_s) || file.to_s == root_copy_legacy
+    end
   end
 
   # Return the persisted result as a chat file when the Step result type is

@@ -219,10 +219,17 @@ module Chat
     jobs.flat_map { |job| Chat.job_chat_files(job) }.uniq
   end
 
+  # ScoutCoder: DUAL-LAYOUT filter (see Chat::DIRECT_LOG_CHAT_GLOBS).  Agent
+  # chats are the NEW layout files living under the job's own files dir
+  # (.files/<name>.chat and .files/<name>.society/**, which no longer have a
+  # log/ component) plus the LEGACY .files/log/ tree written by older
+  # scout-ai.  Other jobs' second-order .files trees are excluded by requiring
+  # the file to be under THIS job's files dir.
   def job_agent_chat_files
     jobs.flat_map do |job|
+      job_files = job.path.to_s + '.files'
       Chat.provenance_chat_files(job, root_type: :job).select do |file|
-        file.include?('.files/log/')
+        file.include?('.files/log/') || file.start_with?(job_files + '/')
       end
     end.uniq
   end

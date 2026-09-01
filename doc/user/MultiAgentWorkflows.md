@@ -50,16 +50,20 @@ that includes the `AgentWorkflow` mixin.
 - **Caching**: The same chat input produces the same output, cached on disk.
 - **Provenance**: Every agent run is recorded with full chat history.
 - **Agent chat sidecar**: the agent's own conversation is always written to
-  `<job>.files/log/agent.chat` next to the job, holding the **full** chat
+  `<job>.files/<name>.chat` next to the job (`agent.chat` by default,
+  `worker.chat`/`critic.chat` for named agents), holding the **full** chat
   (system prompt, tools, every turn), while the job **result** keeps delta
   semantics — only the messages produced by this run.
 - **Provenance includes the society tree**: `scout-ai llm prov` treats a job
   and a saved chat the same way here — both are scanned for conversations
-  under `<path>.files/log/`, including `log/society/<agent>/<conversation>/`.
-  A saved chat skips only its own copy at `<chat>.files/log/agent.chat`;
-  society conversations keep the same `agent.chat` name and are included.
+  under `<path>.files/`, namely `<path>.files/*.chat`,
+  `<path>.files/*.society/<agent>/<conversation>/` and the legacy
+  `<path>.files/log/**` (older scouts, still readable). A saved chat skips
+  only its own top-level copy at `<chat>.files/<name>.chat` (and the legacy
+  `<chat>.files/log/agent.chat`); society conversations keep the same
+  `agent.chat` name and are included.
 - **Lazy society tree**: delegated specialist conversations, if any, are
-  saved under `<job>.files/log/society/<agent_name>/<conversation>/…`, but
+  saved under `<job>.files/<name>.society/<agent_name>/<conversation>/…`, but
   only when they exist. Nothing is created eagerly — no job starts with an
   empty `.files` directory — and parent directories appear on demand.
 - **Dependency tracking**: Tasks can depend on each other.
@@ -201,15 +205,16 @@ combines results.
 ## Logging agent activity
 
 When agents run inside workflow tasks, the agent's own conversation is saved
-to `<job>.files/log/agent.chat` (the full chat), the job result keeps only
+to `<job>.files/<name>.chat` (the full chat; `agent.chat` by default,
+`worker.chat` for a `worker` agent), the job result keeps only
 this run's delta, and delegated specialist conversations — when they exist —
-are saved under `<job>.files/log/society/<agent_name>/<conversation>/…`.
+are saved under `<job>.files/<name>.society/<agent_name>/<conversation>/…`.
 Nothing is created up front; directories and files appear only when there is
 something to save.
 
 Chats saved by the CLI get the same sidecar layout: the root conversation is
-copied to `<chat>.files/log/agent.chat` and any socialized agents land under
-`<chat>.files/log/society/…`. Both jobs and saved chats are examined for
+copied to `<chat>.files/<name>.chat` and any socialized agents land under
+`<chat>.files/<name>.society/…`. Both jobs and saved chats are examined for
 those conversations, so you can inspect either as provenance:
 
 ```bash

@@ -56,8 +56,9 @@ also snapshots the old conversation to
 timestamp, `_1`, `_2`, … suffixes on name collisions) before clearing it. The
 snapshot is lazy — no reset directory is created when there is nothing to
 snapshot — and non-fatal if it fails. Reset snapshots live directly under
-`.files`, not under `.files/log`, so provenance traversal of `log/**/*.chat`
-ignores them: they are recovery artifacts, not logs.
+`.files`, in none of the three directories the `:log` relation sweeps
+(`*.files/*.chat`, `*.files/*.society/**`, the legacy `*.files/log/**`), so
+provenance traversal ignores them: they are recovery artifacts, not logs.
 
 ### Adding messages
 
@@ -96,9 +97,10 @@ Agents persist their conversations on demand, through three cooperating
 pieces:
 
 - **`agent.save_file = path`** designates where this agent's own chat lives
-  (for example `job.files/log/agent.chat` for a `chat_task` job, or
-  `chat.files/log/society/<agent_name>/<conversation>/agent.chat` for a
-  socialized specialist).
+  (for example `job.files/agent.chat` for a `chat_task` job, or
+  `chat.files/agent.society/<agent_name>/<conversation>/agent.chat` for a
+  socialized specialist; named agents write `worker.chat` /
+  `worker.society`).
 - **`agent.save(path = nil)`** writes the agent's **full** `current_chat` —
   not just the new messages — to `save_file` (or to `path`, when given). It
   raises `ScoutException` when neither is set. Files whose content is already
@@ -112,12 +114,19 @@ pieces:
 The canonical layout is decided by *location*, not configuration:
 
 - a root chat saved at `p.chat` puts its society at
-  `p.chat.files/log/society/<agent_name>/<conversation>/agent.chat`;
+  `p.chat.files/agent.society/<agent_name>/<conversation>/agent.chat`
+  (`<name>.society` for named agents; only the depth-0 society directory is
+  name-derived, deeper levels keep the plain `society` basename);
 - a nested chat already at `.../society/<a>/<c>/<file>` stores its own
   children in the **sibling** directory `.../society/<a>/<c>/society/…` — a
   nested `agent.chat` never grows a second `.files` tree;
 - `chat_task` jobs and `scout-ai agent ask` always write the agent's own chat
-  at `<chat_or_job_path>.files/log/agent.chat`.
+  at `<chat_or_job_path>.files/<name>.chat`: `agent.chat` for the default
+  agent, `worker.chat`/`critic.chat` for named ones.
+
+**Legacy layout (read-only).** Older versions wrote
+`<path>.files/log/agent.chat` and `log/society/…`. Nothing writes there
+anymore, old files are not migrated, and provenance still reads them.
 
 Saving is lazy (nothing is created eagerly; parent directories are created on
 demand) and non-fatal (a failure logs a warning and the run continues). Cycle
