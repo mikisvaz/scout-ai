@@ -158,8 +158,9 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
 
   def test_malformed_receipts_become_agent_job_warnings
     TmpFile.with_dir do |dir|
-      # Output indexes after the doubled inline user line: b1 -> 3, b2 -> 5,
-      # b3 -> 7.
+      # Output message indexes in the parsed chat (no leading empty user
+      # message since Chat.parse stopped emitting it): b1 -> 2, b2 -> 4,
+      # b3 -> 6.
       chat = write_chat(dir, 'bad.chat',
                         receipt_chat_text(
                           {'b1' => 'not-an-array',
@@ -196,14 +197,14 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
       # Indexed entries keep their evidence address; the whole-value failure
       # does not have one.
       not_an_array = errors.find { |_e, _k, _o, _r, ref| ref[:reason] == :not_an_array }
-      assert_equal [chat, 3], not_an_array.last[:output_address]
+      assert_equal [chat, 2], not_an_array.last[:output_address]
       assert_nil not_an_array.last[:evidence_address]
       assert_nil not_an_array.last[:agent_meta_index]
       invalid_role = errors.find { |_e, _k, _o, _r, ref| ref[:reason] == :invalid_role }
-      assert_equal [chat, 5, :agent_meta, 0], invalid_role.last[:evidence_address]
+      assert_equal [chat, 4, :agent_meta, 0], invalid_role.last[:evidence_address]
       assert_equal 0, invalid_role.last[:agent_meta_index]
-      unparseable = errors.find { |_e, _k, _o, _r, ref| ref[:reason] == :unparseable_meta && ref[:output_address] == [chat, 5] }
-      assert_equal [chat, 5, :agent_meta, 1], unparseable.last[:evidence_address]
+      unparseable = errors.find { |_e, _k, _o, _r, ref| ref[:reason] == :unparseable_meta && ref[:output_address] == [chat, 4] }
+      assert_equal [chat, 4, :agent_meta, 1], unparseable.last[:evidence_address]
 
       # Nothing malformed was silently used as provenance.
       assert_equal 1, visits.length
@@ -263,7 +264,7 @@ TXT
       unresolved = errors.collect(&:last).select { |ref| ref[:reason] == :unresolved_job_reference }
       assert_equal 1, unresolved.length
       assert_equal missing, unresolved.first[:reference]
-      assert_equal [chat, 3, :agent_meta, 0], unresolved.first[:evidence_address]
+      assert_equal [chat, 2, :agent_meta, 0], unresolved.first[:evidence_address]
       assert_equal 'u1', unresolved.first[:call_id]
       assert_equal 'ask', unresolved.first[:tool_name]
 

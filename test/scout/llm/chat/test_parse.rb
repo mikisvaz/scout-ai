@@ -21,18 +21,35 @@ class TestParse < Test::Unit::TestCase
 
     msgs = Chat.parse(text)
 
-    # Expect a few messages: initial empty user, assistant block, inline user, and final user block
-    assert_equal 'user', msgs[0][:role]
-    assert_equal '', msgs[0][:content]
+    # Expect three messages: assistant block, inline user, and the final
+    # block, which takes the default user role. No leading empty user
+    # message is emitted any more.
+    assert_equal 3, msgs.size
 
-    assert_equal 'assistant', msgs[1][:role]
-    assert_equal "This is a block\nwith lines", msgs[1][:content]
+    assert_equal 'assistant', msgs[0][:role]
+    assert_equal "This is a block\nwith lines", msgs[0][:content]
+
+    assert_equal 'user', msgs[1][:role]
+    assert_equal 'inline reply', msgs[1][:content]
 
     assert_equal 'user', msgs[2][:role]
-    assert_equal 'inline reply', msgs[2][:content]
+    assert_equal 'another line', msgs[2][:content]
+  end
 
-    assert_equal 'assistant', msgs[3][:role]
-    assert_equal 'another line', msgs[3][:content]
+  def test_no_leading_empty_user_message
+    # A chat whose whole content is an empty user block parses to no
+    # messages: Chat.parse must not fabricate an empty leading message.
+    assert_equal [], Chat.parse("user:\n")
+    assert_equal [], Chat.parse("user: \n")
+
+    # A chat starting with a block header keeps its real messages and
+    # gains no empty user message in front of them.
+    msgs = Chat.parse("user:\nRun the worker\nassistant: done\n")
+    assert_equal 2, msgs.size
+    assert_equal 'user', msgs[0][:role]
+    assert_equal 'Run the worker', msgs[0][:content]
+    assert_equal 'assistant', msgs[1][:role]
+    assert_equal 'done', msgs[1][:content]
   end
 
   def _test_parse_code_fence_protection

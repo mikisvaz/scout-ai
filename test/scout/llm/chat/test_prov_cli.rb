@@ -132,8 +132,8 @@ class TestProvCLI < Test::Unit::TestCase
       end
 
       # Receipt evidence keeps its parent output address and call id.
-      assert_match(/agent_meta parent\.chat:3\[agent_meta,0\] call=a1/, out)
-      assert_match(/agent_meta parent\.chat:3\[agent_meta,1\] call=a1/, out)
+      assert_match(/agent_meta parent\.chat:2\[agent_meta,0\] call=a1/, out)
+      assert_match(/agent_meta parent\.chat:2\[agent_meta,1\] call=a1/, out)
 
       # Chat-side evidence for the merged events.
       assert_match(/chat_meta agent\.chat:3/, out)
@@ -154,11 +154,11 @@ class TestProvCLI < Test::Unit::TestCase
       assert status.success?
 
       # Worker is reached through a receipt (relation :agent_job) ...
-      assert_match(/delegated-job w\b/, out)
+      assert_match(/delegated-job (Default_)?w\b/, out)
       # ... while the Critic, referenced by an ordinary local meta job= line
       # (relation :job), keeps the plain job rendering.
-      assert_match(/^\s*job\s+c\b/, out)
-      assert_not_match(/delegated-job c\b/, out)
+      assert_match(/^\s*job\s+(Default_)?c\b/, out)
+      assert_not_match(/delegated-job (Default_)?c\b/, out)
 
       # Delegated usage of the parent chat is annotated once.
       assert_equal 1, out.lines.count { |line| line.include?('delegated receipt:') }
@@ -266,7 +266,7 @@ class TestProvCLI < Test::Unit::TestCase
       assert status.success?
       # Legacy receipt events show their receipt location instead of the raw
       # address array, and they are flagged as possibly overcounted.
-      assert_match(/receipt=legacy\.chat:3\[agent_meta,0\]/, out)
+      assert_match(/receipt=legacy\.chat:2\[agent_meta,0\]/, out)
       assert_include out, 'legacy unresolved'
       assert_not_include out, 'receipt=["', out
     end

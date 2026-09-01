@@ -14,8 +14,8 @@ function_call_output: {"id":"call-1","content":"{\\"exit_status\\":1}"}
 
     call = Chat.tool_calls(conversation, source: '/tmp/example.chat').first
     assert_equal 'bash', call[:name]
-    assert_equal ['/tmp/example.chat', 1], call[:call_address]
-    assert_equal ['/tmp/example.chat', 2], call[:output_address]
+    assert_equal ['/tmp/example.chat', 0], call[:call_address]
+    assert_equal ['/tmp/example.chat', 1], call[:output_address]
     assert_equal({ success: false, reason: :exit_status, exit_status: 1 }, Chat.tool_call_status(call))
   end
 

@@ -51,13 +51,13 @@ function_call_output: #{envelope.to_json}
     assert_equal 'call-1', direct[:call_id]
     assert_equal 'ask', direct[:tool_name]
     assert_equal 0, direct[:agent_meta_index]
-    assert_equal 3, direct[:output_address]
-    assert_equal [3, :agent_meta, 0], direct[:evidence_address]
+    assert_equal 2, direct[:output_address]
+    assert_equal [2, :agent_meta, 0], direct[:evidence_address]
     assert_nil direct[:source]
     assert_equal({role: 'meta', content: 'pt=100 ct=50 tt=150 inference_id=aaa'}, direct[:raw_message])
 
     assert_equal 1, projection[:agent_meta_index]
-    assert_equal [3, :agent_meta, 1], projection[:evidence_address]
+    assert_equal [2, :agent_meta, 1], projection[:evidence_address]
     assert_equal 'Worker/ask/Default_x', projection[:meta][:job]
   end
 
@@ -72,12 +72,12 @@ function_call_output: #{envelope.to_json}
 
       direct = evidence.first
       assert_equal path, direct[:source]
-      assert_equal [path, 3], direct[:output_address]
-      assert_equal [path, 3, :agent_meta, 0], direct[:evidence_address]
+      assert_equal [path, 2], direct[:output_address]
+      assert_equal [path, 2, :agent_meta, 0], direct[:evidence_address]
       assert_equal 'call-1', direct[:call_id]
       assert_equal 'ask', direct[:tool_name]
 
-      assert_equal [path, 3, :agent_meta, 1], evidence.last[:evidence_address]
+      assert_equal [path, 2, :agent_meta, 1], evidence.last[:evidence_address]
     end
   end
 
@@ -101,7 +101,7 @@ assistant: Hi
     warning = warnings.first
     assert_equal :agent_meta, warning[:origin]
     assert_equal :not_an_array, warning[:reason]
-    assert_equal 3, warning[:output_address]
+    assert_equal 2, warning[:output_address]
     assert_equal 'call-1', warning[:call_id]
     assert_equal 'ask', warning[:tool_name]
     assert_nil warning[:agent_meta_index]
@@ -130,7 +130,7 @@ assistant: Hi
     assert_equal :invalid_role, warnings.first[:reason]
     assert_equal 0, warnings.first[:agent_meta_index]
     assert_equal({ 'role' => 'assistant', 'content' => 'not a meta record' }, warnings.first[:raw_entry])
-    assert_equal [3, :agent_meta, 1], evidence.first[:evidence_address]
+    assert_equal [2, :agent_meta, 1], evidence.first[:evidence_address]
   end
 
   def test_entry_without_string_content_is_skipped_with_warning
@@ -175,7 +175,7 @@ assistant: Hi
     local = evidence.first
     assert_equal 10, local[:meta][:pt]
     assert_equal 12, local[:meta][:tt]
-    assert_equal 4, local[:meta_address]
+    assert_equal 3, local[:meta_address]
     assert_nil local[:source]
     assert_equal 'meta', local[:message][:role].to_s
     assert_equal 'pt=10 tt=12 inference_id=local1', local[:message][:content]
@@ -190,9 +190,9 @@ assistant: Hi
       conversation = Chat.load(path)
 
       evidence = Chat.meta_evidence(conversation, source: path)
-      assert_equal [path, 4], evidence.first[:meta_address]
-      assert_equal [path, 3, :agent_meta, 0], evidence[1][:evidence_address]
-      assert_equal [path, 3, :agent_meta, 1], evidence[2][:evidence_address]
+      assert_equal [path, 3], evidence.first[:meta_address]
+      assert_equal [path, 2, :agent_meta, 0], evidence[1][:evidence_address]
+      assert_equal [path, 2, :agent_meta, 1], evidence[2][:evidence_address]
       assert evidence.all? { |record| record[:source] == path }
     end
   end
@@ -207,10 +207,10 @@ assistant: Hi
 
     after = conversation.collect { |message| [message[:role].to_s, message[:content].to_s] }
     assert_equal before, after
-    assert_equal 6, conversation.length
+    assert_equal 5, conversation.length
 
     roles = conversation.collect { |message| message[:role].to_s }
-    assert_equal %w[user user function_call function_call_output meta assistant], roles
+    assert_equal %w[user function_call function_call_output meta assistant], roles
   end
 
   def test_agent_meta_job_references_returns_only_job_records
@@ -225,7 +225,7 @@ assistant: Hi
     assert_equal 'call-1', reference[:call_id]
     assert_equal 'ask', reference[:tool_name]
     assert_equal 1, reference[:agent_meta_index]
-    assert_equal [3, :agent_meta, 1], reference[:evidence_address]
+    assert_equal [2, :agent_meta, 1], reference[:evidence_address]
 
     TmpFile.with_dir do |dir|
       path = File.join(dir, 'parent.chat')
@@ -233,7 +233,7 @@ assistant: Hi
       with_source = Chat.agent_meta_job_references(Chat.load(path), source: path)
       assert_equal 1, with_source.length
       assert_equal 'Worker/ask/Default_x', with_source.first[:job]
-      assert_equal [path, 3, :agent_meta, 1], with_source.first[:evidence_address]
+      assert_equal [path, 2, :agent_meta, 1], with_source.first[:evidence_address]
     end
   end
 

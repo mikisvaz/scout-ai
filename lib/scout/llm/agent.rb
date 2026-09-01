@@ -130,7 +130,7 @@ module LLM
           end
         else
           begin
-            self.save_state
+            self.save if self.save_file
           rescue
             Log.exception $!
           ensure

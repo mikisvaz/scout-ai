@@ -511,8 +511,8 @@ meta: inference_id=request-one tt=5
 assistant: Done
     EOF
     entry = Chat.trace_chat_sources('/tmp/work.chat' => conversation).first
-    assert_equal ['/tmp/work.chat', 2], entry[:meta_address]
-    assert_equal [['/tmp/work.chat', 3]], entry[:message_addresses]
+    assert_equal ['/tmp/work.chat', 1], entry[:meta_address]
+    assert_equal [['/tmp/work.chat', 2]], entry[:message_addresses]
   end
 
 end

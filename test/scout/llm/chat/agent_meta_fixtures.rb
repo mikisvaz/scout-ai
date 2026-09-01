@@ -40,8 +40,9 @@ module AgentMetaFixtures
   # are call ids, values are the agent_meta payloads (Arrays, Strings, ...).
   # `extra` lines are appended after the receipts (e.g. local meta lines).
   #
-  # Message indexes produced by Chat.parse (inline user line is doubled):
-  #   0 user, 1 user, then per receipt: function_call, function_call_output.
+  # Message indexes produced by Chat.parse (single user turn, no leading
+  # empty user message since 49c0d20):
+  #   0 user, then per receipt: function_call, function_call_output.
   def receipt_chat_text(receipts, extra: nil)
     lines = ['user: Run the worker']
     receipts.each do |call_id, agent_meta|
