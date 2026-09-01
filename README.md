@@ -114,10 +114,17 @@ agent, agents without the workflow mixin — [Architecture](doc/developer/Archit
 
 ```bash
 scout-ai llm ask "What is the capital of France?"   # one question
-scout-ai llm ask -c hello.chat                      # or a saved conversation
+scout-ai llm ask -c hello.chat                      # run a saved conversation
 ```
 
+When using the `-c` option the result is appended into the chat file.
+
 A chat file — write it by hand, run it, edit it, diff it:
+
+If agents are used, either through the `scout-ai agent ask` or defined inside
+the chat file, additional logs are placed in a sidecar directory (e.g.
+`hello.chat.files/log/`) storing all chats across the agentic society (agents can
+delegate on other agents).
 
 ```text
 system:

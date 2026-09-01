@@ -1,5 +1,12 @@
 # Agent-meta provenance integration: implementation and test plan
 
+> **Superseded (historical document).** Commit `efd8ebbc` ("Change how meta is
+> passed in function_call_output. Auto-save agent chats in .files") replaced
+> the serialized `agent_meta` writer shape described here with a `meta` key
+> holding an Array of already-deserialized field Hashes. The reader still
+> accepts both formats; see `doc/developer/Provenance.md` for current
+> behavior. The rest of this file is kept verbatim as the design record.
+
 > This is an implementation report for Scout-AI and ChatAnalyst coding agents.
 > It describes a change to provenance handling for `agent_meta` receipts that
 > are embedded in `function_call_output` records. It does not introduce a

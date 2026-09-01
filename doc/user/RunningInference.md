@@ -160,6 +160,17 @@ When you call `agent.chat` or `scout-ai llm ask`, Scout-AI:
 This is all automatic. You configure the endpoint and model; Scout-AI handles
 the rest.
 
+Persistence, however, differs slighly between the two CLIs:
+
+- `scout-ai agent ask ... -c <chat>` sets the agent's `save_file` to
+  `<chat>.files/log/agent.chat`, runs the agent through `agent.chat` (so the
+  auto-save hook fires), and also appends the new messages to `<chat>`
+  itself — a dual write. The `agent.chat` should contain also the agent instructions.
+- `scout-ai llm ask ... -c <chat>` accepts an `agent_save_file:` option
+  internally, but `LLM.ask` currently extracts that option and drops it
+  without applying it, unless an agent is defined inside the chat, in which
+  case that agent will get configured with the `save_file`.
+
 ---
 
 ## Common mistakes

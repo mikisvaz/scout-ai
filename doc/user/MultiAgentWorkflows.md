@@ -49,6 +49,14 @@ that includes the `AgentWorkflow` mixin.
 
 - **Caching**: The same chat input produces the same output, cached on disk.
 - **Provenance**: Every agent run is recorded with full chat history.
+- **Agent chat sidecar**: the agent's own conversation is always written to
+  `<job>.files/log/agent.chat` next to the job, holding the **full** chat
+  (system prompt, tools, every turn), while the job **result** keeps delta
+  semantics — only the messages produced by this run.
+- **Lazy society tree**: delegated specialist conversations, if any, are
+  saved under `<job>.files/log/society/<agent_name>/<conversation>/…`, but
+  only when they exist. Nothing is created eagerly — no job starts with an
+  empty `.files` directory — and parent directories appear on demand.
 - **Dependency tracking**: Tasks can depend on each other.
 
 ---
@@ -187,17 +195,24 @@ combines results.
 
 ## Logging agent activity
 
-When agents run inside workflow tasks, their conversations are automatically
-saved as provenance. You can inspect them:
+When agents run inside workflow tasks, the agent's own conversation is saved
+to `<job>.files/log/agent.chat` (the full chat), the job result keeps only
+this run's delta, and delegated specialist conversations — when they exist —
+are saved under `<job>.files/log/society/<agent_name>/<conversation>/…`.
+Nothing is created up front; directories and files appear only when there is
+something to save. You can inspect all of it as provenance:
 
 ```bash
 scout-ai llm prov /path/to/job
 ```
 
 This shows the full chat history, including any delegations and tool calls.
+Restart snapshots (`.files/resets/<timestamp>.chat`, taken by `agent.start`
+when a prior non-empty chat existed) sit outside `log/` and are recovery
+artifacts, not provenance logs.
 
 See [../developer/Provenance.md](../developer/Provenance.md) for provenance
-internals.
+internals and [BuildingAgents.md](BuildingAgents.md) for save semantics.
 
 ---
 

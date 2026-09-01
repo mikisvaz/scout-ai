@@ -50,6 +50,15 @@ Call `start` to create a new conversation branch:
 agent.start
 ```
 
+If the agent has a `save_file` **and** a prior non-empty saved chat, `start`
+also snapshots the old conversation to
+`<save_file>.files/resets/<timestamp>.chat` (colons stripped from the
+timestamp, `_1`, `_2`, … suffixes on name collisions) before clearing it. The
+snapshot is lazy — no reset directory is created when there is nothing to
+snapshot — and non-fatal if it fails. Reset snapshots live directly under
+`.files`, not under `.files/log`, so provenance traversal of `log/**/*.chat`
+ignores them: they are recovery artifacts, not logs.
+
 ### Adding messages
 
 Use role methods (forwarded to the underlying chat):
@@ -73,6 +82,47 @@ have full history:
 agent.user "And its population?"
 puts agent.chat   # => "Approximately 2.2 million in the city proper."
 ```
+
+`chat` also triggers an **auto-save**: when `agent.save_file` is set, the full
+conversation is serialized recursively at the end of every `chat` call (see
+below). A bare `agent.ask(...)` does **not** auto-save — only `chat` does.
+`LLM.ask` goes through `agent.chat`, so it inherits the same behavior.
+
+---
+
+## Persisting agents: `save_file`, `save`, and auto-save
+
+Agents persist their conversations on demand, through three cooperating
+pieces:
+
+- **`agent.save_file = path`** designates where this agent's own chat lives
+  (for example `job.files/log/agent.chat` for a `chat_task` job, or
+  `chat.files/log/society/<agent_name>/<conversation>/agent.chat` for a
+  socialized specialist).
+- **`agent.save(path = nil)`** writes the agent's **full** `current_chat` —
+  not just the new messages — to `save_file` (or to `path`, when given). It
+  raises `ScoutException` when neither is set. Files whose content is already
+  current are reported but not rewritten; a changed file is refreshed, and the
+  method returns the sorted list of absolute paths whose content is now
+  current. While saving, every reachable child agent gets its `save_file`
+  assigned too, so later independent child turns auto-save in place.
+- **Auto-save on `chat`**: an `ensure` hook in `Agent#chat` performs a full
+  recursive save, but only when `save_file` is set.
+
+The canonical layout is decided by *location*, not configuration:
+
+- a root chat saved at `p.chat` puts its society at
+  `p.chat.files/log/society/<agent_name>/<conversation>/agent.chat`;
+- a nested chat already at `.../society/<a>/<c>/<file>` stores its own
+  children in the **sibling** directory `.../society/<a>/<c>/society/…` — a
+  nested `agent.chat` never grows a second `.files` tree;
+- `chat_task` jobs and `scout-ai agent ask` always write the agent's own chat
+  at `<chat_or_job_path>.files/log/agent.chat`.
+
+Saving is lazy (nothing is created eagerly; parent directories are created on
+demand) and non-fatal (a failure logs a warning and the run continues). Cycle
+protection is built in: already-visited paths, already-seen agents, and a
+depth limit of 32 (warn, never raise) keep recursive saves from looping.
 
 ---
 
