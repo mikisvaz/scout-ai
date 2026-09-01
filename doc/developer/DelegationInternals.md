@@ -95,6 +95,13 @@ location from the save target of the *parent* agent:
   `agent.chat` never grows a second `.files` tree of its own.
 - `chat_task` jobs and the `scout-ai agent ask` CLI always write the agent's
   own chat at `<chat_or_job_path>.files/log/agent.chat`.
+- For a persisted **chat** root that file is a full copy of the root
+  conversation; provenance scanning of the sidecar excludes exactly that
+  copy, while the society conversations under
+  `<chat>.files/log/society/<agent_name>/<conversation>/agent.chat` are
+  included even though they are also named `agent.chat`. Job roots keep
+  `log/agent.chat` as a normal log node, and `log/` is the scan root for
+  both, so `resets/` snapshots stay out.
 
 An agent with no live society writes only its own chat file and creates no
 `.files` tree at all; parent directories are created on demand by

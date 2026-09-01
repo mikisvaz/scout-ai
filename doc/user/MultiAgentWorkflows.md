@@ -53,6 +53,11 @@ that includes the `AgentWorkflow` mixin.
   `<job>.files/log/agent.chat` next to the job, holding the **full** chat
   (system prompt, tools, every turn), while the job **result** keeps delta
   semantics — only the messages produced by this run.
+- **Provenance includes the society tree**: `scout-ai llm prov` treats a job
+  and a saved chat the same way here — both are scanned for conversations
+  under `<path>.files/log/`, including `log/society/<agent>/<conversation>/`.
+  A saved chat skips only its own copy at `<chat>.files/log/agent.chat`;
+  society conversations keep the same `agent.chat` name and are included.
 - **Lazy society tree**: delegated specialist conversations, if any, are
   saved under `<job>.files/log/society/<agent_name>/<conversation>/…`, but
   only when they exist. Nothing is created eagerly — no job starts with an
@@ -200,13 +205,22 @@ to `<job>.files/log/agent.chat` (the full chat), the job result keeps only
 this run's delta, and delegated specialist conversations — when they exist —
 are saved under `<job>.files/log/society/<agent_name>/<conversation>/…`.
 Nothing is created up front; directories and files appear only when there is
-something to save. You can inspect all of it as provenance:
+something to save.
+
+Chats saved by the CLI get the same sidecar layout: the root conversation is
+copied to `<chat>.files/log/agent.chat` and any socialized agents land under
+`<chat>.files/log/society/…`. Both jobs and saved chats are examined for
+those conversations, so you can inspect either as provenance:
 
 ```bash
 scout-ai llm prov /path/to/job
+scout-ai llm prov /path/to/saved.chat
 ```
 
 This shows the full chat history, including any delegations and tool calls.
+Jobs are recognized by their `.info` sidecar; a `.files` directory alone does
+not make a path a job, because saved chats have one too.
+
 Restart snapshots (`.files/resets/<timestamp>.chat`, taken by `agent.start`
 when a prior non-empty chat existed) sit outside `log/` and are recovery
 artifacts, not provenance logs.

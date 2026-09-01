@@ -13,6 +13,25 @@ module Chat
     log.glob('**/*.chat').sort.collect { |file| Path.setup(File.expand_path(file.to_s)) }
   end
 
+  # Return only chat logs owned by this persisted chat's .files sidecar.  The
+  # save mechanism writes saved agent conversations under
+  # <path>.files/log/... exactly like a job does, so a chat with a sidecar is
+  # scanned the same way a job is.  This method is deliberately not recursive;
+  # recursion belongs to traverse_provenance.  The root-copy
+  # <path>.files/log/agent.chat (a full copy of the root conversation written
+  # by the CLI save mechanism) is excluded: it would be a self-edge duplicating
+  # the root chat.
+  def self.direct_chat_sidecar_files(path)
+    root_copy = File.expand_path(File.join(path.to_s + '.files', 'log', 'agent.chat'))
+    log = File.join(path.to_s + '.files', 'log')
+    return [] unless File.directory?(log)
+    Dir.glob(File.join(log, '**', '*.chat')).sort.collect do |file|
+      file = Path.setup(File.expand_path(file))
+      next if file.to_s == root_copy
+      file
+    end.compact
+  end
+
   # Return the persisted result as a chat file when the Step result type is
   # chat. A job and its result chat may have the same path; traversal identities
   # therefore always include the node kind.
@@ -134,7 +153,9 @@ module Chat
   # Relations describe root-outward discovery, not diagram arrow direction:
   # chat -> producer job (:job), chat -> delegated-agent producer job
   # (:agent_job, from agent_meta receipts), job -> dependency (:dependency),
-  # job -> log chat (:log), and job -> result chat (:result).
+  # job -> log chat (:log), job -> result chat (:result), and chat -> log chat
+  # of its own .files sidecar (:log, saved agent conversations, excluding the
+  # root copy at <path>.files/log/agent.chat).
   #
   # Imported and continued chats are a chat-compilation concern, not a
   # provenance concern. They are resolved during Chat.parse and their content
@@ -238,6 +259,14 @@ module Chat
                                                             call_id: record[:call_id],
                                                             tool_name: record[:tool_name]))
               end
+            end
+          end
+
+          if relations.include?(:log)
+            # A saved chat owns its .files sidecar logs (society
+            # conversations) just like a job owns its job logs.
+            direct_chat_sidecar_files(object).each do |file|
+              queue << [:chat, file, :chat, object, :log]
             end
           end
         else

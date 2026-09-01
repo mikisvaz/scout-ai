@@ -105,7 +105,7 @@ module Chat
         if current_content && ! current_content.empty?
           messages << { role: current_role, content: current_content }
         elsif messages.empty?
-          messages << { role: current_role, content: '' }
+          #messages << { role: current_role, content: '' }
         end
 
         if inline_content.empty?

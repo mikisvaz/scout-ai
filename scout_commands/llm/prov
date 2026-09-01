@@ -38,10 +38,10 @@ evidence = options.delete(:evidence)
 filename = ARGV.first
 raise MissingParameterException, :filename if filename.nil?
 
-# A persisted Step normally has an info sidecar and may have a files directory.
-# Chat files outside Workflow storage have neither. Explicitly loading the Step
-# after this evidence check avoids treating every readable chat as a job.
-job_evidence = Open.exists?(filename + '.info') || Open.exists?(filename + '.files')
+# A persisted Step always has an info sidecar. A .files directory alone is NOT
+# evidence: saved agent chats carry one too. Explicitly loading the Step after
+# this evidence check avoids treating every readable chat as a job.
+job_evidence = Open.exists?(filename + '.info')
 root_type = job_evidence ? :job : :chat
 root = root_type == :job ? Step.load(filename) : Path.setup(File.expand_path(filename))
 warnings = []
@@ -218,7 +218,14 @@ def report_line(kind, label, tokens, offset: 0)
 end
 
 def job_short_id(path)
-  File.basename(path).sub(/^Default_/, '')[0, 8]
+  basename = File.basename(path)
+
+  parts = basename.split('_')
+  if parts.length == 2 && parts.last.length > 10
+    parts.last[0,8]
+  else
+    basename
+  end
 end
 
 def node_label(node, parent_node = nil, root_key = nil, key = nil, long = false)

@@ -21,11 +21,17 @@ The structural relations are:
 | chat | `agent_job` | job | A delegated tool call returned an agent whose `job=` receipt names the producer job. |
 | job | `dependency` | job | A normal Scout Workflow dependency. |
 | job | `log` | chat | A persisted agent conversation under `.files/log/**/*.chat`. |
+| chat | `log` | chat | A saved agent conversation under the chat's own `.files/log/**/*.chat` sidecar. |
 | job | `result` | chat | The job result is itself a chat file. |
 
 Relations describe root-outward discovery. A renderer may reverse `job` or `dependency` when drawing natural data flow.
 
-The `log` relation only ever covers files under the job's `log/` directory (`.files/log/**/*.chat`). Restart snapshots written by `Agent#start` live under `.files/resets/<timestamp>.chat`, directly under `.files` and **outside** `log/`: they are recovery artifacts, not logs, and provenance traversal does not follow them.
+The `log` relation only ever covers files under a `log/` directory (`.files/log/**/*.chat`), never anything else under `.files`. Restart snapshots written by `Agent#start` live under `.files/resets/<timestamp>.chat`, directly under `.files` and **outside** `log/`: they are recovery artifacts, not logs, and provenance traversal does not follow them, for jobs and for chats alike.
+
+The two `log` parents are deliberately asymmetric:
+
+- a **job** root includes its own `<job>.files/log/agent.chat` as a real log node, like any other file under `log/`;
+- a **chat** root excludes its root copy at `<save_file>.files/log/agent.chat`, because the save mechanism writes a full copy of the root conversation there and including it would duplicate the root as its own child. The exclusion is for that exact path only: society conversations under `log/society/<agent>/<conversation>/agent.chat` are also named `agent.chat` and **are** included.
 
 Imported and continued chats are **not** provenance relations. They are a chat-compilation concern resolved during `Chat.parse` and `LLM.chat`. The persisted `.chat` file already contains the full inlined conversation. Provenance traversal therefore never follows `import`, `continue`, or `last` chat references.
 
@@ -48,6 +54,10 @@ Do not use `LLM.chat` to inspect historical evidence: that method compiles contr
 Without a block it returns an Enumerator.
 
 The root has nil parent and relation. Every structural edge is yielded. When a shared dependency or cycle reaches an already visited node, `first_visit` is false and the node is not expanded again. Node identity includes both kind and path, because a chat-producing Step and its result chat can share a filesystem path.
+
+A chat node expands its own `.files` sidecar logs with the `log` relation, exactly like a job does; a job node expands `dependency`, `log`, and `result`. Node identity is `[kind, realpath]`, so a file reachable through both a job log glob and a chat sidecar glob collapses to a single node (first visit wins).
+
+`root_type` decides how the root is loaded. The prov CLI always passes it explicitly, from its own job detection (`.info` sidecar present). Callers that hand over a bare path string should know that traversal infers `:chat` when `Step.type` is empty for that path, which is the case for plain persisted chat files; pass `root_type: :job` whenever the root is known to be a Step, so the node is loaded with `Step.load` and expanded through the job relations instead of the chat ones.
 
 By default, loading and resolution errors are raised. Analytical callers that need partial results can supply `on_error`:
 
@@ -79,6 +89,7 @@ Thin collectors use the same traversal:
 Direct readers do not recurse:
 
 - `Chat.direct_job_chat_files(job)` returns chat logs owned directly by a job;
+- `Chat.direct_chat_sidecar_files(path)` returns chat logs owned directly by a persisted chat's `.files` sidecar, excluding the root copy `<save_file>.files/log/agent.chat`;
 - `Chat.job_result_chat_file(job)` returns a chat result when present.
 
 Recursion belongs only to `traverse_provenance`.
@@ -257,6 +268,8 @@ Usage:
     scout-ai llm prov path/to/chat --dot flow.dot
     scout-ai llm prov path/to/chat --plot flow.svg
     scout-ai llm prov path/to/chat --evidence
+
+Root classification uses the `.info` sidecar only: a path is a job iff `<path>.info` exists, and is loaded with `Step.load`. The presence of a `.files` sidecar is **not** evidence of a job, because saved agent chats also carry one; a chat root is simply `Path.setup`'d.
 
 The default tree is a spanning-tree presentation of a DAG. Repeated nodes are displayed as seen references rather than recursively expanded. Compact and graphical flows choose natural data-flow arrow direction during rendering without changing traversal semantics.
 

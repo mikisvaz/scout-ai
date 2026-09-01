@@ -28,6 +28,7 @@ module LLM
     if agent_name
       options[:endpoint] ||= endpoint
       agent = LLM::Agent.load_agent agent_name
+      agent.save_file = agent_save_file if agent_save_file
       agent.follow messages
       res = agent.chat options
       return res
