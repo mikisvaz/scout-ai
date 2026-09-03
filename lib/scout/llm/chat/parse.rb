@@ -56,16 +56,16 @@ module Chat
         line = line.sub("]]", "")
         current_content << "\n" << line unless line.strip.empty?
         next
-      elsif stripped.match(/^[^\s]*:-- .* {{{/)
+      elsif stripped.match(/^[^\s]* :-- .* {{{/)
         in_protected_block = true
         protected_block_type = :square
-        line = line.sub(/^[^\s]*:-- (.*) {{{.*/, '<cmd_output cmd="\1">')
+        line = line.sub(/^[^\s]* :-- (.*) {{{.*/, '<cmd_output cmd="\1">')
         current_content << "\n" << line unless line.strip.empty?
         next
-      elsif stripped.match(/^.*:--.* }}}/) && in_protected_block && protected_block_type == :square
+      elsif stripped.match(/^.* :--.* }}}/) && in_protected_block && protected_block_type == :square
         in_protected_block = false
         protected_block_type = nil
-        line = line.sub(/^.*:-- .* }}}.*/, "</cmd_output>")
+        line = line.sub(/^.* :-- .* }}}.*/, "</cmd_output>")
         current_content << "\n" << line unless line.strip.empty?
         next
       elsif in_protected_block
