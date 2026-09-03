@@ -48,7 +48,7 @@ recognizes these roles:
 | `user` | User message | Yes |
 | `assistant` | Model response | Yes |
 | `function_call` | Tool invocation request from model | Yes (as provider-specific tool_call) |
-| `function_call_output` | Tool execution result. May carry a `meta` key: an Array of already-deserialized receipt field Hashes (delegated inference metadata such as `pt`/`ct`/`tt`/`inference_id`, or `job=<path>` producer references), embedded by `LLM.process_calls` when the tool returned an `LLM::Agent`. Legacy chats may instead carry a serialized `agent_meta` key; both are read, `meta` wins when both are present. See [Provenance.md](Provenance.md). | Yes (as provider-specific tool result) |
+| `function_call_output` | Tool execution result. May carry a `meta` key: an Array of already-deserialized receipt field Hashes (delegated inference metadata such as `pt`/`ct`/`tt`/`inference_id`, or `{"job":"<path>"}` producer references), embedded by `LLM.process_calls` when the tool returned an `LLM::Agent`. Legacy chats may instead carry a serialized `agent_meta` key; both are read, `meta` wins when both are present. Outputs may also carry auxiliary `step`/`start_timestamp`/`timestamp` fields; `step` is bookkeeping, not a provenance edge. See [Provenance.md](Provenance.md). | Yes (as provider-specific tool result) |
 | `meta` | Provenance metadata (tokens, job references) | **No** — stripped before inference |
 | `tool` | Tool definition (inline in chat) | No — extracted into tool registry |
 | `introduce` | Workflow/tool introduction | No — extracted, introduces tools to the model context |

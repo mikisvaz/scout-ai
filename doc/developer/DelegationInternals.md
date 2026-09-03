@@ -223,7 +223,7 @@ When a delegation tool returns an `LLM::Agent`, `LLM.process_calls` embeds
 the child agent's `meta` messages in the parent `function_call_output`
 envelope under the `meta` key, as an Array of **already-deserialized** field
 Hashes (one for the child's own inference metadata, one per producer
-reference). These receipts are provenance evidence, not parent-chat
+reference: a `job` key holding the child job path). These receipts are provenance evidence, not parent-chat
 messages: the child's inference metadata and producer job reference are read
 from the paired tool output and never injected into the parent chat. Provenance
 tooling consumes them through `Chat.agent_meta_evidence` and the `:agent_job`

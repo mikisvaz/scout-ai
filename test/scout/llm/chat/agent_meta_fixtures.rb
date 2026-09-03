@@ -32,8 +32,13 @@ module AgentMetaFixtures
   end
 
   # JSON payload of a function_call_output envelope carrying agent_meta.
-  def receipt_output(call_id, agent_meta, name: 'ask', content: 'child answer')
-    {name: name, content: content, id: call_id, agent_meta: agent_meta}.to_json
+  # `envelope:` selects which serialized key carries the receipts:
+  # :agent_meta is the legacy envelope, :meta the current one written since
+  # the dual-envelope reader landed (lib/scout/llm/tools/call.rb).
+  def receipt_output(call_id, agent_meta, name: 'ask', content: 'child answer', envelope: :agent_meta)
+    payload = {name: name, content: content, id: call_id}
+    payload[envelope] = agent_meta
+    payload.to_json
   end
 
   # Persisted chat text with one paired ask call per receipt entry.  Hash keys
@@ -43,11 +48,11 @@ module AgentMetaFixtures
   # Message indexes produced by Chat.parse (single user turn, no leading
   # empty user message since 49c0d20):
   #   0 user, then per receipt: function_call, function_call_output.
-  def receipt_chat_text(receipts, extra: nil)
+  def receipt_chat_text(receipts, extra: nil, envelope: :agent_meta)
     lines = ['user: Run the worker']
     receipts.each do |call_id, agent_meta|
       lines << 'function_call: ' + %({"name":"ask","arguments":{},"id":"#{call_id}"})
-      lines << 'function_call_output: ' + receipt_output(call_id, agent_meta)
+      lines << 'function_call_output: ' + receipt_output(call_id, agent_meta, envelope: envelope)
     end
     lines.concat(Array(extra)) if extra
     lines << 'assistant: done'

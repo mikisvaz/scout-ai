@@ -45,6 +45,77 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
     end
   end
 
+  ## Envelope variants (current `meta` key) and repeated references ##
+
+  # The current envelope writes receipts under the `meta` key of the
+  # function_call_output payload instead of the legacy `agent_meta` array.
+  # Both must yield :agent_job edges from the enclosing chat.
+  def test_current_meta_envelope_receipt_yields_agent_job_edge
+    TmpFile.with_dir do |dir|
+      child = make_job(dir, 'Cortex/continue/Default_cur.chat')
+      parent = write_chat(dir, 'parent.chat',
+                          receipt_chat_text({'a1' => [{'job' => child}]},
+                                            envelope: :meta))
+
+      errors = []
+      visits = Chat.traverse_provenance(parent, on_error: ->(*args) { errors << args }).to_a
+
+      assert_empty errors
+      signature = visit_signature(visits)
+      edge = signature.find { |_kind, path, relation, _first| relation == :agent_job && path == child }
+      assert edge, "no :agent_job edge to #{child} in #{signature.inspect}"
+      assert_equal :job, edge[0]
+    end
+  end
+
+  # Job references recorded by chat_task point at the .chat result file
+  # (e.g. Cortex/continue/Default_x.chat); resolution must work for them too.
+  def test_chat_typed_job_reference_resolves
+    TmpFile.with_dir do |dir|
+      child = make_job(dir, 'Cortex/continue/Default_x.chat')
+      parent = write_chat(dir, 'parent.chat',
+                          receipt_chat_text({'a1' => [{'job' => child}]},
+                                            envelope: :meta))
+
+      errors = []
+      visits = Chat.traverse_provenance(parent, on_error: ->(*args) { errors << args }).to_a
+
+      assert_empty errors
+      signature = visit_signature(visits)
+      assert signature.any? { |_kind, path, relation, _first| relation == :agent_job && path == child },
+             signature.inspect
+    end
+  end
+
+  # Several continuations of one conversation report the SAME child job ref
+  # from one parent (the user-visible case: three Cortex/continue calls).
+  # Each receipt keeps its own edge and detail, the child node expands once.
+  def test_repeated_job_references_keep_distinct_edges_and_expand_once
+    TmpFile.with_dir do |dir|
+      child = make_job(dir, 'Cortex/continue/Default_dup.chat')
+      receipt = [{'job' => child}]
+      parent = write_chat(dir, 'parent.chat',
+                          receipt_chat_text({'a1' => receipt, 'a2' => receipt, 'a3' => receipt},
+                                            envelope: :meta))
+
+      errors = []
+      visits = Chat.traverse_provenance(parent, on_error: ->(*args) { errors << args }).to_a
+
+      assert_empty errors
+      delegated = visits.select { |v| v[4] == :agent_job }
+      assert_equal 3, delegated.length, 'each receipt keeps its own edge'
+      delegated.each_with_index do |visit, i|
+        assert_equal child, visit[1].path.to_s
+        assert_equal "a#{i + 1}", visit[6][:call_id], 'edge detail keeps the originating call id'
+      end
+      assert_equal [true, false, false], delegated.collect { |v| v[5] },
+                   'only the first visit expands the child node'
+      # Three edges to the SAME job node are structural: only the first one
+      # expands it (visit count 3, single expansion flag set).
+      assert_equal 3, visits.count { |kind, object, *_| kind == :job && object.path.to_s == child }
+    end
+  end
+
   def test_follow_job_excludes_the_agent_job_edge
     TmpFile.with_dir do |dir|
       parent, _worker, _critic, _dep = fixture_c(dir)

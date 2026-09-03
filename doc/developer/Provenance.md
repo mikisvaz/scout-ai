@@ -18,7 +18,7 @@ The structural relations are:
 | Parent | Relation | Child | Meaning |
 |---|---|---|---|
 | chat | `job` | job | A projected response was produced by a Workflow job. |
-| chat | `agent_job` | job | A delegated tool call returned an agent whose `job=` receipt names the producer job. |
+| chat | `agent_job` | job | A delegated tool call returned an agent whose receipt entry carries a `job` field naming the producer job. |
 | job | `dependency` | job | A normal Scout Workflow dependency. |
 | job | `log` | chat | A persisted agent conversation under `.files/*.chat`, `.files/*.society/**/*.chat`, or the legacy `.files/log/**/*.chat`. |
 | chat | `log` | chat | A saved agent conversation under the chat's own `.files` sidecar, same three families (root copy excluded). |
@@ -195,10 +195,12 @@ Two receipt formats exist, and the reader accepts both:
 - **Current format — the `meta` key.** The writer deserializes the child agent's `meta` messages (`LLM.meta_receipt_from_messages`) and emits an Array of plain field Hashes, each already parsed:
 
   ```
-  function_call_output: {"name":"ask","content":"child answer","id":"call_1","meta":[{"pt":100,"ct":50,"tt":150,"inference_id":"aaa"},{"job":"Worker/ask/Default_x"}]}
+  function_call_output: {"name":"ask","content":"child answer","id":"call_1","meta":[{"pt":100,"ct":50,"tt":150,"inference_id":"aaa"},{"job":"Cortex/continue/Default_x.chat"}]}
   ```
 
-  An entry carries either the child's direct inference metadata (`pt`, `ct`, `tt`, ..., `inference_id`) or a producer reference (`job=<path>` as a field). Entries that would carry no fields are dropped by the writer.
+  An entry carries either the child's direct inference metadata (`pt`, `ct`, `tt`, ..., `inference_id`) or a producer reference: a `job` key holding the child job path, e.g. `{"job":"Cortex/continue/Default_x.chat"}`. Job references may be job-typed or chat-typed paths; both resolve to a Step. Entries that would carry no fields are dropped by the writer.
+
+  The same `function_call_output` may also carry auxiliary fields next to the receipt: `step` (the producing step of the same execution), `start_timestamp`, and `timestamp`. They are bookkeeping only: the sole receipt-driven provenance edge source is the `job` field of a receipt entry (`meta[].job`); the `step` field is never followed as a parent-child edge.
 
 - **Legacy format — the `agent_meta` key.** Older data stores serialized meta messages:
 
@@ -235,7 +237,7 @@ Malformed warnings mirror the persisted key in their `evidence_address`, and alw
 
 ### The `agent_job` relation
 
-`Chat::PROVENANCE_RELATIONS` includes `agent_job`: chat to delegated producer job, resolved from `job=` receipts. The child is a normal Step and follows `dependency`, `log`, and `result` as usual. A job reference whose Step path and `.info` sidecar both do not exist is not followed and is reported instead.
+`Chat::PROVENANCE_RELATIONS` includes `agent_job`: chat to delegated producer job, resolved from the `job` field of receipt entries (`meta[].job`; the auxiliary `step` field on the tool output is not an edge source). The child is a normal Step and follows `dependency`, `log`, and `result` as usual. A job reference whose Step path and `.info` sidecar both do not exist is not followed and is reported instead.
 
 Diagnostics go through `Chat.provenance_error` with relation `:agent_job`; the error itself is a plain `ScoutException` whose message is built by `Chat.agent_meta_error_message`, and every structured fact (enclosing chat path, tool output address, receipt address, call id, tool name, malformed entry, reference, reason) travels in the `on_error` reference Hash. In strict mode (no `on_error`) a malformed receipt raises; with `on_error` each problem is reported once per receipt, while the rest of the chat's provenance still expands. Only output JSON that parses to a Hash carrying an explicit receipt key (current `meta`, legacy `agent_meta`) is ever inspected: unparseable tool outputs are never scanned for the substring `agent_meta`.
 
