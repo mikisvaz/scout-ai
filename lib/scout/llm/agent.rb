@@ -104,6 +104,13 @@ module LLM
             self.socialize(options.dup) if socialize && %w(true TRUE True T 1).include?(socialize.to_s)
           end
 
+          if (list = messages.select{|info| info[:role] == 'attachments'}).any?
+            attachments = list.last[:content]
+            messages.delete_if{|info| info[:role] == 'attachments' }
+            self.attachments if attachments && %w(true TRUE True T 1).include?(attachments.to_s)
+          end
+
+
           tools = options[:tools] || {}
           if other_tools = @other_options[:tools]
             other_tools = JSON.parse other_tools if String === other_tools
@@ -219,5 +226,6 @@ end
 require_relative 'agent/chat'
 require_relative 'agent/iterate'
 require_relative 'agent/delegate'
+require_relative 'agent/attach'
 require_relative 'agent/save'
 require_relative 'agent/workflow'

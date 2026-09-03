@@ -7,6 +7,7 @@ module AgentWorkflow
     @chat ||= begin
                 chat = recursive_inputs[:chat]
                 chat = Chat.parse(chat) if String === chat
+                chat = [] if chat.nil?
                 Chat.setup(chat)
                 chat
               end
@@ -37,7 +38,7 @@ module AgentWorkflow
   helper :agent do |name = nil, chat: nil, options: nil, tooling: nil, files: nil, **kwargs|
     options = self.options if options.nil?
     tooling = self.tooling if tooling.nil?
-    options = IndiferentHash.add_defaults options, kwargs
+    options = IndiferentHash.add_defaults kwargs, options
 
     agent = LLM.load_agent name, agent_options(options)
     agent.job = self

@@ -13,7 +13,17 @@ module LLM
     messages = LLM.chat(question)
     options = IndiferentHash.add_defaults options, LLM.options(messages)
 
-    endpoint, persist, agent_save_file = IndiferentHash.process_options options, :endpoint, :persist, :agent_save_file, persist: true
+    agent_name, agent_save_file  = IndiferentHash.process_options options, :agent, :agent_save_file
+    agent_name = nil if %(none false nil).include?(agent_name.to_s)
+    if agent_name
+      agent = LLM::Agent.load_agent agent_name
+      agent.save_file = agent_save_file if agent_save_file
+      agent.follow messages
+      res = agent.chat options
+      return res
+    end
+
+    endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
 
     persist ||= Scout::Config.get :persist, :ask, :llm, env: 'ASK_PERSIST,LLM_PERSIST,PERSIST'
     endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT,ENDPOINT,LLM,ASK'
@@ -21,17 +31,6 @@ module LLM
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
     elsif endpoint && endpoint != ""
       raise "Endpoint not found #{endpoint}"
-    end
-
-    agent_name = IndiferentHash.process_options options, :agent
-    agent_name = nil if %(none false nil).include?(agent_name.to_s)
-    if agent_name
-      options[:endpoint] ||= endpoint
-      agent = LLM::Agent.load_agent agent_name
-      agent.save_file = agent_save_file if agent_save_file
-      agent.follow messages
-      res = agent.chat options
-      return res
     end
 
     job_paths = messages.job_paths
