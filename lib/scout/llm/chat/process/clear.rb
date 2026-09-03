@@ -30,9 +30,11 @@ module Chat
   end
 
   def self.clean(messages, role = ['skip', 'previous_response_id'])
+    role = role.collect{|r| r.to_s } if Array == role
     messages.reject do |message|
       ((String === message[:content]) && message[:content].empty?) ||
         if Array === role
+          role.include?(message[:role].to_s)
         else
           message[:role].to_s == role.to_s
         end

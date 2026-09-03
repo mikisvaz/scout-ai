@@ -51,7 +51,7 @@ module LLM
     messages = Chat.imports messages, original, caller_lib_dir
 
     messages = Chat.clear messages
-    messages = Chat.clean messages
+    messages = Chat.clean messages, :skip
 
     messages = Chat.config messages
     messages = Chat.tasks messages
