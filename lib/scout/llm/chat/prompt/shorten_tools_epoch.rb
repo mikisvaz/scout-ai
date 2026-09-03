@@ -69,19 +69,19 @@ module Chat
 
   #
   # Cache-friendly variant of +shorten_tools+.  Instead of recomputing the
-  # truncation boundary on every single inference (which constantly shifts the
+  # compactation boundary on every single inference (which constantly shifts the
   # prefix and defeats KV-cache / prompt-cache), this strategy divides the
   # conversation into *epochs*.
   #
   # Within an epoch window of +epoch_size+ tool calls the compaction boundary
   # is frozen.  This means that the compacted prefix (the messages up to and
-  # including the truncated region) is byte-for-byte identical for every
+  # including the compacted region) is byte-for-byte identical for every
   # inference inside that window.
   #
   # == Layout (newest at the bottom)
   #
   #   [ dropped ]        tool calls older than (compacted + full) → removed
-  #   [ compacted ]      up to +epoch_compacted_tool_calls+ tool calls, truncated
+  #   [ compacted ]      up to +epoch_compacted_tool_calls+ tool calls, compacted
   #   [ full-recent ]    +epoch_full_tool_calls+ tool calls at full fidelity
   #   [ full-new ]       any tool calls that arrived after the epoch boundary
   #
@@ -114,7 +114,7 @@ module Chat
   # creating infinite retry loops.  To prevent this the strategy detects
   # repeated calls — matched by (name, arguments) excluding the unstable
   # model-generated +id+ — and ensures the *most recent* instance of every
-  # repeated call is never dropped: it is truncated instead.  Older duplicate
+  # repeated call is never dropped: it is compacted instead.  Older duplicate
   # instances are dropped or compacted normally.
   #
   def self.shorten_tools_epoch(messages)
@@ -141,7 +141,7 @@ module Chat
     # From the end, the regions are:
     #   [1 .. new_calls]                              → full-new (keep unchanged)
     #   [new_calls+1 .. new_calls+full]                → full-recent (keep unchanged)
-    #   [new_calls+full+1 .. new_calls+full+compacted] → compacted (truncate)
+    #   [new_calls+full+1 .. new_calls+full+compacted] → compacted
     #   everything older                              → dropped
 
     keep_full_count = new_calls + full
@@ -150,7 +150,7 @@ module Chat
     # ---- detect repeated tool calls to protect from dropping ----
     # Walk forward to identify the most-recent instance of each repeated
     # (name, arguments) pair.  Those reverse positions are added to
-    # +protected_positions+ so that the main reverse walk truncates them
+    # +protected_positions+ so that the main reverse walk compacts them
     # instead of dropping, preventing the agent from re-issuing a call it
     # no longer remembers.
     protected_positions = build_protected_positions(messages, total_tool_outputs)
@@ -162,7 +162,7 @@ module Chat
 
     kept_messages = []
     dropped_count = 0
-    truncated_count = 0
+    compacted_count = 0
 
     # Walk in reverse so we can apply the position-based policy.
     messages.reverse.each do |msg|
@@ -180,7 +180,7 @@ module Chat
           next
         end
 
-        name, content, id = tool_call.values_at 'name', 'content', 'id'
+        name, content, id, step = tool_call.values_at 'name', 'content', 'id', 'step'
         tool_ids << id   # increment BEFORE check (mirrors original shorten_tools)
 
         if tool_ids.length <= keep_full_count || protected_positions.include?(tool_ids.length)
@@ -188,15 +188,16 @@ module Chat
           kept_messages << msg
         elsif tool_ids.length <= truncate_to
           # compacted region → truncate the content
-          new_content = shorten_string(content.to_s, DEFAULT_SHORT_STRING_LENGTH * 2)
+          new_content = shorten_string(content.to_s, DEFAULT_SHORT_STRING_LENGTH * 2, step: step)
           if new_content != content
             tool_call['content'] = new_content
             new_json = tool_call.to_json
             Log.low "Epoch: truncated tool output #{id} #{name} #{json.length} to #{new_json.length}"
             new_msg = msg.dup
             new_msg[:content] = new_json
+            new_msg[:compacted] = true
             kept_messages << new_msg
-            truncated_count += 1
+            compacted_count += 1
           else
             kept_messages << msg
           end
@@ -239,8 +240,9 @@ module Chat
               Log.low "Epoch: truncated tool call #{id} #{name} #{json.length} to #{new_json.length}"
               new_msg = msg.dup
               new_msg[:content] = new_json
+              new_msg[:compacted] = true
               kept_messages << new_msg
-              truncated_count += 1
+              compacted_count += 1
             else
               kept_messages << msg
             end
@@ -260,9 +262,9 @@ module Chat
 
     kept_messages = kept_messages.reverse
 
-	if dropped_count > 0 || truncated_count > 0
+	if dropped_count > 0 || compacted_count > 0
       Log.medium "Epoch strategy: pinned_total=#{pinned_total} new_calls=#{new_calls} " \
-        "full=#{full} compacted=#{compacted} truncated=#{truncated_count} dropped=#{dropped_count} " \
+        "full=#{full} compacted=#{compacted} truncated=#{compacted_count} dropped=#{dropped_count} " \
         "protected=#{protected_positions.length}"
 
 	  compaction_message = {
@@ -270,15 +272,28 @@ module Chat
 		content: <<~TEXT.chomp
 	  === Context Management ===
 
-      To fit within the model context window, this conversation has been compacted: some tool calls arguments and tool call outputs have been truncated, and some have been removed entirely. Truncated content is show as 'Truncated (<original number of characters>) <start-of-content snippet> (...<original number of characters> - <digest>...) <end-of-content snippet>'.
+      To fit within the model context window, this conversation has been
+      compacted: some tool calls arguments and tool call outputs are shown with
+      compacted content, and some have been hidden entirely. Compacted content
+      is show as '[CONTEXT-COMPACTED ...]'. Don't try to reconstruct what
+      happened involving tools that have been compacted.
 
-      Compacted: #{truncated_count}
+      Remember that the real tool call did not suffer any compactation at the
+      time it was issued, it's only compacted in the current context.
+
+      Compacted: #{compacted_count}
       Removed: #{dropped_count}
       
-      Earlier tool results may no longer be present in the visible conversation history. If information appears to be missing, it may have been removed during context compaction rather than never existing. The absence of an earlier tool result in the current conversation does not necessarily mean that the tool has not already been executed.
+      Earlier tool results may no longer be present in the visible conversation
+      history. If information appears to be missing, it may have been removed
+      during context compaction rather than never existing. The absence of an
+      earlier tool result in the current conversation does not necessarily mean
+      that the tool has not already been executed. And care must be had accessing
+      older tool calls which may be compacted.
 
-      Repeated tool calls with the same arguments will be flagged and protected from removal or truncation.
-		TEXT
+      Repeated tool calls with the same arguments will be flagged and the very
+      last instance will be protected from removal or compactation.
+        TEXT
 	  }
 
       index = kept_messages.index do |msg|

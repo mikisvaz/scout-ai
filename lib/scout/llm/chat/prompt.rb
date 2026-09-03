@@ -10,10 +10,16 @@ module Chat
 
   # --- Shared utility used by all strategies ---
 
-  def self.shorten_string(string, size = DEFAULT_SHORT_STRING_LENGTH, warning = 'Truncated')
+  def self.shorten_string(string, size = DEFAULT_SHORT_STRING_LENGTH, step: nil)
     new = Log.truncate_string(string, size)
     if new.length < string.length
-      new = "#{warning} (#{string.length}): " + new
+      new = ['CONTEXT-COMPACTED', 'Historical account compacted for context efficiency; it does not faithfully represent what happened',  "Original content length: #{string.length}"]
+      if step
+        new << "Full output found in job: #{step}"
+      end
+      new << 'Do not execute, copy or otherwise use this string as-is.'
+      new << "Preview: <<#{new}>>"
+      new = "[#{new * ' - '}]"
     end
     new
   end
