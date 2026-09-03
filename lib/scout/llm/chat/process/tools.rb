@@ -194,14 +194,11 @@ module Chat
           workflow = Workflow.require_workflow workflow_name
         end unless workflow
 
-        raise "Workflow not found #{workflow_name}" if workflow.nil?
+        raise ScoutException, "Workflow '#{workflow_name}' not found" if workflow.nil?
 
         next if workflow.documentation.empty?
         content = <<-EOF
-You have access to tools from workflow '#{workflow.name}'. 
-Below is the documentation of the workflow:
-
-# #{workflow.documentation[:title]}
+# Documentation for the '#{workflow_name}' workflow: #{workflow.documentation[:title]}
 
 #{workflow.documentation[:description]}
         EOF
