@@ -124,18 +124,8 @@ or named conversation is initialized; follow-up turns retain their own history.
 The specialist's own start_chat is always applied first.
       EOF
 
-      function = {
-        name: task_name,
-        description: description,
-        parameters: {
-          type: 'object',
-          properties: properties,
-          required: [:agent, :prompt],
-          additionalProperties: false
-        }
-      }
-
-      definition = IndiferentHash.setup(function.merge(type: 'function', function: function))
+      definition = LLM.tool_definition(task_name, description, properties,
+                                       required: [:agent, :prompt])
       @other_options[:tools][task_name] = [block, definition]
     end
 
@@ -164,19 +154,8 @@ The specialist's own start_chat is always applied first.
         }
       }
 
-      required_inputs = [:message]
-
-      function = {
-        name: task_name,
-        description: description,
-        parameters: {
-          type: "object",
-          properties: properties,
-          required: required_inputs
-        }
-      }
-
-      definition = IndiferentHash.setup function.merge(type: 'function', function: function)
+      definition = LLM.tool_definition(task_name, description, properties,
+                                       required: [:message])
 
       @other_options[:tools][task_name] = [block, definition]
     end

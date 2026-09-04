@@ -49,18 +49,8 @@ module LLM
 Attach a file to the current chat, supports images and pdfs.
       EOF
 
-      function = {
-        name: task_name,
-        description: description,
-        parameters: {
-          type: 'object',
-          properties: properties,
-          required: [:file],
-          additionalProperties: false
-        }
-      }
-
-      definition = IndiferentHash.setup(function.merge(type: 'function', function: function))
+      definition = LLM.tool_definition(task_name, description, properties,
+                                       required: [:file])
       @other_options[:tools][task_name] = [block, definition]
     end
   end

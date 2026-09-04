@@ -69,20 +69,8 @@ module LLM
       task_info[:input_options].include?(input) && task_info[:input_options][input][:required]
     end
 
-    function = {
-      name: task_name,
-      description: task_info[:description] || '',
-      parameters: {
-        type: "object",
-        properties: properties,
-        required: required_inputs,
-      }
-    }
-
-    function[:parameters][:defaults] = defaults if defaults
-
-    #IndiferentHash.setup function.merge(type: 'function', function: function)
-    IndiferentHash.setup function
+    LLM.tool_definition(task_name, task_info[:description] || '', properties,
+                        required: required_inputs, defaults: defaults, envelope: false)
   end
 
   def self.workflow_tools(workflow, tasks = nil)
