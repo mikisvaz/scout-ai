@@ -63,8 +63,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   }
   save_locations
   provenance_cortex
+  provenance_cortex.analysis
 
 
+  expanding_epochs
   test_abort
  }
  lib=lib {
@@ -94,6 +96,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      prompt=prompt{
       shorten_tools.rb
       shorten_tools_epoch.rb
+      shorten_tools_epoch_increment.rb
      }
      process=process{
       clear.rb

@@ -1,10 +1,11 @@
 require_relative 'prompt/shorten_tools'
 require_relative 'prompt/shorten_tools_epoch'
+require_relative 'prompt/shorten_tools_epoch_increment'
 
 module Chat
 
   REGISTERED_STRATEGIES = {}
-  DEFAULT_CONTEXT_STRATEGY = %w(shorten_tools_epoch)
+  DEFAULT_CONTEXT_STRATEGY = %w(shorten_tools_epoch_increment)
   DEFAULT_SHORT_STRING_LENGTH = 200
   DEFAULT_SHORT_JSON_LENGTH = 2000
 
@@ -28,7 +29,7 @@ module Chat
 
   def self.prepare_prompt(prompt, prompt_strategies = nil)
     return prompt_strategies.call(prompt) if Proc === prompt_strategies
-    prompt_strategies = DEFAULT_CONTEXT_STRATEGY if prompt_strategies.nil?
+    prompt_strategies = Scout::Config.get(:prompt_strategies, :chat, :scout_ai, env:'PROMPT_STRATEGY', default: DEFAULT_CONTEXT_STRATEGY) if prompt_strategies.nil?
     prompt_strategies = prompt_strategies.split(',') if String === prompt_strategies
     prompt_strategies.each do |strategy|
       prompt = case strategy
@@ -36,11 +37,17 @@ module Chat
                  Chat.shorten_tools(prompt)
                when 'shorten_tools_epoch'
                  Chat.shorten_tools_epoch(prompt)
+               when 'shorten_tools_epoch_increment'
+                 Chat.shorten_tools_epoch_increment(prompt)
                when 'none'
                  prompt
                else
                  strategy_proc = REGISTERED_STRATEGIES[strategy]
-                 strategy_proc.call(prompt)
+                 if strategy_proc
+                   strategy_proc.call(prompt)
+                 else
+                   Chat.send(strategy.to_sym)
+                 end
                end
     end
     return prompt

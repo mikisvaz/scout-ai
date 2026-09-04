@@ -204,44 +204,56 @@ module LLM
         step = nil
       end
 
-      content = case content
-                when Hash
-                  # ScoutCoder: When the response of the function contains a
-                  # Hash with only two keys, content and meta or content and
-                  # agent_meta treat it as content with inference meta. Extract
-                  # accordingly.
-                  content = IndiferentHash.setup(content)
-                  keys = content.keys.collect{|k| k.to_s }
-                  if keys.sort == %w(meta content)
-                    # New inbound shape: `meta` is already the deserialized
-                    # receipt array; pass it through verbatim.
-                    meta, content = content.values_at :meta, :content
+
+      begin
+        content = case content
+                  when Hash
+                    # ScoutCoder: When the response of the function contains a
+                    # Hash with only two keys, content and meta or content and
+                    # agent_meta treat it as content with inference meta. Extract
+                    # accordingly.
+                    content = IndiferentHash.setup(content)
+                    keys = content.keys.collect{|k| k.to_s }
+                    if keys.sort == %w(meta content)
+                      # New inbound shape: `meta` is already the deserialized
+                      # receipt array; pass it through verbatim.
+                      meta, content = content.values_at :meta, :content
+                      content
+                    elsif keys.sort == %w(agent_meta content)
+                      # Legacy inbound shape: serialized meta messages;
+                      # normalize them into the new deserialized form.
+                      meta = LLM.meta_receipt_from_messages(content[:agent_meta])
+                      content[:content]
+                    else
+                      content.to_json
+                    end
+                  when TSV
+                    content.to_s
+                  when String
                     content
-                  elsif keys.sort == %w(agent_meta content)
-                    # Legacy inbound shape: serialized meta messages;
-                    # normalize them into the new deserialized form.
-                    meta = LLM.meta_receipt_from_messages(content[:agent_meta])
-                    content = content[:content]
                   else
                     content.to_json
                   end
-                when TSV
-                  content.to_s
-                when String
-                  content
-                else
-                  content.to_json
-                end
 
-      if (String === content) && content.length > max_content_length
-        exception_msg = "Function #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}) was executed successfully, but it returned #{content.length} characters, which is more than the maximum of #{max_content_length}. To protect the model context window this result was not returned. Here is a fingerprint of the content #{Log.fingerprint(content)}."
-        exception_msg += " The results was persisted at '#{step.path}'." if step
-        Log.high exception_msg
-        content = {exception: exception_msg, stack: caller}.to_json
-        error = :truncated
+        if (String === content) && content.length > max_content_length
+          exception_msg = "Function #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}) was executed successfully, but it returned #{content.length} characters, which is more than the maximum of #{max_content_length}. To protect the model context window this result was not returned. Here is a fingerprint of the content #{Log.fingerprint(content)}."
+          exception_msg += " The results was persisted at '#{step.path}'." if step
+          Log.high exception_msg
+          content = {exception: exception_msg, stack: caller}.to_json
+          error = :truncated
+        end
+
+        Log.high "Called #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}): " + Log.fingerprint(content)
+      rescue ScoutException => e
+        error = :scout
+        stack = e.backtrace
+        content = {exception: e.message, exception_line: e.backtrace&.first}.to_json
+      rescue => e
+        Log.exception e
+        error = :harness
+        stack = e.backtrace
+        content = {exception: e.message, exception_line: e.backtrace&.first}.to_json
       end
-
-      Log.high "Called #{function_name} #{tool_call_id} (#{Log.fingerprint function_arguments}): " + Log.fingerprint(content)
 
       response_message = {
         name: function_name,
