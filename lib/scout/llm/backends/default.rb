@@ -481,8 +481,8 @@ module LLM
       def ask(question, options = {}, &block)
         original_options = options.dup
 
-        return_messages, log_response, current_meta, relay, process, prompt_strategies = IndiferentHash.process_options options, 
-          :return_messages, :log_response, :current_meta, :relay, :process, :prompt_strategies,
+        return_messages, log_response, current_meta, relay, process, prompt_strategies, save_file = IndiferentHash.process_options options, 
+          :return_messages, :log_response, :current_meta, :relay, :process, :prompt_strategies, :save_file,
           return_messages: false, log_response: true
 
         messages = self.messages question, options
@@ -507,6 +507,7 @@ module LLM
                        Log.debug 'Asking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
                        begin
                          tmpfile = TmpFile.tmp_file 
+                         Open.write save_file + ".error", Chat.print(messages) if save_file
                          Open.write tmpfile + ".chat", Chat.print(messages)
                          Open.write tmpfile + ".options", options.except(:messages, :tools).to_json
                          Open.write tmpfile + ".meta", current_meta.to_json
@@ -517,6 +518,8 @@ module LLM
                        end
 
                        raise e
+                     ensure
+                       Open.write save_file, Chat.print(messages) if save_file
                      end
         end
 
@@ -544,6 +547,7 @@ module LLM
                      if previous_response_id_error
                        message.unshift IndiferentHash.setup({role: :previous_response_id, content: previous_response_id_error})
                      end
+                     Open.write save_file + ".error", Chat.print(messages) if save_file
                      Open.write tmpfile + ".chat", Chat.print(messages)
                      Open.write tmpfile + ".options", options.except(:messages, :tools).to_json
                      Open.write tmpfile + ".meta", current_meta.to_json
@@ -553,6 +557,8 @@ module LLM
                    rescue
                    end
                    raise e
+                 ensure
+                   Open.write save_file, Chat.print(messages) if save_file
                  end
 
         if log_response
@@ -561,7 +567,7 @@ module LLM
           meta['timestamp'] = timestamp
         end
 
-        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta, relay: relay)
+        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta, relay: relay, save_file: save_file)
 
         if log_response && meta && meta.any?
           # The meta is about to become the first message of a segment that

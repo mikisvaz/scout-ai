@@ -124,7 +124,7 @@ module LLM
           end
 
           options[:tools] = tools
-          LLM.ask messages, @other_options.except(:no_ask_override).merge(log_errors: true).merge(options).merge(agent: false)
+          LLM.ask messages, @other_options.except(:no_ask_override).merge(log_errors: true, save_file: self.save_file).merge(options).merge(agent: false)
         end
       rescue
         exception = $!
