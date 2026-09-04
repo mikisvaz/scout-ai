@@ -225,6 +225,7 @@ end
 
 require_relative 'agent/chat'
 require_relative 'agent/iterate'
+require_relative 'agent/conversation'
 require_relative 'agent/delegate'
 require_relative 'agent/attach'
 require_relative 'agent/save'
