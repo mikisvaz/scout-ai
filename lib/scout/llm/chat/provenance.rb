@@ -149,23 +149,45 @@ module Chat
     on_error.call(error, kind, object, relation, reference)
   end
 
+  # Candidate filesystem bases, in priority order, used to resolve a relative
+  # job reference (e.g. "Planned/ask/Default_abc.chat") when Step.load could
+  # not locate the job data: first the standard Rbbt workflow storage
+  # (~/.rbbt/var/jobs), then Scout's own workflow storage (Scout.var.jobs,
+  # normally ~/.scout/var/jobs).  Exposed as a class method so tests can point
+  # it at a tmp fixture tree instead of the real HOME.
+  def self.job_reference_fallback_bases
+    ['~/.rbbt/var/jobs', Scout.var.jobs.find.to_s].collect { |base| File.expand_path(base) }
+  end
+
+  # A reference is acceptable when the job file itself exists or its .info
+  # sidecar does (a job whose payload was cleaned but whose .info survives
+  # still carries provenance).
+  def self.job_reference_candidate?(path)
+    path = path.to_s
+    File.exist?(path) || File.exist?(path + '.info')
+  end
+
   # Resolve a job reference from a chat meta message into a Step. References
   # like "Planned/ask/Default_abc.chat" are relative workflow paths. Step.load
   # may resolve them to a Scout-specific directory that does not contain the
-  # actual job data, so we fall back to checking Rbbt.var.jobs and Scout.var.jobs.
+  # actual job data, so we fall back to the candidate bases in order.
   def self.load_job_reference(reference)
     return reference if Step === reference
     ref_str = reference.to_s
 
     step = Step.load(ref_str)
-    return step if File.exist?(step.path.to_s) || File.exist?(step.path.to_s + '.info')
+    return step if job_reference_candidate?(step.path.to_s)
 
     # Step.load resolves relative workflow paths (e.g. Planned/ask/Default_xyz.chat)
     # via Path.find, which may point to a directory that does not contain the
-    # actual job data (e.g. ~/.scout/ instead of ~/.rbbt/var/jobs/). Try the
-    # standard Rbbt workflow storage location as a fallback.
-    rbbt_candidate = File.expand_path(File.join('~/.rbbt/var/jobs', ref_str))
-    return Step.load(rbbt_candidate) if File.exist?(rbbt_candidate) || File.exist?(rbbt_candidate + '.info')
+    # actual job data (e.g. ~/.scout/ instead of ~/.rbbt/var/jobs/). Try each
+    # candidate base in priority order; the first base under which the file or
+    # its .info sidecar exists wins. Order is preserved: Step.load first, then
+    # the bases exactly as listed in job_reference_fallback_bases.
+    job_reference_fallback_bases.each do |base|
+      candidate = File.join(base, ref_str)
+      return Step.load(candidate) if job_reference_candidate?(candidate)
+    end
 
     step
   end
