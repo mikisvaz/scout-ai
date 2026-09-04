@@ -511,6 +511,60 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
     end
   end
 
+  # Continuation chain: a job's accounting delta is its RESULT CHAT ONLY, even
+  # though its persisted agent log also carries the whole projected parent
+  # history.  The synthetic A/B/C chain from the review (theme 2) is rebuilt
+  # here in miniature; the history stays inspectable through the ordinary
+  # :log relation, so nothing is truncated, it just is not counted twice.
+  def test_continuation_chain_delta_is_result_chat_only
+    TmpFile.with_dir do |dir|
+      a_meta = (1..3).collect { |i| "meta: pt=10 tt=10 inference_id=a#{i}" }
+      b_meta = (1..2).collect { |i| "meta: pt=100 tt=100 inference_id=b#{i}" }
+
+      # Job A: fresh conversation; result chat = 3 metas; log = same 3.
+      make_job(dir, 'Chain/continue/Default_A', result: "user: a\n#{a_meta * "\n"}\n",
+              logs: {'agent.chat' => "user: a\n#{a_meta * "\n"}\n"})
+
+      # Job B: continuation of A; result chat = B's own 2 metas; log = the
+      # cumulative agent history (A's 3 projected + B's 2).
+      b_log = ["user: a\n", a_meta, "user: b\n", b_meta].flatten.join("\n")
+      b_result = "user: b\n#{b_meta * "\n"}\n"
+      b = make_job(dir, 'Chain/continue/Default_B', result: b_result,
+                   logs: {'agent.chat' => b_log})
+
+      # Type the job result as chat so Chat.job_result_chat_file resolves it.
+      info = JSON.parse(File.read(b + '.info'))
+      File.write(b + '.info', {dependencies: info['dependencies'], type: :chat}.to_json)
+
+      result_chat = Chat.job_result_chat_file(Step.load(b))
+      assert result_chat, 'B has a chat-typed persisted result'
+      assert_equal({pt: 200, ct: 0, tt: 200, cct: 0, cwt: 0, rt: 0},
+                   Chat.token_totals([Chat.load(result_chat)]),
+                   'B delta = its own new metas only, not the projected history')
+
+      # The cumulative log remains fully inspectable: its direct totals still
+      # count 3 + 2 events (30 + 200 = 230), and the traversal still reaches
+      # it through the ordinary :log relation.
+      log_path = File.join(b + '.files', 'log', 'agent.chat')
+      assert_equal({pt: 230, ct: 0, tt: 230, cct: 0, cwt: 0, rt: 0},
+                   Chat.token_totals([Chat.load(log_path)]),
+                   'the history itself is untouched and readable')
+      # Traversed from the JOB root (the accounting root of a chat_task run);
+      # a bare path string would be interpreted as a chat root, so load the
+      # Step.  The cumulative log is visited through the ordinary :log relation.
+      visits = Chat.traverse_provenance(Step.load(b)).to_a
+      assert visits.any? { |k, o, _pk, _p, r, _f| k == :chat && o.to_s == log_path && r == :log },
+             'cumulative log is traversed, not dropped'
+
+      # Whole-chain accounting from the B root keeps one copy of each event:
+      # 3 A metas (30) + 2 B metas (200) = 230, not the sum of the two files
+      # (130 + 130) and not B's delta alone (200).
+      assert_equal({pt: 230, ct: 0, tt: 230, cct: 0, cwt: 0, rt: 0},
+                   Chat.provenance_token_totals(Step.load(b)),
+                   'deduplicated chain total = A metas + B metas, once each')
+    end
+  end
+
   # Two separate ask receipts pointing at the same job= keep both edge details
   # (distinct call ids and receipt addresses) while the Step is visited once.
   def test_two_receipts_to_the_same_job_keep_both_edge_details

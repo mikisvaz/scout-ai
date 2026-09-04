@@ -519,6 +519,68 @@ TXT
 
   ## Regression
 
+  ## Reviewer pins: no tool-name gating on the :agent_job edge
+
+  # The edge exists for ANY tool whose function_call_output envelope carries a
+  # meta[].job receipt; the function name is irrelevant to accounting.  Proven
+  # by fabricating a tool name that is not a scout-ai task (`not_ask`) and by
+  # reusing the names of the receipt-producing workflows (`cortex_continue`,
+  # `cortex_brief`) on a non-delegating envelope as a negative control.
+  def test_agent_job_edge_under_arbitrary_tool_names
+    TmpFile.with_dir do |dir|
+      child = make_job(dir, 'Cortex/continue/Default_tn.chat')
+
+      %w[not_ask cortex_continue cortex_brief].each do |tool|
+        parent = write_chat(dir, "parent_#{tool}.chat",
+                            receipt_chat_text({'a1' => [{'job' => child}]},
+                                              envelope: :meta, tool: tool))
+        signature = visit_signature(Chat.traverse_provenance(parent).to_a)
+        assert signature.any? { |_kind, path, relation, _first|
+          relation == :agent_job && path == child
+        }, "no :agent_job edge for tool #{tool}: #{signature.inspect}"
+      end
+
+      # Negative control: same tool names, envelope without a job receipt ->
+      # no edge, so the edge follows the receipt, not the name.
+      %w[not_ask cortex_continue cortex_brief].each do |tool|
+        parent = write_chat(dir, "plain_#{tool}.chat",
+                            receipt_chat_text({'a1' => [{'role' => 'meta',
+                                                         'content' => 'ok'}]},
+                                              envelope: :meta, tool: tool))
+        signature = visit_signature(Chat.traverse_provenance(parent).to_a)
+        assert_empty signature.select { |_kind, _path, relation, _first| relation == :agent_job },
+                     "unexpected :agent_job edge for tool #{tool}"
+      end
+    end
+  end
+
+  # Structural double check: the provenance source contains no conditional on
+  # a function/tool name anywhere in the receipt lifting path.  The check
+  # looks for gating CONSTRUCTS around the tool name (==/match/case), not for
+  # the bare word, because `tool_name` is legitimately recorded as evidence
+  # detail.
+  def test_no_tool_name_conditional_in_provenance_sources
+    source = File.read(File.expand_path('../../../../lib/scout/llm/chat/provenance.rb', __dir__))
+    # 1. no equality/matching test between the name and a literal tool name
+    %w[ask cortex_continue cortex_brief not_ask].each do |name|
+      ["tool_name == :#{name}",
+       "tool_name.to_s == '#{name}'",
+       "tool_name == '#{name}'",
+       "name == '#{name}'",
+       "tool_name =~ /#{name}/",
+       "'name' => '#{name}'"].each do |pattern|
+        assert_not_include source, pattern,
+                           "tool-name conditional #{pattern.inspect} leaked into provenance traversal"
+      end
+    end
+    # 2. no case/when branch on the name at all
+    assert_not_match(/^\s*case\s+(\S*tool_name|name)\s*$/, source)
+    # 3. the word only appears as evidence detail, never as a value compared
+    #    (the literal name recorded by callers lives in test fixtures, not here)
+    assert_not_include source, "tool_name =='", source
+    assert_not_include source, 'tool_name==', source
+  end
+
   def test_provenance_relations_include_agent_job_and_not_import
     assert_equal %i[job dependency log result agent_job], Chat::PROVENANCE_RELATIONS
     assert_not_include Chat::PROVENANCE_RELATIONS, :import

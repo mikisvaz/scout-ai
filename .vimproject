@@ -62,6 +62,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    }
   }
   save_locations
+  provenance_cortex
+
+
+  test_abort
  }
  lib=lib {
   scout-ai.rb

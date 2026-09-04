@@ -17,12 +17,22 @@ Examine the provenance of a chat or workflow job
 $ #{cmd} [<options>] <filename>
 
 -h--help Print this help
--c--component Show per-component direct costs instead of aggregate totals
+-c--component Show per-component direct costs (direct=) instead of subtree evidence closures (evidence=)
 -f--flow Print a compact provenance flow
 -l--long Show full filesystem paths instead of abbreviated names
 -e--evidence List the deduplicated direct inference events and their evidence
 --dot* Write the flow as Graphviz DOT
 -p--plot* Render the flow as svg, png, or pdf
+
+Default-tree numbers are evidence= subtree-deduplicated closures: they overlap
+between nodes and are never per-part cost.  Job nodes add delta= (direct tokens
+of the persisted chat-typed result, the accounting delta).  The root footer
+always prints the authoritative deduplicated_total, in both modes; --component
+relabels the node numbers direct=.  cache= carries the cache-hit share of
+prompt (cct/pt); the root footer adds fresh= (prompt not served from cache,
+including cache_write) and cache_write= (Anthropic cache-write tokens).
+Per-job delta= values sum to the root total on continuation chains but not on
+general DAGs.
 EOF
 if options[:help]
   defined?(scout_usage) ? scout_usage : puts(SOPT.doc)
@@ -37,6 +47,12 @@ long = options.delete(:long)
 evidence = options.delete(:evidence)
 filename = ARGV.first
 raise MissingParameterException, :filename if filename.nil?
+
+# One parse-once cache for the whole CLI run (see
+# Chat.provenance_chat_load): the initial traversal, the token-event
+# collector and this script's own node computations then share a single
+# Chat object per resolved path.
+Chat.open_provenance_run_cache
 
 # A persisted Step always has an info sidecar. A .files directory alone is NOT
 # evidence: saved agent chats carry one too. Explicitly loading the Step after
@@ -103,17 +119,35 @@ chat_cache = {}
 direct_tokens = lambda do |key|
   node = nodes[key]
   if node[:kind] == :chat
-    chat = chat_cache[node[:path]] ||= Chat.load(node[:path])
+    chat = chat_cache[node[:path]] ||= Chat.provenance_chat_load(node[:path])
     Chat.token_totals([chat])
   else
     logs = edges.select { |e| e[:from] == key && e[:relation] == :log }
                 .collect { |e| nodes[e[:to]][:path] }.uniq
-    chats = logs.collect { |path| chat_cache[path] ||= Chat.load(path) }
+    chats = logs.collect { |path| chat_cache[path] ||= Chat.provenance_chat_load(path) }
     Chat.token_totals(chats)
   end
 rescue => error
   warnings << { error: error, kind: node[:kind], object: node[:object], relation: :tokens }
   Chat::TOKEN_KEYS.each_with_object({}) { |name, totals| totals[name.to_sym] = 0 }
+end
+# Per-job accounting delta: the direct tokens of the job's persisted
+# chat-typed result (Chat.job_result_chat_file).  This is the
+# receipt-defined accounting object - the new chat the job returned - so on a
+# continuation chain the per-job deltas sum to the root deduplicated_total
+# while every ancestor's evidence= closure stays cumulative.  Jobs whose
+# result is not chat-typed omit the field (nil, never zero).
+delta_cache = {}
+delta_tokens = lambda do |key|
+  return delta_cache[key] if delta_cache.key?(key)
+  node = nodes[key]
+  delta_cache[key] = if node[:kind] == :job
+    file = Chat.job_result_chat_file(node[:object])
+    file ? Chat.token_totals([chat_cache[Chat.provenance_path(:chat, file)] ||= Chat.provenance_chat_load(file)]) : nil
+  end
+rescue => error
+  warnings << { error: error, kind: node[:kind], object: node[:object], relation: :delta }
+  delta_cache[key] = nil
 end
 
 # ------------------------------------------------------------------
@@ -204,21 +238,52 @@ end
 # ------------------------------------------------------------------
 # Formatting helpers
 # ------------------------------------------------------------------
-def token_str(tokens)
+# `qualifier` names the total field after what it measures so a number can
+# never be read as a different quantity: `evidence` (default tree; subtree
+# deduplicated closure), `direct` (-c; per-component direct tokens),
+# `deduplicated_total` (root footer; the authoritative cost).  `events`
+# appends the deduplicated event count where it is already computed (the
+# footer), and `delta` inserts the job's result-chat delta right after it.
+#
+# Canonical field order, identical for node lines and the footer: qualifier
+# total, [delta=], then the prompt axis `prompt= cache=<abs>@<rate> [fresh=]
+# [cache_write=]`, then generation `cont= reason=`.  `footer: true` adds the
+# run-level economics (`fresh=`, `cache_write=`) that do not belong to a node
+# label.  The rate is always computed from RAW integer totals
+# (`100.0 * cct / pt`): humanized values round at K/M boundaries and would
+# corrupt boundary rates.  `cache=` prints whenever pt is positive, including
+# `cache=0@0.0%`; when pt is nil/0 the whole prompt axis is omitted (nothing
+# to partition).  A conflicting summed set can yield cct > pt; the raw ratio
+# is then printed unclamped and the footer caveat line is the guard that
+# labels such a figure best-effort.
+def token_str(tokens, qualifier: nil, events: nil, delta: nil, footer: false)
   parts = []
-  parts << "total=#{Misc.human_number(tokens[:tt])}" if tokens[:tt] && tokens[:tt].to_i > 0
-  parts << "prompt=#{Misc.human_number(tokens[:pt])}" if tokens[:pt] && tokens[:pt].to_i > 0
+  if tokens[:tt] && tokens[:tt].to_i > 0
+    value = Misc.human_number(tokens[:tt])
+    value += " (#{events} events)" if events
+    parts << "#{qualifier || 'total'}=#{value}"
+    parts << "delta=#{Misc.human_number(delta[:tt])}" if delta && delta[:tt].to_i > 0
+  end
+  pt = tokens[:pt].to_i
+  if pt > 0
+    cct = tokens[:cct].to_i
+    parts << "prompt=#{Misc.human_number(pt)}"
+    parts << "cache=#{Misc.human_number(cct)}@#{format('%.1f', 100.0 * cct / pt)}%"
+    if footer
+      parts << "fresh=#{Misc.human_number(pt - cct)}"
+      parts << "cache_write=#{Misc.human_number(tokens[:cwt].to_i)}" if tokens[:cwt] && tokens[:cwt].to_i > 0
+    end
+  end
   parts << "cont=#{Misc.human_number(tokens[:ct])}" if tokens[:ct] && tokens[:ct].to_i > 0
-  parts << "cache=#{Misc.human_number(tokens[:cct])}" if tokens[:cct] && tokens[:cct].to_i > 0
   parts << "reason=#{Misc.human_number(tokens[:rt])}" if tokens[:rt] && tokens[:rt].to_i > 0
   parts * ' '
 end
 
-def report_line(kind, label, tokens, offset: 0)
+def report_line(kind, label, tokens, offset: 0, qualifier: nil, delta: nil, events: nil)
   color = kind == :job ? :yellow : :green
   parts = [' ' * (offset * 2)]
   parts << Log.color(color, kind.to_s)
-  tok = token_str(tokens)
+  tok = token_str(tokens, qualifier: qualifier, events: events, delta: delta)
   parts << tok unless tok.empty?
   parts << Log.color(:blue, label.to_s) unless label.to_s.empty?
   parts * ' '
@@ -279,14 +344,34 @@ unless flow || dot_file || plot_file
     node = nodes[key]
     parent_node = parent_key ? nodes[parent_key] : nil
 
-    # Skip hidden nodes entirely — don't print, don't traverse children
-    return if hidden_node?(node, relation)
+    # Hidden nodes (result chats duplicating a job, top-level agent.chat
+    # logs) are not printed, but PROJECTION ONLY: the walk still descends
+    # through them so their children are attributed to the current display
+    # parent.  This is what makes delegated children of tree-hidden carrier
+    # chats visible without adding, removing or rewriting any traversal
+    # edge: the :agent_job/:job edges keep pointing at the carrier chat.
+    #   - no "printed" slot is consumed, so offsets stay as if the carrier
+    #     were not there
+    #   - children keep their own incoming relation (delegated-job label)
+    #   - the global `printed` set still dedups nodes discovered from
+    #     several carriers (first visit wins)
+    if hidden_node?(node, relation)
+      (adjacency[key] || []).each do |edge|
+        print_tree.call(edge[:to], offset, edge[:relation], parent_key)
+      end
+      return
+    end
 
     printed << key
     label = node_label(node, parent_node, root_key, key, long)
     # A job reached through an agent_meta receipt is a delegated producer.
     label = "delegated-job #{label}" if node[:kind] == :job && relation == :agent_job
-    puts report_line(node[:kind], label, node_tokens.call(key), offset: offset)
+    # Both modes: job nodes carry their accounting delta (in -c the
+    # direct=/delta= contrast on one line is the question the mode answers).
+    delta = node[:kind] == :job ? delta_tokens.call(key) : nil
+    puts report_line(node[:kind], label, node_tokens.call(key), offset: offset,
+                     qualifier: component ? 'direct' : 'evidence',
+                     delta: delta)
 
     # One compact annotation line for the delegated usage embedded in this
     # chat's own outputs; never one line per receipt.
@@ -309,6 +394,25 @@ unless flow || dot_file || plot_file
   end
   print_tree.call(root_key, 0, nil, nil)
 
+  # Root footer (BOTH modes): the one authoritative cost figure, always
+  # printed, so -c no longer lacks a global bound.  It carries the run-level
+  # economics (deduplicated event count, fresh=, cache_write=) that do not
+  # belong to a node label.  It reuses the root aggregate computed for the
+  # root node line, which IS the root :deduplicated_total (every deduplicated
+  # event once).  Identity conflicts demote it to best-effort; this footer
+  # caveat is the single home of the non-authoritative warning in both modes
+  # (the -c scope block no longer repeats it).
+  conflicts = {}
+  root_totals = Chat.provenance_token_totals(root, warnings: receipt_warnings, conflicts: conflicts)
+  puts Log.color(:cyan, 'root ') +
+    token_str(root_totals, qualifier: 'deduplicated_total',
+                       events: token_events_for.call.length, footer: true) + ' ' +
+    Log.color(:cyan, '(authoritative cost; per-node evidence=/direct= values overlap)')
+  unless conflicts[:authoritative]
+    puts Log.color(:red, 'unresolved identity conflicts: ') +
+      "#{conflicts[:events]} conflicting event(s); totals above are best-effort (canonical evidence only), not exact"
+  end
+
   # Component mode: make the evidence coverage behind the numbers explicit
   # once receipts are present; chats without receipts keep the previous output
   # exactly.  These are COVERAGE figures, not additive cost categories:
@@ -316,8 +420,7 @@ unless flow || dot_file || plot_file
   # both a saved child log and a receipt.  Only deduplicated_total is the
   # cost, and receipt_only is the disjoint delegated contribution.
   if component && has_receipt_evidence
-    coverage = [[:deduplicated_total, 'total'],
-                [:chat_evidence, 'events with saved chat/log evidence'],
+    coverage = [[:chat_evidence, 'events with saved chat/log evidence'],
                 [:receipt_evidence, 'events inside agent_meta receipts (overlaps chat_evidence)'],
                 [:receipt_only, 'receipt evidence with no saved chat/log']]
     coverage.each do |scope, note|
@@ -325,13 +428,6 @@ unless flow || dot_file || plot_file
       rendered = token_str(totals)
       rendered = 'total=0' if rendered.empty?
       puts Log.color(:cyan, "evidence #{scope}:") + ' ' + rendered + ' ' + Log.color(:cyan, "(#{note})")
-    end
-
-    conflict_info = {}
-    Chat.provenance_token_totals(root, warnings: [], conflicts: conflict_info)
-    unless conflict_info[:authoritative]
-      puts Log.color(:red, 'unresolved identity conflicts: ') +
-        "#{conflict_info[:events]} conflicting event(s); totals above are best-effort (canonical evidence only), not exact"
     end
   end
 end
@@ -600,3 +696,7 @@ receipt_warnings.each do |warning|
     Log.warn "agent_meta receipt: #{warning[:reason]} in #{warning[:source]} at #{location.inspect} call=#{warning[:call_id]}#{warning[:message] ? ' - ' + warning[:message] : ''}"
   end
 end
+
+# End of the CLI run: drop the parse-once cache so a following run in the
+# same process (tests, embedded use) re-parses freshly.
+Chat.close_provenance_run_cache

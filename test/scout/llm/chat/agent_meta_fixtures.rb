@@ -35,6 +35,7 @@ module AgentMetaFixtures
   # `envelope:` selects which serialized key carries the receipts:
   # :agent_meta is the legacy envelope, :meta the current one written since
   # the dual-envelope reader landed (lib/scout/llm/tools/call.rb).
+  # `name` only decorates the envelope; the receipt lifting ignores it.
   def receipt_output(call_id, agent_meta, name: 'ask', content: 'child answer', envelope: :agent_meta)
     payload = {name: name, content: content, id: call_id}
     payload[envelope] = agent_meta
@@ -48,10 +49,12 @@ module AgentMetaFixtures
   # Message indexes produced by Chat.parse (single user turn, no leading
   # empty user message since 49c0d20):
   #   0 user, then per receipt: function_call, function_call_output.
-  def receipt_chat_text(receipts, extra: nil, envelope: :agent_meta)
+  # `tool` sets the function_call name; receipts are lifted from the output
+  # envelope regardless of it, so tests can pin that no tool name is special.
+  def receipt_chat_text(receipts, extra: nil, envelope: :agent_meta, tool: 'ask')
     lines = ['user: Run the worker']
     receipts.each do |call_id, agent_meta|
-      lines << 'function_call: ' + %({"name":"ask","arguments":{},"id":"#{call_id}"})
+      lines << 'function_call: ' + %({"name":"#{tool}","arguments":{},"id":"#{call_id}"})
       lines << 'function_call_output: ' + receipt_output(call_id, agent_meta, envelope: envelope)
     end
     lines.concat(Array(extra)) if extra
@@ -132,5 +135,83 @@ module AgentMetaFixtures
       %({"name":"#{name}","arguments":{},"id":"#{call_id}"}).sub(/^/, 'function_call: ') + "\n" +
       "function_call_output: #{payload}\n" +
       "assistant: done\n"
+  end
+
+  # Continuation-chain fixture (theme-2 A/B/C shape, in-repo).  Three
+  # chat-typed jobs A -> B -> C whose agent logs are cumulative histories
+  # (each carries the projected parent metas before its own), so per-root
+  # closures are cumulative while each job's own delta is disjoint.  Every
+  # meta line is a plain direct chat meta (not a receipt).
+  #
+  # Token plan (all figures arithmetically checkable):
+  #   A own: 3 metas pt=40 tt=50 cct=30 cwt=5  -> delta tt=150, pt=120, cct=90
+  #   B own: 2 metas pt=100 tt=120 (no cache)  -> delta tt=240, pt=200
+  #   C own: 1 meta  pt=0   tt=600 (pt missing)-> delta tt=600, pt=0
+  #   chain closure at C: 6 events, tt=990, pt=320, cct=90, cwt=15, ct=6
+  #   sum of deltas 150+240+600 = 990 == root deduplicated_total
+  #
+  # Also builds a TSV-typed job reached from `parent.chat` through a
+  # receipt, to pin delta= omission for non-chat results in both modes.
+  # Returns [a_job, b_job, c_job, tsv_job, parent_chat].
+  def continuation_chain(dir)
+    meta = lambda do |id, pt, tt, cct: 0, cwt: 0|
+      parts = ["pt=#{pt}", 'ct=1', "tt=#{tt}"]
+      parts << "cct=#{cct}" if cct > 0
+      parts << "cwt=#{cwt}" if cwt > 0
+      parts << "inference_id=#{id}" << 'timestamp=2026-09-04T00:00:00Z'
+      "meta: " + parts * ' '
+    end
+
+    a_metas = (1..3).collect { |i| meta.call("a#{i}", 40, 50, cct: 30, cwt: 5) }
+    b_metas = (1..2).collect { |i| meta.call("b#{i}", 100, 120) }
+    c_meta  = meta.call('c1', 0, 600)
+
+    a = make_job(dir, 'Cortex/continue/Default_a1', logs: {'agent.chat' => ''})
+    File.write(a + '.info', {dependencies: [], type: :chat}.to_json)
+    File.write(a, (['user: start'] + a_metas + ["meta: job=#{a}"]) * "
+" + "
+")
+    File.write(File.join(a + '.files', 'log', 'agent.chat'), a_metas * "
+" + "
+")
+
+    b = make_job(dir, 'Cortex/continue/Default_b2', logs: {'agent.chat' => ''})
+    File.write(b + '.info', {dependencies: [], type: :chat}.to_json)
+    File.write(b, (['user: continue B'] + b_metas + ["meta: job=#{b}"]) * "
+" + "
+")
+    File.write(File.join(b + '.files', 'log', 'agent.chat'),
+               (["meta: job=#{a}"] + a_metas + b_metas) * "
+" + "
+")
+
+    c = make_job(dir, 'Cortex/continue/Default_c3', logs: {'agent.chat' => ''})
+    File.write(c + '.info', {dependencies: [], type: :chat}.to_json)
+    File.write(c, (['user: continue C'] + [c_meta, "meta: job=#{c}"]) * "
+" + "
+")
+    File.write(File.join(c + '.files', 'log', 'agent.chat'),
+               (["meta: job=#{b}"] + a_metas + b_metas + [c_meta]) * "
+" + "
+")
+
+    # TSV-typed job (no chat result): must omit delta= while still showing
+    # its own log evidence.
+    tsv = make_job(dir, 'Other/step/Default_d4',
+                   result: "a	b
+1	2
+",
+                   logs: {'agent.chat' => meta.call('d1', 7, 8) + "
+"})
+    info = JSON.parse(File.read(tsv + '.info'))
+    File.write(tsv + '.info', {dependencies: info['dependencies'], type: :tsv}.to_json)
+
+    parent = write_chat(dir, 'parent.chat',
+                        receipt_chat_text(
+                          {'a1' => [meta_receipt("job=#{tsv}")]},
+                          extra: ['meta: pt=10 ct=1 tt=11 inference_id=p1']
+                        ))
+
+    [a, b, c, tsv, parent]
   end
 end

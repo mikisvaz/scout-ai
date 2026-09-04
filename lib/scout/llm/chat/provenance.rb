@@ -95,6 +95,55 @@ module Chat
     [kind.to_sym, provenance_path(kind, object)]
   end
 
+  # ------------------------------------------------------------------
+  # Run-scoped, parse-once chat cache (review theme 04, stage s1)
+  # ------------------------------------------------------------------
+  # A provenance "run" is one top-level call to a public provenance entry
+  # point (traverse_provenance, provenance_token_events,
+  # provenance_token_totals / tokens, and the collectors delegating to them).
+  # Inside a run every chat file is parsed at most once, keyed by the same
+  # realpath discipline as node identity (provenance_path), so a file reached
+  # through several addresses - symlinks, or a chat-typed job whose result
+  # path equals a chat node path - is parsed once and never double counted.
+  #
+  # Guards:
+  #   * lifetime: the cache exists only while a run is active and is dropped
+  #     when it ends, so a live session that appends between two runs is
+  #     always re-parsed (no cross-run persistence);
+  #   * identity: realpath keyed, exactly like provenance nodes;
+  #   * transparency: no envelope shape, traversal order or deduplication
+  #     semantics change - the same Chat object is simply reused within the
+  #     run, and everything downstream only reads it.
+  def self.with_provenance_run_cache
+    previous = Thread.current[:scout_ai_provenance_run_cache]
+    Thread.current[:scout_ai_provenance_run_cache] ||= {}
+    begin
+      yield
+    ensure
+      Thread.current[:scout_ai_provenance_run_cache] = previous
+    end
+  end
+
+  # Manual scope control for linear, top-level callers such as the `prov`
+  # SOPT script, whose body cannot be wrapped in a block without reindenting
+  # the whole file.  Open at the start of the run, close when it ends; an
+  # open scope makes nested with_provenance_run_cache calls reuse it.
+  def self.open_provenance_run_cache
+    Thread.current[:scout_ai_provenance_run_cache] ||= {}
+  end
+
+  def self.close_provenance_run_cache
+    Thread.current[:scout_ai_provenance_run_cache] = nil
+  end
+
+  # Chat.load with the run cache applied.  Outside a run this parses
+  # directly, exactly like Chat.load.
+  def self.provenance_chat_load(path)
+    cache = Thread.current[:scout_ai_provenance_run_cache]
+    return Chat.load(path) unless cache
+    cache[provenance_path(:chat, path)] ||= Chat.load(path)
+  end
+
   def self.provenance_error(on_error, error, kind, object, relation, reference)
     raise error unless on_error
     on_error.call(error, kind, object, relation, reference)
@@ -206,6 +255,11 @@ module Chat
   # therefore never follows import, continue, or last references.
   def self.traverse_provenance(root, root_type: nil, follow: :all, on_error: nil, &block)
     return enum_for(__method__, root, root_type: root_type, follow: follow, on_error: on_error) unless block
+    unless Thread.current[:scout_ai_provenance_run_cache]
+      return with_provenance_run_cache do
+        traverse_provenance(root, root_type: root_type, follow: follow, on_error: on_error, &block)
+      end
+    end
     # Lambda blocks have strict arity; keep six-argument callbacks compatible
     # by only yielding the trailing detail when the block can receive it.
     detail_arity = lambda do
@@ -244,7 +298,7 @@ module Chat
 
       begin
         if kind == :chat
-          chat = Chat.load(object)
+          chat = provenance_chat_load(object)
 
           if relations.include?(:job)
             chat.jobs.each do |reference|
@@ -497,6 +551,11 @@ module Chat
   #
   # Checkpoint fields (*_c, *_s) are never read or summed here.
   def self.provenance_token_events(root, warnings: nil, strict: false, **traversal_options)
+    unless Thread.current[:scout_ai_provenance_run_cache]
+      return with_provenance_run_cache do
+        provenance_token_events(root, warnings: warnings, strict: strict, **traversal_options)
+      end
+    end
     # Route traversal-stage agent_meta problems into the caller's warnings
     # Array instead of letting them raise.  Other traversal errors stay strict
     # (raise), and an explicitly supplied on_error keeps being called.
@@ -519,7 +578,7 @@ module Chat
 
     files = provenance_chat_files(root, **traversal_options)
     sources = {}
-    files.each { |file| sources[file] = Chat.load(file) }
+    files.each { |file| sources[file] = provenance_chat_load(file) }
 
     evidences = []
 
