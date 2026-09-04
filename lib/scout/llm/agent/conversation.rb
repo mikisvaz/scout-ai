@@ -25,7 +25,9 @@ module LLM
     #    specialist's own start_chat, then the inherited context selected by
     #    `inherit` (none = empty, tools = caller task tooling, conversation =
     #    caller task conversation), then the `preamble:` messages, then
-    #    `agent.start(initial_chat)`.
+    #    `agent.start(initial_chat)`. With `adopt: :current` the template's
+    #    own progress (current_chat minus its start_chat) is folded in right
+    #    after the start_chat copy, before the inherited context.
     # 3. Anchor: `agent.save_file = anchor || society_save_file(name,
     #    conversation)`, assigned at creation so auto-save and restart
     #    snapshots apply from the first round.
@@ -40,10 +42,11 @@ module LLM
     # ignored for now.
     def open_conversation(name, conversation: 'default', inherit: 'tools',
                           options: {}, preamble: nil, anchor: nil,
-                          restart: false, template: nil, job: nil)
+                          restart: false, template: nil, adopt: nil, job: nil)
       agent_name = normalize_social_agent_name(name)
       conversation = normalize_social_conversation_name(conversation)
       inherit = normalize_social_inherit(inherit)
+      adopt = normalize_social_adopt(adopt)
 
       @chats ||= {}
       key = social_chat_key(agent_name, conversation)
@@ -58,7 +61,7 @@ module LLM
         return agent
       end
 
-      agent = start_social_chat(agent_name, options, inherit, template: template, preamble: preamble)
+      agent = start_social_chat(agent_name, options, inherit, template: template, preamble: preamble, adopt: adopt)
       agent.save_file = anchor || society_save_file(agent_name, conversation)
 
       @chats[key] ||= agent
@@ -71,7 +74,7 @@ module LLM
     # messages because the prompt is appended with Agent#user.
     def ask_conversation(name, prompt, conversation: nil, inherit: 'tools',
                          options: {}, preamble: nil, anchor: nil,
-                         restart: false, template: nil, job: nil)
+                         restart: false, template: nil, adopt: nil, job: nil)
       raise ParameterException, 'The delegated prompt must be a String' unless String === prompt
 
       conversation = 'default' if conversation.nil?
@@ -79,11 +82,22 @@ module LLM
       agent = open_conversation(name, conversation: conversation, inherit: inherit,
                                              options: options, preamble: preamble,
                                              anchor: anchor, restart: restart,
-                                             template: template, job: job)
+                                             template: template, adopt: adopt,
+                                             job: job)
 
       agent.user(prompt)
 
       agent
+    end
+
+    # The live conversation registered under a society key
+    # (`social_chat_key(name, conversation)` => `"<name>/<conversation>"`).
+    # Returns nil when no such conversation is open. Delegation callers that
+    # hold their own agent object can use this to reach the conversation
+    # holder that actually advanced: the pipeline clones instead of mutating
+    # the passed object.
+    def conversation_agent(key)
+      (@chats || {})[key]
     end
 
     private
@@ -114,6 +128,16 @@ module LLM
 
       raise ParameterException,
             "Unknown inheritance policy #{inherit.inspect}; expected one of #{SOCIAL_INHERIT_MODES * ', '}"
+    end
+
+    # `adopt:` is nil (nothing is folded in) or :current (the template's own
+    # progress becomes part of the seed).
+    def normalize_social_adopt(adopt)
+      return nil if adopt.nil?
+      return :current if adopt == :current || adopt.to_s == 'current'
+
+      raise ParameterException,
+            "Unknown adoption policy #{adopt.inspect}; expected nil or :current"
     end
 
     # --- society caches ------------------------------------------------------
@@ -187,23 +211,30 @@ module LLM
     # Seed one specialist conversation. `template:` (a pre-built Agent)
     # bypasses `load_agent`; `preamble:` messages are followed after the
     # inherited context and before `start`.
-    def start_social_chat(agent_name, options, inherit, template: nil, preamble: nil)
+    def start_social_chat(agent_name, options, inherit, template: nil, preamble: nil, adopt: nil)
       template ||= load_agent(agent_name, options)
       agent = clone_social_agent(template)
       initial_chat = social_chat_copy(agent.start_chat)
+      initial_chat.follow(social_context_delta(template)) if adopt == :current
       initial_chat.follow(social_inherited_context(inherit))
       initial_chat.follow(preamble) if preamble
       agent.start(initial_chat)
       agent
     end
 
-    # In the usual Agent#start branch, start-chat messages are the same Hash
-    # objects in both arrays, which lets us remove the caller agent's policy
-    # exactly even if Agent#ask has removed control roles. The prefix fallback
-    # covers callers that adopted an equivalent, separately parsed Chat.
-    def social_caller_context
-      current = current_chat || []
-      base = start_chat || []
+    # Delta of one agent's current chat over its own start_chat: what that
+    # agent has actually said and done since it began. In the usual
+    # Agent#start branch, start-chat messages are the same Hash objects in
+    # both arrays, which lets us remove the policy exactly even if Agent#ask
+    # has removed control roles. The prefix fallback covers chats adopted
+    # from an equivalent, separately parsed Chat.
+    #
+    # ONE rule serves both seeding directions: the caller context
+    # (social_caller_context) and the adopted template progress
+    # (`adopt: :current`).
+    def social_context_delta(an_agent)
+      current = an_agent.current_chat || []
+      base = an_agent.start_chat || []
       base_ids = base.each_with_object({}) { |message, ids| ids[message.object_id] = true }
 
       context = if current.any? { |message| base_ids[message.object_id] }
@@ -216,6 +247,10 @@ module LLM
                 end
 
       social_chat_copy(context)
+    end
+
+    def social_caller_context
+      social_context_delta(self)
     end
 
     def social_inherited_context(inherit)

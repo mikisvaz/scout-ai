@@ -98,17 +98,52 @@ The specialist's own start_chat is always applied first.
       @other_options[:tools][task_name] = [block, definition]
     end
 
+    # Delegate work to a specialist through a `hand_off_to_<name>` tool.
+    #
+    # `agent` may be any object that answers `user` (duck-typed); only
+    # LLM::Agent instances can go through the conversation pipeline.
+    #
+    # Registration: an LLM::Agent passed here is pre-registered in
+    # `@society[name] ||= agent`. @society is ALSO socialize's template
+    # cache, so a pre-registered live agent becomes the template for that
+    # name; the clone copies only its start_chat (plus any adopted delta),
+    # so drift between the two objects is contained to their chats.
     def delegate(agent, name, description, task_name = nil, &block)
       @other_options[:tools] ||= {}
       task_name = "hand_off_to_#{name}".to_sym if task_name.nil?
+      @society ||= {}
+      @society[name] ||= agent if LLM::Agent === agent
 
       block ||= Proc.new do |_name, parameters|
         message = parameters[:message]
         new_conversation = parameters[:new_conversation]
         Log.medium "Delegated to #{agent}: " + Log.fingerprint(message)
-        agent.start if new_conversation
-        agent.user message
-        agent
+
+        begin
+          if LLM::Agent === agent
+            # The conversation slot is derived from the delegated name and
+            # sanitized like a society conversation key, so any name that can
+            # name a tool can name a conversation (save.rb's conservative
+            # `[^a-zA-Z0-9_-]` sanitizer, never a raise).
+            slot = name.to_s.gsub(/[^a-zA-Z0-9_-]/, '_')
+            slot = '_' if slot.empty?
+            slot = '_' + slot unless slot =~ /\A[a-z0-9]/i
+
+            ask_conversation(name, message,
+                             conversation: slot,
+                             inherit: 'none',
+                             template: agent,
+                             adopt: :current,
+                             restart: new_conversation)
+          else
+            # Duck-typed objects keep the legacy direct-mutation behavior
+            agent.start if new_conversation
+            agent.user message
+            agent
+          end
+        rescue ScoutException => e
+          e
+        end
       end
 
       properties = {
