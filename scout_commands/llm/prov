@@ -556,30 +556,262 @@ if flow || dot_file || plot_file
   end
 
   if dot_file || plot_file
+    # ----------------------------------------------------------------
+    # Explanatory execution-flow dot (design: task/prov-svg-design-spec)
+    # ----------------------------------------------------------------
+    # The dot source explains the run instead of dumping it: labels carry
+    # names only, absolute paths live exclusively in tooltip= attributes
+    # (graphviz emits one <title> per node, shown on hover in svg), and
+    # the machine relation tokens survive only as class= attributes, so
+    # the legacy text greps keep passing without printing machine words in
+    # the figure.  Shapes keep the historical job=box / chat=note
+    # contract; the one deliberate exception is the root, which swaps its
+    # note for a dominant inverted box pinned to the source rank.
     ids = ordered_keys.each_with_index.to_h { |key, index| [key, "n#{index}"] }
+
+    # Flow-edge semantics, in data-flow direction:
+    #   :delegated_result  job -> parent chat (agent_meta receipt): the
+    #                      chat delegated to the job, rendered chat -> job.
+    #   :result            job -> chat that references it (meta: job=
+    #                      line): also a delegation, rendered chat -> job.
+    #                      A :result edge whose endpoints SHARE a path is
+    #                      instead the job's own chat-typed result
+    #                      (job_result_chat_file returns job.path itself),
+    #                      whose node is hidden above as a job duplicate;
+    #                      that identity pair is dropped, never drawn.
+    #   :log               parent -> chat.  A job parent means the chat is
+    #                      an artifact the job produced (produces edge); a
+    #                      chat parent is a saved sidecar conversation,
+    #                      kept visually secondary (dashed, unlabeled).
+    #   :dependency        dependency job -> depending job: the dependency
+    #                      produced the job's input.
+    delegates = []
+    produces = []
+    log_edges = []
+    dependency_edges = []
+    flow_edges.each do |edge|
+      from, to, relation = edge.values_at(:from, :to, :relation)
+      next unless visible_set.include?(from) && visible_set.include?(to)
+      case relation
+      when :delegated_result, :result
+        next if nodes[from][:path] == nodes[to][:path]
+        delegates << {from: to, to: from}
+      when :log
+        if nodes[from][:kind] == :job
+          produces << {from: from, to: to}
+        else
+          log_edges << {from: from, to: to}
+        end
+      when :dependency
+        dependency_edges << {from: from, to: to}
+      end
+    end
+    delegates.uniq!
+    produces.uniq!
+    log_edges.uniq!
+    dependency_edges.uniq!
+    produced_keys = Set.new(produces.collect { |edge| edge[:to] })
+
+    # Continuation chains: jobs sharing a jobname (Step#clean_name) are
+    # turns of one conversation continued in place; mtime order is the
+    # operative signal, since every turn rewrites a longer chat.  Chains
+    # render as flat arcs between consecutive turns, port-pinned south to
+    # north so they thread the gap between adjacent turns instead of
+    # competing with delegates (west) and produces (east) for ports;
+    # constraint=false keeps them from adding rank constraints.
+    chain_turns = {}
+    continues = []
+    chain_members = []
+    name_groups = Hash.new { |hash, name| hash[name] = [] }
+    visible_keys.each do |key|
+      next unless nodes[key][:kind] == :job
+      job = nodes[key][:object]
+      name = job.respond_to?(:clean_name) ? job.clean_name : nil
+      next if name.nil? || name == Task::DEFAULT_NAME
+      name_groups[name] << key
+    end
+    name_groups.each do |name, keys|
+      next unless keys.length >= 2
+      ordered = keys.sort_by do |key|
+        mtime = begin
+          File.mtime(nodes[key][:path])
+        rescue StandardError
+          Time.at(0)
+        end
+        [mtime, nodes[key][:path]]
+      end
+      ordered.each_with_index { |key, index| chain_turns[key] = index + 1 }
+      ordered.each_cons(2) { |first, second| continues << {from: first, to: second} }
+      # Cluster membership: the chain's jobs plus the chats those jobs
+      # produced, and nothing else; groups of one stay unclustered.
+      members = ordered.reject { |key| key == root_key }
+      members += produces.select { |edge| members.include?(edge[:from]) }
+                         .collect { |edge| edge[:to] }
+      chain_members << [name, members]
+    end
+
+    # Job label line 1 keeps the node_label contract (workflow/task plus
+    # jobname); chain members trade the shared-name hash disambiguation
+    # for an explicit turn number, since the chain itself orders them.
+    job_label = lambda do |key|
+      turn = chain_turns[key]
+      base = node_label(nodes[key], nil, nil, key, long)
+      next base unless turn
+      job = nodes[key][:object]
+      info = job.respond_to?(:info) ? job.info : {}
+      workflow = info[:workflow] || info['workflow']
+      task = info[:task_name] || info['task_name']
+      name = job.respond_to?(:clean_name) ? job.clean_name : nil
+      core = name && name != Task::DEFAULT_NAME ? name : job_short_id(nodes[key][:path])
+      labelled = workflow && task ? "#{workflow}/#{task} #{core}" : core
+      "#{labelled} · turn #{turn}"
+    end
+
+    # Outcome before cost: an errored or aborted job shows its outcome and
+    # no token line (a zero figure would read as cost information the run
+    # does not have).  Healthy jobs omit the token line only when there is
+    # nothing to show.
+    job_failed = lambda do |key|
+      job = nodes[key][:object]
+      info = job.respond_to?(:info) ? job.info : {}
+      status = info[:status] || info['status']
+      %w[error aborted].include?(status.to_s) || (job.respond_to?(:error?) && job.error?)
+    end
+
+    qualifier = component ? 'direct' : 'evidence'
+    node_lines = ordered_keys.collect do |key|
+      node = nodes[key]
+      path = node[:path]
+      tokens = node_tokens.call(key)[:tt]
+      badge = short_number(tokens)
+      label =
+        if key == root_key
+          lines = [node[:kind] == :chat ? File.basename(path) : job_label.call(key),
+                   node[:kind] == :chat ? 'Root conversation' : 'Root job',
+                   "#{qualifier} #{badge}"]
+          lines << '⚠ error' if node[:kind] == :job && job_failed.call(key)
+          lines
+        elsif node[:kind] == :job
+          lines = [job_label.call(key)]
+          if job_failed.call(key)
+            lines << '⚠ error'
+          elsif tokens > 0
+            lines << badge
+          end
+          lines
+        elsif society_label_pair(path)
+          [node_label(node, nil, nil, key, long), badge]
+        else
+          [File.basename(path), badge]
+        end
+      attrs =
+        if key == root_key
+          'shape=box, class="prov-root", style="rounded,filled,bold", penwidth=2, ' \
+          'fillcolor="#1F3A5F", color="#142A45", fontcolor="#FFFFFF", fontsize=14'
+        elsif node[:kind] == :job && job_failed.call(key)
+          'shape=box, class="prov-job prov-error", style="rounded,filled", ' \
+          'fillcolor="#FBE3E3", color="#C0392B", fontcolor="#8E2418"'
+        elsif node[:kind] == :job
+          'shape=box, class="prov-job", style="rounded,filled", ' \
+          'fillcolor="#DCE9F7", color="#4A7EBB", fontcolor="#1F3A5F"'
+        elsif society_label_pair(path)
+          'shape=note, class="prov-society", style=filled, ' \
+          'fillcolor="#F1F3F5", color="#9AA5B1", fontcolor="#5A6672"'
+        elsif produced_keys.include?(key)
+          'shape=note, class="prov-chat", style=filled, ' \
+          'fillcolor="#FFF6DC", color="#C9A227", fontcolor="#5C5236"'
+        else
+          'shape=note, class="prov-chat", style=filled, ' \
+          'fillcolor="#F1F3F5", color="#9AA5B1", fontcolor="#5A6672"'
+        end
+      format('  %s [%s, label=%s, tooltip=%s];',
+             ids[key], attrs, JSON.generate(label * "\n"), JSON.generate(path))
+    end
+
+    # Clusters carry the two groupings a reader needs: saved society
+    # conversations, and continuation chains with the artifacts their
+    # turns produced.  A node joins at most one cluster.
+    cluster_blocks = []
+    clustered = Set.new
+    society_keys = ordered_keys.select do |key|
+      key != root_key && nodes[key][:kind] == :chat && society_label_pair(nodes[key][:path])
+    end
+    unless society_keys.empty?
+      clustered.merge(society_keys)
+      cluster_blocks << [
+        '  subgraph cluster_society {',
+        '    label="society chats (root logs)"; labeljust=l; fontsize=10; fontcolor="#5A6672";',
+        '    style="rounded,filled"; fillcolor="#F7F9FB"; color="#C7D0D9";',
+        '    ' + society_keys.collect { |key| ids[key] } * '; ' + ';',
+        '  }'
+      ] * "\n"
+    end
+    chain_members.sort_by { |name, _members| name }.each do |name, members|
+      members = members.reject { |key| clustered.include?(key) }
+      next if members.empty?
+      clustered.merge(members)
+      suffix = name.gsub(/[^A-Za-z0-9]/, '_')
+      suffix = "chain_#{suffix}" if suffix == 'society'
+      cluster_blocks << [
+        "  subgraph cluster_#{suffix} {",
+        "    label=\"#{name} continuation chain\"; labeljust=l; fontsize=10; fontcolor=\"#1F3A5F\";",
+        '    style="rounded,filled"; fillcolor="#F7F9FB"; color="#C7D0D9";',
+        '    ' + members.collect { |key| ids[key] } * '; ' + ';',
+        '  }'
+      ] * "\n"
+    end
+
+    # Ranks: the root pinned to the source rank (leftmost in LR), every
+    # other job on one shared rank so delegation edges stay short and the
+    # chain arcs run flat between siblings; chats take the natural rank
+    # behind their producing job.
+    rank_blocks = ["  {rank=source; #{ids[root_key]};}"]
+    job_ids = ordered_keys.select { |key| nodes[key][:kind] == :job && key != root_key }
+                          .collect { |key| ids[key] }
+    rank_blocks << "  {rank=same; #{job_ids * '; '};}" unless job_ids.empty?
+
+    edge_lines = []
+    delegates.each do |edge|
+      edge_lines << format('  %s -> %s [label="delegates", color="#1F3A5F", fontcolor="#1F3A5F", ' \
+                           'penwidth=1.6, class="delegated_result"];',
+                           ids[edge[:from]], ids[edge[:to]])
+    end
+    produces.each do |edge|
+      edge_lines << format('  %s -> %s [label="produces", color="#4A7EBB", fontcolor="#4A7EBB", ' \
+                           'penwidth=1.1, class="dependency"];',
+                           ids[edge[:from]], ids[edge[:to]])
+    end
+    continues.each do |edge|
+      edge_lines << format('  %s -> %s [label="continues", color="#6E5AA8", fontcolor="#6E5AA8", ' \
+                           'penwidth=1.3, constraint=false, tailport=s, headport=n];',
+                           ids[edge[:from]], ids[edge[:to]])
+    end
+    dependency_edges.each do |edge|
+      edge_lines << format('  %s -> %s [label="result", color="#8A93A0", penwidth=0.9, ' \
+                           'class="dependency"];',
+                           ids[edge[:from]], ids[edge[:to]])
+    end
+    log_edges.each do |edge|
+      edge_lines << format('  %s -> %s [style=dashed, color="#B0B7C3", penwidth=0.9];',
+                           ids[edge[:from]], ids[edge[:to]])
+    end
+
     lines = [
       'digraph scout_ai_provenance {',
-      '  graph [rankdir=LR, bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.6];',
-      '  node [fontname="Helvetica", fontsize=10];',
-      '  edge [fontname="Helvetica", fontsize=8, arrowsize=0.7];'
-    ]
-    ordered_keys.each do |key|
-      node = nodes[key]
-      label = "#{node[:kind].to_s.capitalize}\n#{node_label(node, nil, nil, key, long)}\n#{short_number(node_tokens.call(key)[:tt])} tokens"
-      shape = node[:kind] == :job ? 'box' : 'note'
-      lines << %(  #{ids[key]} [shape=#{shape}, style="rounded,filled", fillcolor="#f7f7f7", label=#{JSON.generate(label)}];)
-    end
-    styles = {
-      result: 'color="#39804a", penwidth=1.5, label="result"',
-      delegated_result: 'color="#8a6d3b", penwidth=1.2, label="delegated_result"',
-      dependency: 'color="#333333", label="dependency"',
-      log: 'color="#2864a5", style="dashed", label="log"'
-    }
-    flow_edges.each do |edge|
-      next unless visible_set.include?(edge[:from]) && visible_set.include?(edge[:to])
-      lines << %(  #{ids[edge[:from]]} -> #{ids[edge[:to]]} [#{styles[edge[:relation]] || "label=#{JSON.generate(edge[:relation].to_s)}"}];)
-    end
-    lines << '}'
+      '  graph [rankdir=LR, splines="spline", bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.8, ' \
+      'fontname="Helvetica", fontsize=11];',
+      '  node [shape=box, style=filled, fontname="Helvetica", fontsize=11, margin="0.14,0.09"];',
+      '  edge [fontname="Helvetica", fontsize=9, fontcolor="#6B7280", arrowsize=0.8, color="#8A93A0"];',
+      '',
+      node_lines,
+      '',
+      cluster_blocks,
+      '',
+      rank_blocks,
+      '',
+      edge_lines,
+      '}'
+    ].flatten
     dot = lines * "\n"
     Open.write(dot_file, dot) if dot_file
 
