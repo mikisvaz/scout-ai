@@ -40,8 +40,12 @@ module AgentWorkflow
   # both happen BEFORE the first chat/start call, so the per-round auto-save
   # in Agent#chat and the restart snapshots in Agent#start are in effect from
   # the very first round, and any specialist socialized mid-round derives
-  # its society layout from a real parent anchor instead of nil.
-  helper :agent do |name = nil, chat: nil, options: nil, tooling: nil, files: nil, **kwargs|
+  # its society layout from a real parent anchor instead of nil. The
+  # `job_path_message` chooses to add a messages that informs the agent
+  # about the location of the job path and it's files_directory, a useful
+  # message in multi-step inference workflows but which may interfere with
+  # cache mechanisms.
+  helper :agent do |name = nil, chat: nil, options: nil, tooling: nil, job_path_message: true, files: nil, **kwargs|
     options = self.options if options.nil?
     tooling = self.tooling if tooling.nil?
     options = IndiferentHash.add_defaults kwargs, options
@@ -51,19 +55,21 @@ module AgentWorkflow
     agent.start_chat.follow tooling if tooling && !tooling.empty?
     agent.save_file = LLM::Agent.canonical_chat_file(files_dir, name)
 
-    agent.start_chat.system <<-EOF
+    if job_path_message
+      agent.start_chat.system <<-EOF
 Your current working directory is #{Dir.pwd}.
 You are working through an ask job with path #{self.path} and files_dir #{self.files_dir}.
-    EOF
+      EOF
 
-    if dependencies.any?
-      agent.start_chat.system <<-EOF
+      if dependencies.any?
+        agent.start_chat.system <<-EOF
 This workflow job has the following depencencies:
 
 #{rec_dependencies.collect(&:path) * "\n"}
 
 Their input should already be incorporated, but they might have artifacts
-      EOF
+        EOF
+      end
     end
 
     if chat && !chat.empty?
