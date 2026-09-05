@@ -156,7 +156,20 @@ module LLM
       end
     end
 
-    tool_call_content.collect do |function_name,function_arguments,tool_call_id,tool_call,content|
+    # ScoutCoder: each agent-returning tool call must be paired with the
+    # answer produced by ITS OWN round. `agents.index(content)` returns the
+    # position of the FIRST occurrence, so two calls in one round returning
+    # the SAME Agent (two `ask` calls to one registered conversation, or two
+    # delegate calls to the same specialist slot) both embedded the FIRST
+    # answer in every `function_call_output` message and followed the wrong
+    # chat. Pair by tool-call position instead: the n-th agent-returning
+    # call consumes the n-th collected answer.
+    agent_call_positions = {}
+    tool_call_content.each_with_index do |entry, position|
+      agent_call_positions[position] = agent_call_positions.length if LLM::Agent === entry.last
+    end
+
+    tool_call_content.each_with_index.collect do |(function_name,function_arguments,tool_call_id,tool_call,content), call_position|
       error = false
       stack = nil
       meta = []
@@ -181,7 +194,7 @@ module LLM
           end
         end
       elsif LLM::Agent === content
-        res, path = agent_answers[agents.index(content)]
+        res, path = agent_answers[agent_call_positions[call_position]]
 
         begin
           Chat.allow_read_job Step.load(path) 
