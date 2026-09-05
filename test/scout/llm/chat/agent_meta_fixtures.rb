@@ -71,13 +71,14 @@ module AgentMetaFixtures
   # (e.g. 'Worker/ask/Default_w'): the result file, a .info sidecar with
   # `dependencies` (always written, matching scout-gear Step), and agent chat
   # logs written under `<job>.files/<name>` (Hash name -> chat text; the
-  # canonical agent-log layout, no `log/` component).  Returns
-  # the job path.
-  def make_job(dir, ref, result: 'answer', dependencies: [], logs: {})
+  # canonical agent-log layout, no `log/` component).  `info` entries are
+  # merged over the sidecar JSON so tests can set workflow/task_name/
+  # clean_name exactly like a real run would.  Returns the job path.
+  def make_job(dir, ref, result: 'answer', dependencies: [], logs: {}, info: {})
     path = File.expand_path(File.join(dir, ref))
     FileUtils.mkdir_p(File.dirname(path))
     File.write(path, result)
-    File.write(path + '.info', {dependencies: dependencies}.to_json)
+    File.write(path + '.info', {dependencies: dependencies}.merge(info).to_json)
     logs.each do |name, text|
       log_path = File.join(path + '.files', name)
       FileUtils.mkdir_p(File.dirname(log_path))

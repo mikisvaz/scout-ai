@@ -98,6 +98,21 @@ records.each do |kind, object, parent_kind, parent, relation, first_visit, _deta
 end
 root_key = Chat.provenance_key(root_type, root)
 
+# Job nodes whose jobname (Step#clean_name) is not the `Default` sentinel
+# label with the jobname instead of the input-hash excerpt.  Jobnames are not
+# unique: a conversation continued twice shares one jobname, so names used by
+# more than one job node of this tree are disambiguated by appending the short
+# hash.  Counted once here, before any rendering, so tree, flow and dot modes
+# disambiguate identically.  A constant (like RELATION_ORDER below) because
+# node_label is a def, and defs cannot close over top-level locals.
+JOB_NAME_COUNTS = Hash.new(0)
+nodes.each_value do |node|
+  next unless node[:kind] == :job
+  job = node[:object]
+  name = job.respond_to?(:clean_name) ? job.clean_name : nil
+  JOB_NAME_COUNTS[name] += 1 if name && name != Task::DEFAULT_NAME
+end
+
 # Adjacency: parent -> children, sorted for readability
 adjacency = Hash.new { |h, k| h[k] = [] }
 edges.each do |edge|
@@ -304,6 +319,14 @@ def node_label(node, parent_node = nil, root_key = nil, key = nil, long = false)
     workflow = job.info[:workflow] || job.info['workflow']
     task = job.info[:task_name] || job.info['task_name']
     short_id = job_short_id(path)
+    # Prefer the jobname over the hash excerpt; `Default` (and any step
+    # without a usable name) keeps the historical hash-only label.  Shared
+    # jobnames get the short hash appended so the two nodes stay
+    # distinguishable in tree/flow/dot output.
+    name = job.respond_to?(:clean_name) ? job.clean_name : nil
+    if name && name != Task::DEFAULT_NAME
+      short_id = JOB_NAME_COUNTS[name] > 1 ? "#{name} #{short_id}" : name
+    end
     workflow && task ? "#{workflow}/#{task} #{short_id}" : short_id
   elsif parent_node && parent_node[:kind] == :job && path.include?(parent_node[:path] + '.files/')
     # Log chat under a job: show the path relative to the job's files dir, so

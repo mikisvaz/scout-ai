@@ -682,4 +682,118 @@ class TestProvCLI < Test::Unit::TestCase
     end
   end
 
+  # ---- Short-form jobname labels (delegated-job presentation) ------------
+  #
+  # Jobname-when-not-Default rule: a delegated job whose jobname differs from
+  # the `Default` sentinel labels with the jobname; a Default-named job keeps
+  # the historical hash-excerpt label.
+  def test_named_delegated_job_labels_with_jobname
+    TmpFile.with_dir do |dir|
+      child = make_job(dir, 'Cortex/continue/echo-worker_f44dbdeb0c47d569454e8276ea39de5e.chat',
+                       info: {workflow: 'Cortex', task_name: 'continue', clean_name: 'echo-worker'})
+      worker_log = receipt_chat_text({'n1' => [meta_receipt("job=#{child}")]})
+      worker = make_job(dir, 'Planned/work/Default_wn',
+                        info: {workflow: 'Planned', task_name: 'work'},
+                        logs: {'agent.chat' => worker_log})
+
+      out, err, status = prov(worker)
+      assert status.success?, err
+      assert_match(/job delegated-job Cortex\/continue echo-worker\b/, out)
+      # The hash excerpt is no longer the label token for a named job.
+      assert_not_include out, 'Cortex/continue f44dbdeb'
+    end
+  end
+
+  def test_default_named_job_keeps_hash_excerpt_label
+    TmpFile.with_dir do |dir|
+      child = make_job(dir, 'Cortex/continue/Default_f44dbdeb0c47d569454e8276ea39de5e.chat',
+                       info: {workflow: 'Cortex', task_name: 'continue', clean_name: 'Default'})
+      worker_log = receipt_chat_text({'d1' => [meta_receipt("job=#{child}")]})
+      worker = make_job(dir, 'Planned/work/Default_wd2',
+                        info: {workflow: 'Planned', task_name: 'work'},
+                        logs: {'agent.chat' => worker_log})
+
+      out, err, status = prov(worker)
+      assert status.success?, err
+      assert_match(/job delegated-job Cortex\/continue f44dbdeb\b/, out)
+      assert_not_include out, 'Cortex/continue Default'
+    end
+  end
+
+  # A failed named job produces a bare delegated-job line (no evidence/cost
+  # fields, since it contributed no tokens) carrying its jobname.
+  def test_failed_named_job_renders_bare_delegated_line_with_name
+    TmpFile.with_dir do |dir|
+      child = make_job(dir, 'Cortex/continue/cortex-bad-brief_11111111111111111111111111111111.chat',
+                       result: {exception: 'boom'}.to_json,
+                       info: {workflow: 'Cortex', task_name: 'continue',
+                              clean_name: 'cortex-bad-brief', status: 'error'})
+      worker_log = receipt_chat_text({'f1' => [meta_receipt("job=#{child}")]})
+      worker = make_job(dir, 'Planned/work/Default_wf2',
+                        info: {workflow: 'Planned', task_name: 'work'},
+                        logs: {'agent.chat' => worker_log})
+
+      out, err, status = prov(worker)
+      assert status.success?, err
+      bare = out.lines.find { |line| line.include?('cortex-bad-brief') }
+      assert bare, out
+      assert_match(/\A\s*job delegated-job Cortex\/continue cortex-bad-brief\s*$/, bare)
+      %w[evidence= delta= prompt= cache= cont= reason=].each do |field|
+        assert_not_include bare, field, bare
+      end
+    end
+  end
+
+  # Two distinct jobs sharing one jobname stay distinguishable: each label
+  # carries the jobname plus its short hash.
+  def test_shared_jobname_disambiguated_with_short_hash
+    TmpFile.with_dir do |dir|
+      child1 = make_job(dir, 'Cortex/continue/echo-worker_f44dbdeb0c47d569454e8276ea39de5e.chat',
+                        info: {workflow: 'Cortex', task_name: 'continue', clean_name: 'echo-worker'})
+      child2 = make_job(dir, 'Cortex/continue/echo-worker_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.chat',
+                        info: {workflow: 'Cortex', task_name: 'continue', clean_name: 'echo-worker'})
+      worker_log = receipt_chat_text(
+        {'s1' => [meta_receipt("job=#{child1}"), meta_receipt("job=#{child2}")]}
+      )
+      worker = make_job(dir, 'Planned/work/Default_ws',
+                        info: {workflow: 'Planned', task_name: 'work'},
+                        logs: {'agent.chat' => worker_log})
+
+      out, err, status = prov(worker)
+      assert status.success?, err
+      assert_include out, 'Cortex/continue echo-worker f44dbdeb'
+      assert_include out, 'Cortex/continue echo-worker aaaaaaaa'
+      bare_lines = out.lines.select do |line|
+        line.include?('Cortex/continue echo-worker') &&
+          !line.include?('f44dbdeb') && !line.include?('aaaaaaaa')
+      end
+      assert_empty bare_lines, "no shared-name label without hash: #{bare_lines * ' | '}"
+    end
+  end
+
+  # Flow and dot share node_label, so the jobname rule reaches both; the flow
+  # table's separate id column keeps the hash.
+  def test_flow_and_dot_show_jobname_label
+    TmpFile.with_dir do |dir|
+      child = make_job(dir, 'Cortex/continue/echo-worker_f44dbdeb0c47d569454e8276ea39de5e.chat',
+                       info: {workflow: 'Cortex', task_name: 'continue', clean_name: 'echo-worker'})
+      worker_log = receipt_chat_text({'fd1' => [meta_receipt("job=#{child}")]})
+      worker = make_job(dir, 'Planned/work/Default_wfd',
+                        info: {workflow: 'Planned', task_name: 'work'},
+                        logs: {'agent.chat' => worker_log})
+
+      out, _err, status = prov('--flow', worker)
+      assert status.success?
+      job_row = out.lines.find { |line| line =~ /Cortex\/continue/ }
+      assert job_row, out
+      assert_include job_row, 'Cortex/continue echo-worker'
+      assert_include job_row, 'f44dbdeb', "flow id column keeps the hash: #{job_row}"
+
+      dot_file = File.join(dir, 'prov.dot')
+      out2, _err2, status2 = prov('--dot', dot_file, worker)
+      assert status2.success?
+      assert_include File.read(dot_file), 'Cortex/continue echo-worker'
+    end
+  end
+
 end
