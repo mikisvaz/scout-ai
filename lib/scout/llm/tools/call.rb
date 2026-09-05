@@ -226,7 +226,7 @@ module LLM
                     # content with inference meta. Extract accordingly.
                     content = IndiferentHash.setup(content)
                     keys = content.keys.collect{|k| k.to_s }
-                    if keys.sort == %w(meta content)
+                    if keys.sort == %w(content meta)
                       # `meta` is the deserialized receipt array; pass it
                       # through verbatim.
                       meta, content = content.values_at :meta, :content
