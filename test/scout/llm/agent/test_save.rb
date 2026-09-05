@@ -362,6 +362,19 @@ class TestLLMAgentSocietySaveFile < Test::Unit::TestCase
                  agent.send(:society_save_file, 'Direct', 'harness_test')
   end
 
+  # CLI `ask --chat` builds its agent save file from the chat's files_dir
+  # through Agent.canonical_chat_file (scout_commands/agent/ask and
+  # scout_commands/llm/ask); these mirror the two layouts that CLI accepts.
+  def test_canonical_chat_file_cli_shaped_save_file
+    assert_equal 'dir/cli.chat.files/agent.chat',
+                 LLM::Agent.canonical_chat_file('dir/cli.chat.files', nil)
+  end
+
+  def test_canonical_chat_file_cli_shaped_named_agent
+    assert_equal 'dir/job.chat.files/worker.chat',
+                 LLM::Agent.canonical_chat_file('dir/job.chat.files', 'worker')
+  end
+
   def test_society_save_file_plain_root_chat
     agent = LLM::Agent.new
     agent.save_file = 'dir/root.chat'
