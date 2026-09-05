@@ -47,6 +47,18 @@ module LLM
         File.join(File.dirname(p), File.basename(p).sub(/\.chat\z/, '.society'))
       end
 
+      # Canonical chat file of an agent run inside a workflow job (or any
+      # other files_dir owner): `<files_dir>/<agent_name || 'agent'>.chat`.
+      #
+      # ScoutCoder: this rule was duplicated in AgentWorkflow#log_agent and
+      # restated in a comment at scout_commands/agent/ask; it lives here now,
+      # beside the other layout rules, as the single source of truth. Both
+      # Path and String files_dir are accepted and the result is always a
+      # plain String.
+      def canonical_chat_file(files_dir, agent_name = nil)
+        File.join(files_dir.to_s, "#{agent_name || 'agent'}.chat")
+      end
+
       # ScoutCoder: LEGACY root society directory (`<path>.files/log/society`)
       # from before the flat layout change. Kept read-only: nothing writes
       # here anymore, but provenance traversal must still glob it so chats

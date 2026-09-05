@@ -1,6 +1,21 @@
 require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
+# Offline replacement for the remote `Baking` workflow (same technique as
+# test/scout/llm/test_chat.rb): the `introduce:`/`tool:` directives resolve
+# workflow names through Kernel.const_get first, so a named module is
+# reachable without any git clone.
+TestBaking = Module.new do
+  extend Workflow
+  self.name = "TestBaking"
+
+  desc "Bake a tray of muffins"
+  input :blueberries, :boolean, "Add blueberries", true
+  task :bake_muffin_tray => :string do |blueberries|
+    "Baking muffins: blueberries=#{blueberries}"
+  end
+end
+
 class TestWorkflowChatTaskSave < Test::Unit::TestCase
   # NOTE on setup order: test_helper's `setup do` callback runs AFTER this
   # `setup` method and does `Open.rm_rf tmpdir`, i.e. it deletes every
@@ -15,6 +30,8 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
     @tmp_work = Path.setup(File.join(TmpFile.tmpdir, 'workflow_chat_task_save'))
     Open.mkdir @tmp_work
     TestWorkflowChatTaskSaveWF.directory = @tmp_work
+    $tooling_probe_agent = nil
+    $tools_option_agent = nil
   end
 
   def teardown
@@ -47,6 +64,38 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
       agent.user 'question one'
       agent.current_chat.push({role: :assistant, content: 'answer one'})
       agent
+    end
+
+    # The agent is built through the `agent` helper and socializes (the
+    # `ask` tool) DURING its first round. The round then ends in a
+    # ScoutException raised by the block itself, so chat_task's rescue path
+    # runs and log_agent (the end-of-task sweep) NEVER executes: the child
+    # conversation can only be durable through its creation-time anchor.
+    chat_task :socialize_in_first_round do
+      worker = LLM::Agent.new(start_chat: Chat.setup([{role: :system, content: 'child helper'}]))
+      agent = self.agent nil
+      agent.society = { 'Worker' => worker }
+      agent.socialize
+      agent.user 'delegate please'
+      LLM::Mock.script({tool_calls: [{name: 'ask', arguments: {agent: 'Worker', prompt: 'child prompt'}}]},
+                       'child answer',
+                       'parent done')
+      agent.chat(return_messages: true)
+      raise ScoutException, 'deliberate stop before log_agent'
+    end
+
+    # Hygiene probe: declarative workflow tooling from the job chat must
+    # reach the seeded conversation, and the helper's own option handling
+    # (which keeps :tools, unlike the social pipeline's private-option
+    # strip) must still deliver an options-level tool to the agent.
+    chat_task :tooling_probe do
+      $tooling_probe_agent = self.agent nil
+      extra = [Proc.new { |_name, _args| 'ok' },
+               {'name' => 'extra_tool',
+                'parameters' => {'type' => 'object', 'properties' => {}, 'required' => []}}]
+      $tools_option_agent = self.agent nil, tools: {'extra_tool' => extra}
+      $tooling_probe_agent.current_chat.push({role: :assistant, content: 'probe done'})
+      $tooling_probe_agent
     end
   end
 
@@ -106,5 +155,52 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
     delta = result.reject { |m| m[:role].to_s == 'meta' }
     assert_include delta.first[:content], 'question one'
     assert_include delta.last[:content], 'answer one'
+  end
+
+  # The fails-today guard of the A4 step: a chat_task agent that socializes
+  # INSIDE its first round leaves a durable child society file, even though
+  # the task then aborts before log_agent's end-of-task save sweep.
+  def test_socialize_inside_first_round_persists_child_society
+    job = run_job(TmpFile.tmpdir, :socialize_in_first_round)
+    child = File.join(job.files_dir.to_s, 'agent.society', 'Worker', 'default', 'agent.chat')
+    assert Open.exist?(child), "expected the socialized child chat at #{child}"
+    parent = File.join(job.files_dir.to_s, 'agent.chat')
+    assert Open.exist?(parent), "expected the job agent chat at #{parent}"
+  end
+
+  def test_agent_helper_seeds_tooling_and_keeps_tools_option
+    chat = "tool: TestWorkflowChatTaskSaveWF\nintroduce: TestWorkflowChatTaskSaveWF\nuser: hi\n"
+    TestWorkflowChatTaskSaveWF.directory = Path.setup(TmpFile.tmpdir)
+    job = TestWorkflowChatTaskSaveWF.job(:tooling_probe, chat: chat)
+    job.produce
+
+    agent = $tooling_probe_agent
+    refute_nil agent
+    # Anchored and job-wired at creation, through the pipeline
+    assert_equal File.join(job.files_dir.to_s, 'agent.chat'), agent.save_file.to_s
+    assert_equal job.path.to_s, agent.job.path.to_s
+    # Seed order preserved: declarative tooling first, then the cwd/job
+    # system preamble, exactly where start_chat.follow tooling sat before
+    roles = agent.start_chat.collect { |m| m[:role].to_s }
+    assert_equal %w[tool introduce system], roles
+    assert agent.start_chat.last[:content].include?('Your current working directory')
+    # The declarative tooling seeded into the conversation still resolves
+    # to real tool definitions. The chat inside a chat_task refers to this
+    # workflow itself; here we resolve the directive against a module whose
+    # constant IS reachable, to prove the seeded messages are well-formed
+    # tooling rather than inert text (the same technique as
+    # test/scout/llm/test_chat.rb's TestBaking).
+    seeded = Chat.setup(agent.start_chat.dup)
+    seeded.each { |m| m[:content] = m[:content].to_s.gsub('TestWorkflowChatTaskSaveWF', 'TestBaking') }
+    definitions = LLM::Mock.tools(seeded, {})
+    assert_include definitions.keys, :bake_muffin_tray
+    assert_equal TestBaking, definitions[:bake_muffin_tray].first
+
+    # Option hygiene: the helper's options reach the agent intact (the
+    # pipeline does not strip :tools on this path)
+    tools_option_agent = $tools_option_agent
+    refute_nil tools_option_agent
+    assert tools_option_agent.other_options[:tools]['extra_tool']
+    assert_equal File.join(job.files_dir.to_s, 'agent.chat'), tools_option_agent.save_file.to_s
   end
 end

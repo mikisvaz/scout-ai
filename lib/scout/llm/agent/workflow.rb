@@ -35,6 +35,12 @@ module AgentWorkflow
     self.tooling.select { |msg| msg[:role] == 'introduce' }
   end
 
+  # Build the workflow job's own agent, anchored at creation. The layout rule
+  # (`Agent.canonical_chat_file`, same as `log_agent`) and the `job` wiring
+  # both happen BEFORE the first chat/start call, so the per-round auto-save
+  # in Agent#chat and the restart snapshots in Agent#start are in effect from
+  # the very first round, and any specialist socialized mid-round derives
+  # its society layout from a real parent anchor instead of nil.
   helper :agent do |name = nil, chat: nil, options: nil, tooling: nil, files: nil, **kwargs|
     options = self.options if options.nil?
     tooling = self.tooling if tooling.nil?
@@ -43,6 +49,7 @@ module AgentWorkflow
     agent = LLM.load_agent name, agent_options(options)
     agent.job = self
     agent.start_chat.follow tooling if tooling && !tooling.empty?
+    agent.save_file = LLM::Agent.canonical_chat_file(files_dir, name)
 
     agent.start_chat.system <<-EOF
 Your current working directory is #{Dir.pwd}.
@@ -98,13 +105,14 @@ There are other jobs found in this chat:
     # every nested conversation under
     # <files_dir>/<agent_name>.society/<agent>/<conversation>/agent.chat.
     #
-    # ScoutCoder: the save_file MUST be assigned BEFORE the first chat/start
-    # call (chat_task does it for us here, but any caller must too): the
-    # Agent#chat ensure-hook and the restart-snapshot hook in Agent#start
-    # both write through save_file, so assigning it late loses the
-    # intermediate turns. `agent_name` defaults to 'agent' and names the
+    # The `agent` helper anchors the agents it builds at creation time
+    # (save_file assigned there), so per-round auto-saves and restart
+    # snapshots already write through it by the time we get here. This is
+    # the end-of-task sweep for such agents and the fallback anchor for any
+    # agent constructed directly inside the block (LLM::Agent.new), which
+    # has no save_file yet. `agent_name` defaults to 'agent' and names the
     # file, never a directory: worker.chat -> worker.society, no log/ level.
-    agent.save_file = files_dir["#{agent_name || 'agent'}.chat"] if agent.save_file.nil?
+    agent.save_file = LLM::Agent.canonical_chat_file(files_dir, agent_name) if agent.save_file.nil?
     agent.save
 
     update_info :dependencies, dependencies.collect { |dependency| dependency.path.find }
