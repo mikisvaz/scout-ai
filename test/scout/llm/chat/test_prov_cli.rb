@@ -113,8 +113,9 @@ class TestProvCLI < Test::Unit::TestCase
       assert_include root_line, 'prompt=6', out
       assert_match(/root deduplicated_total=9 /, out)
 
-      # The society conversation is traversed and rendered as its own node.
-      society_line = out.lines.find { |line| line.include?('agent.society/Worker/default/agent.chat') }
+      # The society conversation is traversed and rendered as its own node,
+      # labeled with its agent/conversation pair in the short form.
+      society_line = out.lines.find { |line| line.include?('society Worker/default') }
       assert society_line, out
       assert_match(/\A\s*chat\b/, society_line, out)
       assert_include society_line, 'evidence=7', out
@@ -793,6 +794,175 @@ class TestProvCLI < Test::Unit::TestCase
       out2, _err2, status2 = prov('--dot', dot_file, worker)
       assert status2.success?
       assert_include File.read(dot_file), 'Cortex/continue echo-worker'
+    end
+  end
+
+
+  # ---- Short-form society chat labels ------------------------------------
+  #
+  # Society conversations saved under a `.society` directory label with
+  # `society <Agent>/<conversation>` derived from the LAST marker segment
+  # (`society` or any `<name>.society`), instead of their path.  The rule is
+  # layout-based: it fires for chat-owned and job-owned societies alike, and
+  # in flow/dot output where the parent is unknown.
+  #
+  # Chat-owned society sidecar: compact pair, never the path.
+  def test_society_chat_labels_with_agent_conversation_pair
+    TmpFile.with_dir do |dir|
+      saved = write_chat(dir, 'saved.chat',
+                         "user: hi\nmeta: pt=1 ct=1 tt=2 inference_id=s1\nassistant: done\n")
+      society_chat = File.join(saved + '.files', 'agent.society', 'Worker', 'mgr-social-smoke', 'agent.chat')
+      FileUtils.mkdir_p(File.dirname(society_chat))
+      File.write(society_chat,
+                 "user: work\nmeta: pt=5 ct=2 tt=7 inference_id=s2\nassistant: ok\n")
+
+      out, err, status = prov(saved)
+      assert status.success?, err
+
+      society_line = out.lines.find { |line| line.include?('society Worker/mgr-social-smoke') }
+      assert society_line, out
+      assert_match(/\A\s*chat\b/, society_line, out)
+      assert_include society_line, 'evidence=7', out
+      assert_not_include out, 'agent.society/Worker/mgr-social-smoke/agent.chat'
+    end
+  end
+
+  # -l still prints full paths: the society line is byte-identical to the
+  # pre-change rendering, so the long form is untouched.
+  def test_society_long_form_shows_full_path
+    TmpFile.with_dir do |dir|
+      saved = write_chat(dir, 'saved.chat',
+                         "user: hi\nmeta: pt=1 ct=1 tt=2 inference_id=s1\nassistant: done\n")
+      society_chat = File.join(saved + '.files', 'agent.society', 'Worker', 'mgr-social-smoke', 'agent.chat')
+      FileUtils.mkdir_p(File.dirname(society_chat))
+      File.write(society_chat,
+                 "user: work\nmeta: pt=5 ct=2 tt=7 inference_id=s2\nassistant: ok\n")
+
+      long_out, err, status = prov('-l', saved)
+      assert status.success?, err
+      long_line = long_out.lines.find { |line| line.include?(society_chat) }
+      assert long_line, long_out
+      assert_include long_line, 'agent.society/Worker/mgr-social-smoke/agent.chat'
+
+      short_out, _err, _status = prov(saved)
+      assert_not_include short_out, society_chat
+      assert_include short_out, 'society Worker/mgr-social-smoke'
+    end
+  end
+
+  # The same pair saved under two parents stays distinguishable through the
+  # short path digest (the digest the flow id column already shows).
+  def test_duplicate_society_pair_disambiguated_with_digest
+    TmpFile.with_dir do |dir|
+      saved = write_chat(dir, 'saved.chat',
+                         "user: hi\nmeta: pt=1 ct=1 tt=2 inference_id=s1\nassistant: done\n")
+      first = File.join(saved + '.files', 'agent.society', 'Worker', 'default', 'agent.chat')
+      second = File.join(saved + '.files', 'other.society', 'Worker', 'default', 'agent.chat')
+      [first, second].each do |path|
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "user: work\nmeta: pt=5 ct=2 tt=7 inference_id=s2\nassistant: ok\n")
+      end
+
+      out, err, status = prov(saved)
+      assert status.success?, err
+
+      society_lines = out.lines.select { |line| line.include?('society Worker/default') }
+      assert_equal 2, society_lines.length, out
+      digests = society_lines.collect { |line| line[/society Worker\/default \(([0-9a-f]{8})\)/, 1] }
+      assert_equal 2, digests.compact.uniq.length, society_lines * "\n"
+      assert_equal [Misc.digest(first)[0, 8], Misc.digest(second)[0, 8]].sort, digests.sort
+
+      ambiguous = society_lines.reject { |line| line =~ /society Worker\/default \([0-9a-f]{8}\)/ }
+      assert_empty ambiguous, ambiguous * "\n"
+    end
+  end
+
+  # Nested societies label by their own agent/conversation: the LAST marker
+  # segment wins, both for the plain `society` basename and for the
+  # `<name>.society` sibling form of nested saves.
+  def test_nested_society_labels_by_last_marker
+    TmpFile.with_dir do |dir|
+      saved = write_chat(dir, 'saved.chat',
+                         "user: hi\nmeta: pt=1 ct=1 tt=2 inference_id=s1\nassistant: done\n")
+      nested = File.join(saved + '.files', 'agent.society', 'Worker', 'w_A',
+                         'society', 'Critic', 'c_1', 'agent.chat')
+      sibling = File.join(saved + '.files', 'agent.society', 'Worker', 'w_B',
+                          'Worker.society', 'Critic', 'c_2', 'agent.chat')
+      [nested, sibling].each do |path|
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "user: crit\nmeta: pt=3 ct=1 tt=4 inference_id=s3\nassistant: ok\n")
+      end
+
+      out, err, status = prov(saved)
+      assert status.success?, err
+      assert_include out, 'society Critic/c_1'
+      assert_include out, 'society Critic/c_2'
+      # The outer agent/conversation never leaks into the nested label.
+      assert_not_include out, 'society Worker/w_A'
+      assert_not_include out, 'society Worker/w_B'
+
+      # Flow and dot share node_label with no parent, so the compact pair
+      # reaches both automatically.
+      flow_out, _err, _status = prov('--flow', saved)
+      assert_include flow_out, 'society Critic/c_1'
+      dot_file = File.join(dir, 'prov.dot')
+      prov('--dot', dot_file, saved)
+      assert_include File.read(dot_file), 'society Critic/c_2'
+    end
+  end
+
+  # Job-owned societies get the compact label too, while ordinary job log
+  # chats (no marker segment) keep their basename rendering.
+  def test_job_log_children_and_job_owned_society_labels
+    TmpFile.with_dir do |dir|
+      job = make_job(dir, 'Cortex/continue/cortex-smoke_a8f0e48e0000000000000000000000000000.chat',
+                     info: {workflow: 'Cortex', task_name: 'continue', clean_name: 'cortex-smoke'},
+                     logs: {
+                       'Worker.chat' => "user: work\nmeta: pt=5 ct=2 tt=7 inference_id=w1\nassistant: ok\n",
+                       'agent.society/Worker/mgr-social-smoke/agent.chat' =>
+                         "user: soc\nmeta: pt=4 ct=1 tt=5 inference_id=s1\nassistant: ok\n"
+                     })
+
+      out, err, status = prov(job)
+      assert status.success?, err
+
+      # A log chat without a marker segment keeps the basename label.
+      worker_line = out.lines.find { |line| line.include?('Worker.chat') }
+      assert worker_line, out
+      assert_match(/\A\s*chat\b/, worker_line, out)
+      assert_not_include worker_line, 'society'
+
+      # The job-owned society conversation is compacted as well.
+      society_line = out.lines.find { |line| line.include?('society Worker/mgr-social-smoke') }
+      assert society_line, out
+      assert_match(/\A\s*chat\b/, society_line, out)
+      assert_not_include out, 'agent.society/Worker/mgr-social-smoke/agent.chat'
+    end
+  end
+
+  # Label changes must not touch accounting: the root footer stays byte
+  # identical between the pre- and post-change renderings of the same tree.
+  def test_society_tree_keeps_footer_accounting
+    TmpFile.with_dir do |dir|
+      saved = write_chat(dir, 'saved.chat',
+                         "user: hi\nmeta: pt=1 ct=1 tt=2 inference_id=s1\nassistant: done\n")
+      society_chat = File.join(saved + '.files', 'agent.society', 'Worker', 'mgr-social-smoke', 'agent.chat')
+      FileUtils.mkdir_p(File.dirname(society_chat))
+      File.write(society_chat,
+                 "user: work\nmeta: pt=5 ct=2 tt=7 inference_id=s2\nassistant: ok\n")
+
+      expected = Chat.provenance_token_totals(saved)
+
+      out, err, status = prov(saved)
+      assert status.success?, err
+
+      footer = out.lines.find { |line| line.start_with?('root deduplicated_total=') }
+      assert footer, out
+      assert_equal "root deduplicated_total=9 (2 events) prompt=6 cache=0@0.0% fresh=6 cont=3 " +
+                   "(authoritative cost; per-node evidence=/direct= values overlap)",
+                   footer.chomp, out
+      assert_equal expected[:tt], 9
+      assert_equal expected[:pt], 6
     end
   end
 

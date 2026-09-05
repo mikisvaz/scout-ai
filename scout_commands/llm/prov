@@ -113,6 +113,34 @@ nodes.each_value do |node|
   JOB_NAME_COUNTS[name] += 1 if name && name != Task::DEFAULT_NAME
 end
 
+# Society conversations saved under a `.society` directory (agent.society at
+# the top level, plain `society` or `<name>.society` for nested saves) label
+# with their `<Agent>/<conversation>` pair instead of the path.  The pair is
+# taken after the LAST marker segment, so a nested save is labeled by its own
+# agent/conversation rather than the outer one.  Pairs are not unique either:
+# the same conversation may be saved under two parents, so pairs used by more
+# than one chat node are disambiguated by appending the short path digest
+# (the same digest the flow id column shows for chats).  Counted in the same
+# pre-render pass as the jobname counts so tree, flow and dot modes label
+# identically.  A constant for the counts, like JOB_NAME_COUNTS above,
+# because node_label is a def and defs cannot close over top-level locals.
+def society_label_pair(path)
+  segments = path.split(File::SEPARATOR)
+  marker = segments.rindex do |segment|
+    segment == 'society' || segment.end_with?('.society')
+  end
+  return nil unless marker
+  agent, conversation = segments.values_at(marker + 1, marker + 2)
+  agent && conversation ? "#{agent}/#{conversation}" : nil
+end
+
+SOCIETY_LABEL_COUNTS = Hash.new(0)
+nodes.each_value do |node|
+  next unless node[:kind] == :chat
+  pair = society_label_pair(node[:path])
+  SOCIETY_LABEL_COUNTS[pair] += 1 if pair
+end
+
 # Adjacency: parent -> children, sorted for readability
 adjacency = Hash.new { |h, k| h[k] = [] }
 edges.each do |edge|
@@ -328,6 +356,12 @@ def node_label(node, parent_node = nil, root_key = nil, key = nil, long = false)
       short_id = JOB_NAME_COUNTS[name] > 1 ? "#{name} #{short_id}" : name
     end
     workflow && task ? "#{workflow}/#{task} #{short_id}" : short_id
+  elsif node[:kind] == :chat && (pair = society_label_pair(path))
+    # Saved society conversation: show the agent/conversation pair after the
+    # last `.society` marker instead of the path.  Layout-based, so it fires
+    # for chat- and job-owned societies alike (and in flow/dot, where the
+    # parent is unknown).  Non-unique pairs get the short digest appended.
+    SOCIETY_LABEL_COUNTS[pair] > 1 ? "society #{pair} (#{Misc.digest(path)[0, 8]})" : "society #{pair}"
   elsif parent_node && parent_node[:kind] == :job && path.include?(parent_node[:path] + '.files/')
     # Log chat under a job: show the path relative to the job's files dir, so
     # agent.society/Direct/harness_test/agent.chat is shown shortened.
