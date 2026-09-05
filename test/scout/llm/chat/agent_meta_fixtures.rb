@@ -4,14 +4,14 @@
 #
 # Helpers provided:
 #   write_chat(dir, name, text)                         -> chat file path
-#   meta_receipt(content)                               -> agent_meta entry Hash
-#   receipt_output(call_id, agent_meta, ...)            -> JSON envelope String
+#   meta_receipt(fields)                                -> meta entry Hash
+#   receipt_output(call_id, meta, ...)                  -> JSON envelope String
 #   receipt_chat_text(receipts, extra: nil)             -> persisted chat text
 #   plain_delegation_chat(job_path)                     -> persisted chat text
 #   make_job(dir, ref, dependencies:, logs:)            -> job path
 #   visit_signature(visits)                             -> comparable Array
 #   fixture_c(dir)                                      -> C/D layout paths
-#   truncated_receipt_chat(call_id, agent_meta)          -> fixture H text
+#   truncated_receipt_chat(call_id, meta)               -> fixture H text
 require 'fileutils'
 require 'json'
 
@@ -24,26 +24,25 @@ module AgentMetaFixtures
     path
   end
 
-  # One agent_meta receipt entry with direct meta content, e.g.
+  # One meta receipt entry, already-deserialized field Hash form, e.g.
   # meta_receipt('pt=10 ct=4 tt=14 inference_id=w1') or
   # meta_receipt('job=Worker/ask/Default_w').
   def meta_receipt(content)
-    {role: 'meta', content: content}
+    Chat.parse_meta(content)
   end
 
-  # JSON payload of a function_call_output envelope carrying agent_meta.
-  # `envelope:` selects which serialized key carries the receipts:
-  # :agent_meta is the legacy envelope, :meta the current one written since
-  # the dual-envelope reader landed (lib/scout/llm/tools/call.rb).
+  # JSON payload of a function_call_output envelope carrying a receipt
+  # under the `meta` key.  `envelope:` remains so tests can force the legacy
+  # `agent_meta` key for the deliberate-breakage tests.
   # `name` only decorates the envelope; the receipt lifting ignores it.
-  def receipt_output(call_id, agent_meta, name: 'ask', content: 'child answer', envelope: :agent_meta)
+  def receipt_output(call_id, meta, name: 'ask', content: 'child answer', envelope: :meta)
     payload = {name: name, content: content, id: call_id}
-    payload[envelope] = agent_meta
+    payload[envelope] = meta
     payload.to_json
   end
 
   # Persisted chat text with one paired ask call per receipt entry.  Hash keys
-  # are call ids, values are the agent_meta payloads (Arrays, Strings, ...).
+  # are call ids, values are the meta payloads (Arrays, Strings, ...).
   # `extra` lines are appended after the receipts (e.g. local meta lines).
   #
   # Message indexes produced by Chat.parse (single user turn, no leading
@@ -51,11 +50,11 @@ module AgentMetaFixtures
   #   0 user, then per receipt: function_call, function_call_output.
   # `tool` sets the function_call name; receipts are lifted from the output
   # envelope regardless of it, so tests can pin that no tool name is special.
-  def receipt_chat_text(receipts, extra: nil, envelope: :agent_meta, tool: 'ask')
+  def receipt_chat_text(receipts, extra: nil, envelope: :meta, tool: 'ask')
     lines = ['user: Run the worker']
-    receipts.each do |call_id, agent_meta|
+    receipts.each do |call_id, meta|
       lines << 'function_call: ' + %({"name":"#{tool}","arguments":{},"id":"#{call_id}"})
-      lines << 'function_call_output: ' + receipt_output(call_id, agent_meta, envelope: envelope)
+      lines << 'function_call_output: ' + receipt_output(call_id, meta, envelope: envelope)
     end
     lines.concat(Array(extra)) if extra
     lines << 'assistant: done'
@@ -126,12 +125,12 @@ module AgentMetaFixtures
 
   # Fixture H: the output content is the standard truncation exception JSON
   # (error: :truncated) exactly as LLM.process_calls serializes it, while the
-  # agent_meta receipts survive in the same envelope.
-  def truncated_receipt_chat(call_id, agent_meta, name: 'ask', characters: 90_000)
+  # receipts survive in the same envelope.
+  def truncated_receipt_chat(call_id, meta, name: 'ask', characters: 90_000)
     exception_msg = "Function #{name} #{call_id} was executed successfully, but it returned #{characters} characters, which is more than the maximum of 30000. To protect the model context window this result was not returned."
     content = {exception: exception_msg, stack: ['a', 'b']}.to_json
     payload = {name: name, content: content, id: call_id, error: :truncated,
-               agent_meta: agent_meta}.to_json
+               meta: meta}.to_json
     "user: Run\n" +
       %({"name":"#{name}","arguments":{},"id":"#{call_id}"}).sub(/^/, 'function_call: ') + "\n" +
       "function_call_output: #{payload}\n" +

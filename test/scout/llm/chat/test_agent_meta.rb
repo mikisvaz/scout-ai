@@ -2,15 +2,16 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require 'scout/llm/chat'
 
 class TestChatAgentMeta < Test::Unit::TestCase
+
   def chat(text)
     Chat.setup(LLM.messages(text))
   end
 
   # Build persisted-style chat text with one paired tool call whose output
-  # envelope carries a receipt.  Legacy format uses the `agent_meta` key with
-  # serialized meta messages; the current format uses the `meta` key with an
-  # array of already-deserialized field Hashes (as LLM.process_calls now
-  # writes for delegated agents).
+  # envelope carries a receipt under the `meta` key with an array of
+  # already-deserialized field Hashes (as LLM.process_calls writes for
+  # delegated agents).  The `agent_meta` kwarg forces the LEGACY envelope
+  # key; the current reader does not accept it (deliberate breakage).
   def receipt_text(agent_meta: nil, meta: nil, name: 'ask', call_id: 'call-1', content: 'child answer')
     envelope = {name: name, content: content, id: call_id}
     envelope[:agent_meta] = agent_meta unless agent_meta.nil?
@@ -22,7 +23,7 @@ function_call_output: #{envelope.to_json}
     EOF
   end
 
-  # Current-format equivalent of `valid_receipt`
+  # Current-format receipt: `meta` key carrying deserialized field Hashes.
   def valid_meta_receipt
     receipt_text(meta: [
       {'pt' => 100, 'ct' => 50, 'tt' => 150, 'inference_id' => 'aaa'},
@@ -30,15 +31,8 @@ function_call_output: #{envelope.to_json}
     ])
   end
 
-  def valid_receipt
-    receipt_text(agent_meta: [
-      {role: 'meta', content: 'pt=100 ct=50 tt=150 inference_id=aaa'},
-      {role: 'meta', content: 'job=Worker/ask/Default_x'}
-    ])
-  end
-
   def test_extracts_valid_receipt_entries
-    evidence = Chat.agent_meta_evidence(chat(valid_receipt))
+    evidence = Chat.agent_meta_evidence(chat(valid_meta_receipt))
     assert_equal 2, evidence.length
 
     direct, projection = evidence
@@ -52,19 +46,19 @@ function_call_output: #{envelope.to_json}
     assert_equal 'ask', direct[:tool_name]
     assert_equal 0, direct[:agent_meta_index]
     assert_equal 2, direct[:output_address]
-    assert_equal [2, :agent_meta, 0], direct[:evidence_address]
+    assert_equal [2, :meta, 0], direct[:evidence_address]
     assert_nil direct[:source]
-    assert_equal({role: 'meta', content: 'pt=100 ct=50 tt=150 inference_id=aaa'}, direct[:raw_message])
+    assert_nil direct[:raw_message]
 
     assert_equal 1, projection[:agent_meta_index]
-    assert_equal [2, :agent_meta, 1], projection[:evidence_address]
+    assert_equal [2, :meta, 1], projection[:evidence_address]
     assert_equal 'Worker/ask/Default_x', projection[:meta][:job]
   end
 
   def test_extracts_receipt_entries_from_persisted_file_with_source
     TmpFile.with_dir do |dir|
       path = File.join(dir, 'parent.chat')
-      Open.write(path, valid_receipt)
+      Open.write(path, valid_meta_receipt)
       conversation = Chat.load(path)
 
       evidence = Chat.agent_meta_evidence(conversation, source: path)
@@ -73,11 +67,11 @@ function_call_output: #{envelope.to_json}
       direct = evidence.first
       assert_equal path, direct[:source]
       assert_equal [path, 2], direct[:output_address]
-      assert_equal [path, 2, :agent_meta, 0], direct[:evidence_address]
+      assert_equal [path, 2, :meta, 0], direct[:evidence_address]
       assert_equal 'call-1', direct[:call_id]
       assert_equal 'ask', direct[:tool_name]
 
-      assert_equal [path, 2, :agent_meta, 1], evidence.last[:evidence_address]
+      assert_equal [path, 2, :meta, 1], evidence.last[:evidence_address]
     end
   end
 
@@ -94,7 +88,7 @@ assistant: Hi
 
   def test_agent_meta_not_an_array_is_skipped_with_warning
     warnings = []
-    evidence = Chat.agent_meta_evidence(chat(receipt_text(agent_meta: 'oops')), warnings: warnings)
+    evidence = Chat.agent_meta_evidence(chat(receipt_text(meta: 'oops')), warnings: warnings)
     assert_equal [], evidence
     assert_equal 1, warnings.length
 
@@ -110,7 +104,7 @@ assistant: Hi
 
   def test_non_hash_entry_is_skipped_with_warning
     warnings = []
-    evidence = Chat.agent_meta_evidence(chat(receipt_text(agent_meta: ['nonsense'])), warnings: warnings)
+    evidence = Chat.agent_meta_evidence(chat(receipt_text(meta: ['nonsense'])), warnings: warnings)
     assert_equal [], evidence
     assert_equal 1, warnings.length
     assert_equal :not_a_hash, warnings.first[:reason]
@@ -118,52 +112,8 @@ assistant: Hi
     assert_equal 'nonsense', warnings.first[:raw_entry]
   end
 
-  def test_entry_with_wrong_role_is_skipped_with_warning
-    warnings = []
-    agent_meta = [
-      {role: 'assistant', content: 'not a meta record'},
-      {role: 'meta', content: 'pt=1 tt=1 inference_id=keep'}
-    ]
-    evidence = Chat.agent_meta_evidence(chat(receipt_text(agent_meta: agent_meta)), warnings: warnings)
-    assert_equal 1, evidence.length
-    assert_equal 1, warnings.length
-    assert_equal :invalid_role, warnings.first[:reason]
-    assert_equal 0, warnings.first[:agent_meta_index]
-    assert_equal({ 'role' => 'assistant', 'content' => 'not a meta record' }, warnings.first[:raw_entry])
-    assert_equal [2, :agent_meta, 1], evidence.first[:evidence_address]
-  end
-
-  def test_entry_without_string_content_is_skipped_with_warning
-    warnings = []
-    agent_meta = [
-      {role: 'meta'},
-      {role: 'meta', content: 42},
-      {role: 'meta', content: 'pt=1 tt=1 inference_id=keep'}
-    ]
-    evidence = Chat.agent_meta_evidence(chat(receipt_text(agent_meta: agent_meta)), warnings: warnings)
-    assert_equal 1, evidence.length
-    assert_equal 2, warnings.length
-    assert_equal %i[invalid_content invalid_content], warnings.collect { |w| w[:reason] }
-    assert_equal 0, warnings.first[:agent_meta_index]
-    assert_equal 1, warnings.last[:agent_meta_index]
-  end
-
-  def test_unparseable_content_is_skipped_with_warning
-    warnings = []
-    evidence = Chat.agent_meta_evidence(chat(receipt_text(agent_meta: [{role: 'meta', content: 'no key value pairs here'}])), warnings: warnings)
-    assert_equal [], evidence
-    assert_equal 1, warnings.length
-    assert_equal :unparseable_meta, warnings.first[:reason]
-    assert_equal 0, warnings.first[:agent_meta_index]
-  end
-
-  def test_malformed_entries_are_skipped_without_warnings_kwarg
-    evidence = Chat.agent_meta_evidence(chat(receipt_text(agent_meta: [{role: 'assistant', content: 'x'}])))
-    assert_equal [], evidence
-  end
-
   def test_meta_evidence_combines_both_origins
-    text = valid_receipt + "\nmeta: pt=10 tt=12 inference_id=local1\nassistant: done\n"
+    text = valid_meta_receipt + "\nmeta: pt=10 tt=12 inference_id=local1\nassistant: done\n"
     conversation = chat(text)
 
     evidence = Chat.meta_evidence(conversation)
@@ -186,19 +136,19 @@ assistant: Hi
   def test_meta_evidence_preserves_source_addresses
     TmpFile.with_dir do |dir|
       path = File.join(dir, 'parent.chat')
-      Open.write(path, valid_receipt + "\nmeta: pt=10 tt=12 inference_id=local1\nassistant: done\n")
+      Open.write(path, valid_meta_receipt + "\nmeta: pt=10 tt=12 inference_id=local1\nassistant: done\n")
       conversation = Chat.load(path)
 
       evidence = Chat.meta_evidence(conversation, source: path)
       assert_equal [path, 3], evidence.first[:meta_address]
-      assert_equal [path, 2, :agent_meta, 0], evidence[1][:evidence_address]
-      assert_equal [path, 2, :agent_meta, 1], evidence[2][:evidence_address]
+      assert_equal [path, 2, :meta, 0], evidence[1][:evidence_address]
+      assert_equal [path, 2, :meta, 1], evidence[2][:evidence_address]
       assert evidence.all? { |record| record[:source] == path }
     end
   end
 
   def test_extraction_does_not_change_chat_contents
-    conversation = chat(valid_receipt + "\nmeta: pt=10 tt=12 inference_id=local1\nassistant: done\n")
+    conversation = chat(valid_meta_receipt + "\nmeta: pt=10 tt=12 inference_id=local1\nassistant: done\n")
     before = conversation.collect { |message| [message[:role].to_s, message[:content].to_s] }
 
     Chat.agent_meta_evidence(conversation)
@@ -214,7 +164,7 @@ assistant: Hi
   end
 
   def test_agent_meta_job_references_returns_only_job_records
-    conversation = chat(valid_receipt)
+    conversation = chat(valid_meta_receipt)
     references = Chat.agent_meta_job_references(conversation)
 
     assert_equal 1, references.length
@@ -225,15 +175,15 @@ assistant: Hi
     assert_equal 'call-1', reference[:call_id]
     assert_equal 'ask', reference[:tool_name]
     assert_equal 1, reference[:agent_meta_index]
-    assert_equal [2, :agent_meta, 1], reference[:evidence_address]
+    assert_equal [2, :meta, 1], reference[:evidence_address]
 
     TmpFile.with_dir do |dir|
       path = File.join(dir, 'parent.chat')
-      Open.write(path, valid_receipt)
+      Open.write(path, valid_meta_receipt)
       with_source = Chat.agent_meta_job_references(Chat.load(path), source: path)
       assert_equal 1, with_source.length
       assert_equal 'Worker/ask/Default_x', with_source.first[:job]
-      assert_equal [path, 2, :agent_meta, 1], with_source.first[:evidence_address]
+      assert_equal [path, 2, :meta, 1], with_source.first[:evidence_address]
     end
   end
 
@@ -260,8 +210,8 @@ assistant: Hi
   end
 
   def test_agent_meta_is_not_limited_to_ask_tool
-    agent_meta = [{role: 'meta', content: 'pt=7 tt=7 inference_id=other'}]
-    evidence = Chat.agent_meta_evidence(chat(receipt_text(agent_meta: agent_meta, name: 'chat_task', call_id: 'call-9')))
+    meta_entries = [Chat.parse_meta('pt=7 tt=7 inference_id=other')]
+    evidence = Chat.agent_meta_evidence(chat(receipt_text(meta: meta_entries, name: 'chat_task', call_id: 'call-9')))
     assert_equal 1, evidence.length
     assert_equal 'chat_task', evidence.first[:tool_name]
     assert_equal 'call-9', evidence.first[:call_id]
@@ -293,10 +243,20 @@ assistant: Hi
     assert_equal :agent_meta, references.first[:origin]
   end
 
-  def test_mixed_keys_meta_wins
-    text = receipt_text(meta: [{'tt' => 1}],
-                        agent_meta: [{role: 'meta', content: 'tt=2'}])
-    evidence = Chat.agent_meta_evidence(chat(text))
+  # Deliberate breakage (plan B2): the legacy `agent_meta` envelope key is no
+  # longer accepted.  A legacy-only receipt produces NO evidence at all, and a
+  # mixed envelope ignores the legacy key entirely.
+  def test_legacy_agent_meta_envelope_produces_no_evidence
+    legacy_only = receipt_text(agent_meta: [{role: 'meta', content: 'pt=100 tt=150 inference_id=aaa'}])
+    warnings = []
+    assert_equal [], Chat.agent_meta_evidence(chat(legacy_only), warnings: warnings)
+    assert_empty warnings, 'the legacy key is not a receipt: nothing to warn about'
+
+    assert_equal [], Chat.agent_meta_job_references(chat(legacy_only))
+
+    mixed = receipt_text(meta: [{'tt' => 1}],
+                         agent_meta: [{role: 'meta', content: 'tt=2'}])
+    evidence = Chat.agent_meta_evidence(chat(mixed))
     assert_equal 1, evidence.length
     assert_equal 1, evidence.first[:meta][:tt]
     assert_equal :meta, evidence.first[:evidence_address][1]

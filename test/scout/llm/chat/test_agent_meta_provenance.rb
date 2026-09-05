@@ -235,19 +235,18 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
       chat = write_chat(dir, 'bad.chat',
                         receipt_chat_text(
                           {'b1' => 'not-an-array',
-                           'b2' => [{role: 'assistant', content: 'pt=1 tt=2'},
-                                    meta_receipt('no parseable pairs at all')],
-                           'b3' => [meta_receipt('also not parseable')]}
+                           'b2' => ['plain-string-entry', Chat.parse_meta('pt=1 tt=2')],
+                           'b3' => [{}]}
                         ))
 
       errors = []
       visits = Chat.traverse_provenance(chat, on_error: ->(*args) { errors << args }).to_a
 
-      assert_equal 4, errors.length
+      assert_equal 3, errors.length
       reasons = errors.collect { |_error, _kind, _object, _relation, reference| reference[:reason] }
       assert_include reasons, :not_an_array
-      assert_include reasons, :invalid_role
-      assert_equal 2, reasons.count(:unparseable_meta)
+      assert_include reasons, :not_a_hash
+      assert_include reasons, :empty_meta
 
       errors.each do |error, kind, object, relation, reference|
         assert_kind_of ScoutException, error
@@ -271,11 +270,11 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
       assert_equal [chat, 2], not_an_array.last[:output_address]
       assert_nil not_an_array.last[:evidence_address]
       assert_nil not_an_array.last[:agent_meta_index]
-      invalid_role = errors.find { |_e, _k, _o, _r, ref| ref[:reason] == :invalid_role }
-      assert_equal [chat, 4, :agent_meta, 0], invalid_role.last[:evidence_address]
-      assert_equal 0, invalid_role.last[:agent_meta_index]
-      unparseable = errors.find { |_e, _k, _o, _r, ref| ref[:reason] == :unparseable_meta && ref[:output_address] == [chat, 4] }
-      assert_equal [chat, 4, :agent_meta, 1], unparseable.last[:evidence_address]
+      not_a_hash = errors.find { |_e, _k, _o, _r, ref| ref[:reason] == :not_a_hash }
+      assert_equal [chat, 4, :meta, 0], not_a_hash.last[:evidence_address]
+      assert_equal 0, not_a_hash.last[:agent_meta_index]
+      empty_meta = errors.find { |_e, _k, _o, _r, ref| ref[:reason] == :empty_meta }
+      assert_equal [chat, 6, :meta, 0], empty_meta.last[:evidence_address]
 
       # Nothing malformed was silently used as provenance.
       assert_equal 1, visits.length
@@ -335,7 +334,7 @@ TXT
       unresolved = errors.collect(&:last).select { |ref| ref[:reason] == :unresolved_job_reference }
       assert_equal 1, unresolved.length
       assert_equal missing, unresolved.first[:reference]
-      assert_equal [chat, 2, :agent_meta, 0], unresolved.first[:evidence_address]
+      assert_equal [chat, 2, :meta, 0], unresolved.first[:evidence_address]
       assert_equal 'u1', unresolved.first[:call_id]
       assert_equal 'ask', unresolved.first[:tool_name]
 
@@ -391,12 +390,12 @@ TXT
   def test_strict_mode_raises_on_malformed_receipt
     TmpFile.with_dir do |dir|
       chat = write_chat(dir, 'strict-bad.chat',
-                        receipt_chat_text({'s1' => [{role: 'assistant', content: 'x'}]}))
+                        receipt_chat_text({'s1' => ['not-a-hash-entry']}))
 
       error = assert_raise(ScoutException) do
         Chat.traverse_provenance(chat).to_a
       end
-      assert_match(/invalid_role/, error.message)
+      assert_match(/not_a_hash/, error.message)
     end
   end
 

@@ -222,21 +222,15 @@ module LLM
         content = case content
                   when Hash
                     # ScoutCoder: When the response of the function contains a
-                    # Hash with only two keys, content and meta or content and
-                    # agent_meta treat it as content with inference meta. Extract
-                    # accordingly.
+                    # Hash with exactly two keys, content and meta, treat it as
+                    # content with inference meta. Extract accordingly.
                     content = IndiferentHash.setup(content)
                     keys = content.keys.collect{|k| k.to_s }
                     if keys.sort == %w(meta content)
-                      # New inbound shape: `meta` is already the deserialized
-                      # receipt array; pass it through verbatim.
+                      # `meta` is the deserialized receipt array; pass it
+                      # through verbatim.
                       meta, content = content.values_at :meta, :content
                       content
-                    elsif keys.sort == %w(agent_meta content)
-                      # Legacy inbound shape: serialized meta messages;
-                      # normalize them into the new deserialized form.
-                      meta = LLM.meta_receipt_from_messages(content[:agent_meta])
-                      content[:content]
                     else
                       content.to_json
                     end

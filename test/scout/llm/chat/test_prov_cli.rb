@@ -137,8 +137,8 @@ class TestProvCLI < Test::Unit::TestCase
       end
 
       # Receipt evidence keeps its parent output address and call id.
-      assert_match(/agent_meta parent\.chat:2\[agent_meta,0\] call=a1/, out)
-      assert_match(/agent_meta parent\.chat:2\[agent_meta,1\] call=a1/, out)
+      assert_match(/agent_meta parent\.chat:2\[meta,0\] call=a1/, out)
+      assert_match(/agent_meta parent\.chat:2\[meta,1\] call=a1/, out)
 
       # Chat-side evidence for the merged events.
       assert_match(/chat_meta agent\.chat:3/, out)
@@ -240,7 +240,7 @@ class TestProvCLI < Test::Unit::TestCase
 
   def test_malformed_receipt_renders_with_warning
     TmpFile.with_dir do |dir|
-      payload = {'id' => 'bad1', 'result' => 'x', 'agent_meta' => 'oops'}
+      payload = {'id' => 'bad1', 'result' => 'x', 'meta' => 'oops'}
       text = "user: hi\n" +
              'function_call: ' + %({"name":"ask","arguments":{},"id":"bad1"}) + "\n" +
              'function_call_output: ' + JSON.generate(payload) + "\n" +
@@ -278,7 +278,7 @@ class TestProvCLI < Test::Unit::TestCase
       assert status.success?
       # Legacy receipt events show their receipt location instead of the raw
       # address array, and they are flagged as possibly overcounted.
-      assert_match(/receipt=legacy\.chat:2\[agent_meta,0\]/, out)
+      assert_match(/receipt=legacy\.chat:2\[meta,0\]/, out)
       assert_include out, 'legacy unresolved'
       assert_not_include out, 'receipt=["', out
     end
@@ -354,22 +354,33 @@ class TestProvCLI < Test::Unit::TestCase
     end
   end
 
-  # Legacy `agent_meta` receipts must keep producing delegated children too
-  # (the same lifter path, different envelope key).
-  def test_job_root_legacy_agent_meta_receipt_children
+  # Deliberate breakage (plan B2): the legacy `agent_meta` envelope key is no
+  # longer read.  A worker log whose job= receipts travel under the legacy key
+  # produces NO delegated children (old chats intentionally lose those edges).
+  def test_job_root_legacy_agent_meta_receipt_has_no_children
     TmpFile.with_dir do |dir|
       child = make_job(dir, 'Worker/ask/Default_legacy')
       worker_log = receipt_chat_text(
-        {'l1' => [{role: 'meta', content: "job=#{child}"}]}
+        {'l1' => [{role: 'meta', content: "job=#{child}"}]},
+        envelope: :agent_meta
       )
-      # force the legacy key by hand: receipt_chat_text always writes agent_meta
-      text = worker_log.gsub('"agent_meta"', '"agent_meta"')
       worker = make_job(dir, 'Planned/work/Default_wl',
-                        logs: {'agent.chat' => text})
+                        logs: {'agent.chat' => worker_log})
 
       out, _err, status = prov(worker)
       assert status.success?
-      assert_match(/delegated-job .*Default_legacy/, out)
+      assert_not_include out, 'Default_legacy', out
+      assert_not_include out, 'delegated-job', out
+
+      # The same receipt under the current `meta` key DOES produce the child.
+      current = receipt_chat_text(
+        {'l1' => [{'job' => child}]}
+      )
+      worker2 = make_job(dir, 'Planned/work/Default_wc',
+                        logs: {'agent.chat' => current})
+      out2, _err, status2 = prov(worker2)
+      assert status2.success?
+      assert_match(/delegated-job .*Default_legacy/, out2)
     end
   end
 

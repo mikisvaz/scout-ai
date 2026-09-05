@@ -45,8 +45,8 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
                      .sort_by { |event| event[:inference_id] }
                      .collect { |event| event[:evidence].first }
 
-      assert_equal [parent, 2, :agent_meta, 0], evidence.first[:evidence_address]
-      assert_equal [parent, 2, :agent_meta, 1], evidence.last[:evidence_address]
+      assert_equal [parent, 2, :meta, 0], evidence.first[:evidence_address]
+      assert_equal [parent, 2, :meta, 1], evidence.last[:evidence_address]
       assert_equal %w[a1 a1], evidence.collect { |record| record[:call_id] }
       assert_equal %w[ask ask], evidence.collect { |record| record[:tool_name] }
       assert_equal parent, evidence.first[:source]
@@ -113,7 +113,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
         chat_side = event[:evidence].find { |record| record[:origin] == :chat_meta }
         receipt_side = event[:evidence].find { |record| record[:origin] == :agent_meta }
         assert_equal File.join(worker + '.files', 'agent.chat'), chat_side[:source]
-        assert_equal [parent, 2, :agent_meta, event[:inference_id] == 'w1' ? 0 : 1],
+        assert_equal [parent, 2, :meta, event[:inference_id] == 'w1' ? 0 : 1],
                      receipt_side[:evidence_address]
         assert !event[:conflict]
       end
@@ -451,7 +451,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
 
       unresolved = warnings.last
       assert_equal missing, unresolved[:reference]
-      assert_equal [chat, 4, :agent_meta, 0], unresolved[:evidence_address]
+      assert_equal [chat, 4, :meta, 0], unresolved[:evidence_address]
       assert_equal 'b2', unresolved[:call_id]
       assert_match(/unresolved_job_reference/, unresolved[:message])
     end

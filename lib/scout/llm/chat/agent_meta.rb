@@ -28,23 +28,17 @@ module Chat
   # provenance analysis: plain Arrays and Hashes in and out, no wrapper
   # classes, no mutation of the inspected chat.
   #
-  # Two receipt formats are accepted (the envelope is generic: any tool
-  # output may carry one, so nothing here special-cases a tool name such as
-  # `ask`):
+  # The envelope is generic: any tool output may carry one, so nothing here
+  # special-cases a tool name such as `ask`.
   #
-  #   meta (current):  {"meta": [{"pt": 10, "inference_id": "w1"}, ...]}
+  #   {"meta": [{"pt": 10, "inference_id": "w1"}, ...]}
   #     Entries are ALREADY-DESERIALIZED field Hashes (no role/content
   #     wrapper, no re-parsing).  Evidence addresses use the [:meta, index]
   #     suffix, mirroring the persisted key.  raw_message is nil.
   #
-  #   agent_meta (legacy):  {"agent_meta": [{"role": "meta", "content": "pt=10 ..."}, ...]}
-  #     Serialized meta messages; each content String is parsed with
-  #     Chat.parse_meta.  Evidence addresses keep the [:agent_meta, index]
-  #     suffix and raw_message is {role: 'meta', content: <String>} so old
-  #     data stays addressable exactly as it always was.
-  #
-  # When both keys are present in one envelope the `meta` key wins (current
-  # writer emits exactly one of the two).
+  # The legacy `agent_meta` key (serialized meta messages) is no longer
+  # accepted: envelopes carrying it are simply not receipts and produce no
+  # evidence at all.
 
   # One Hash per valid agent_meta entry found across the paired tool outputs
   # of the chat.  Pairing is delegated to Chat.tool_calls; raw text is never
@@ -57,13 +51,11 @@ module Chat
   #     meta: <IndiferentHash of meta fields>,
   #     source: <String path or nil>,
   #     output_address: <as returned by Chat.tool_calls>,
-  #     evidence_address: <output_address + [:agent_meta, index]> (legacy
-  #                       entries; current-format entries use [:meta, index]),
+  #     evidence_address: <output_address + [:meta, index]>,
   #     call_id: ...,
   #     tool_name: ...,
   #     agent_meta_index: ...,
-  #     raw_message: {role: "meta", content: "..."} (legacy; nil for
-  #                  current-format entries, which are born deserialized)
+  #     raw_message: nil (entries are born deserialized)
   #   }
   #
   # Malformed data is skipped.  When the caller supplies an Array through the
@@ -71,8 +63,7 @@ module Chat
   #
   #   {
   #     origin: :agent_meta,
-  #     reason: :not_an_array | :not_a_hash | :invalid_role |
-  #             :invalid_content | :unparseable_meta | :empty_meta,
+  #     reason: :not_an_array | :not_a_hash | :empty_meta,
   #     source:, output_address:, evidence_address:,
   #     call_id:, tool_name:,
   #     agent_meta_index: (nil when the whole receipt value is malformed),
@@ -80,28 +71,23 @@ module Chat
   #     raw_entry: <the malformed item as found>
   #   }
   #
-  # :empty_meta applies to current-format entries (deserialized field Hash
-  # with no fields).  Malformed receipt data is never silently reinterpreted
+  # :empty_meta applies to deserialized field Hashes with no fields.
+  # Malformed receipt data is never silently reinterpreted as provenance.
   # as provenance.
   def self.agent_meta_evidence(chat, source: nil, warnings: nil)
     tool_calls(chat, source: source).flat_map do |call|
       output_info = call[:output_info]
       next [] unless Hash === output_info
 
-      # Key presence, not truthiness: an explicit `meta: false` or
-      # `agent_meta: nil` is a present-but-malformed receipt and must warn,
-      # while an absent key simply has no receipt at all.
-      has_meta = output_info.key?('meta') || output_info.key?(:meta)
-      has_agent_meta = output_info.key?('agent_meta') || output_info.key?(:agent_meta)
-      next [] unless has_meta || has_agent_meta
+      # Key presence, not truthiness: an explicit `meta: false` or `meta:
+      # nil` is a present-but-malformed receipt and must warn, while an
+      # absent key simply has no receipt at all. The legacy `agent_meta` key
+      # is not accepted; envelopes carrying only it are not receipts.
+      next [] unless output_info.key?('meta') || output_info.key?(:meta)
 
-      # Current writer emits exactly one of the two; when both are present
-      # the current `meta` key wins and the legacy one is ignored.
-      format = has_meta ? :meta : :agent_meta
       agent_meta = output_info['meta']
       agent_meta = output_info[:meta] if agent_meta.nil? && output_info.key?(:meta)
-      agent_meta = output_info['agent_meta'] if format == :agent_meta && agent_meta.nil?
-      agent_meta = output_info[:agent_meta] if format == :agent_meta && agent_meta.nil?
+      format = :meta
 
       add_warning = lambda do |reason, index, raw_entry|
         return unless Array === warnings
@@ -138,43 +124,21 @@ module Chat
           next nil
         end
 
-        meta, raw_message =
-          if format == :meta
-            # Current format: entries are already-deserialized field Hashes.
-            # No role/content wrapper and no re-parse; an entry with no
-            # fields carries no evidence and is warned about.
-            fields = IndiferentHash.setup(entry.dup)
-            [fields, nil]
-          else
-            # Legacy format: serialized {role: 'meta', content: 'k=v ...'}
-            # meta messages.
-            role = entry['role'] || entry[:role]
-            content = entry['content'] || entry[:content]
-
-            if role.to_s != 'meta'
-              add_warning.call(:invalid_role, index, entry)
-              next nil
-            end
-
-            unless String === content
-              add_warning.call(:invalid_content, index, entry)
-              next nil
-            end
-
-            [parse_meta(content), { role: role, content: content }]
-          end
+        # Entries are already-deserialized field Hashes.  No role/content
+        # wrapper and no re-parse; an entry with no fields carries no
+        # evidence and is warned about.
+        meta = IndiferentHash.setup(entry.dup)
+        raw_message = nil
 
         if meta.empty?
-          reason = format == :meta ? :empty_meta : :unparseable_meta
-          add_warning.call(reason, index, entry)
+          add_warning.call(:empty_meta, index, entry)
           next nil
         end
 
         output_address = call[:output_address]
         # Without a source, Chat.tool_calls reports a bare message index; the
         # receipt address keeps the key-mirroring suffix so it stays truthful
-        # to the persisted envelope ([:meta, index] for current data,
-        # [:agent_meta, index] for legacy data).
+        # to the persisted envelope ([:meta, index]).
         evidence_address = if Array === output_address
                              output_address + [format, index]
                            else

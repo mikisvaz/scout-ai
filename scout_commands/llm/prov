@@ -547,7 +547,7 @@ if evidence
     return '' unless Array === address && address.any?
     rest = address[1..-1]
     base = address[0].nil? ? '?' : File.basename(address[0].to_s)
-    if rest.length >= 3 && (rest[1] == :agent_meta || rest[1] == :meta)
+    if rest.length >= 3 && rest[1] == :meta
       "#{base}:#{rest[0]}[#{rest[1]},#{rest[2]}]"
     else
       "#{base}:#{rest[0]}"
