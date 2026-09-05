@@ -56,12 +56,10 @@ that includes the `AgentWorkflow` mixin.
   semantics — only the messages produced by this run.
 - **Provenance includes the society tree**: `scout-ai llm prov` treats a job
   and a saved chat the same way here — both are scanned for conversations
-  under `<path>.files/`, namely `<path>.files/*.chat`,
-  `<path>.files/*.society/<agent>/<conversation>/` and the legacy
-  `<path>.files/log/**` (older scouts, still readable). A saved chat skips
-  only its own top-level copy at `<chat>.files/<name>.chat` (and the legacy
-  `<chat>.files/log/agent.chat`); society conversations keep the same
-  `agent.chat` name and are included.
+  under `<path>.files/`, namely `<path>.files/*.chat` and
+  `<path>.files/*.society/<agent>/<conversation>/`. A saved chat skips
+  only its own top-level copy at `<chat>.files/<name>.chat`;
+  society conversations keep the same `agent.chat` name and are included.
 - **Lazy society tree**: delegated specialist conversations, if any, are
   saved under `<job>.files/<name>.society/<agent_name>/<conversation>/…`, but
   only when they exist. Nothing is created eagerly — no job starts with an

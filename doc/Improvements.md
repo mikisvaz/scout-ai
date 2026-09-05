@@ -174,6 +174,84 @@ the canonical reference.
 
 ---
 
+## Refactor Log
+
+Resolved entries from the delegation-machinery refactor (steps tracked in the
+Cortex artifacts `refactor/delegation-conversation-pipeline.md` and
+`refactor/delegation-execution-reference.md`):
+
+### R1. Shared tool-definition builder and strict schemas
+
+The four hand-built JSON-schema tool definition sites (delegate `hand_off_to_*`,
+`ask`, `attach`, workflow tasks) now build through one helper,
+`LLM.tool_definition` in `lib/scout/llm/tools/definition.rb` (envelope/strict/
+defaults aware). All four sites emit strict schemas
+(`additionalProperties: false`); previously only two did. The `defaults`
+replay side-channel (`parameters[:defaults]`, consumed by
+`LLM.process_calls`) is preserved.
+
+### R2. Conversation-open pipeline
+
+The specialist setup sequence that lived inline in `delegate.rb`
+(template resolve, seed, anchor, register, restart) is now
+`Agent#open_conversation` in `lib/scout/llm/agent/conversation.rb`, with
+`ask_conversation` as the prompt-appending companion and `load_agent`/
+`load_chat`/`ask_agent` as thin wrappers. New kwargs: `preamble:`, `anchor:`,
+`restart:`, `template:`, `adopt: :current` (folds a template's own progress
+into the seed), `job:` (reserved).
+
+### R3. Delegate default hand-off block rebuilt on the pipeline
+
+The default `delegate` block no longer mutates the passed agent. It runs
+`ask_conversation` with a sanitized conversation slot (the delegated name),
+`inherit: 'none'`, `template:` the passed agent, `adopt: :current`, and
+`restart:` from `new_conversation`. Hand-off children persist under
+`<save>.society/<Agent>/<slot>/agent.chat` and are swept by the parent save;
+the live conversation is reachable with `conversation_agent("<name>/<slot>")`.
+Custom blocks and non-Agent objects keep the direct-mutation contract; the
+passed Agent is pre-registered as the `@society` template for its name. A
+failed hand-off now returns the exception instead of aborting the tool round.
+
+### R4. First-round anchoring for workflow agents
+
+`AgentWorkflow#agent` (chat_task agents) assigns the agent's canonical
+`<files_dir>/<name>.chat` save file at creation via
+`Agent.canonical_chat_file`, so autosave and restart snapshots apply from the
+first round; mid-round socialized children get a real parent anchor. The
+`scout-ai agent ask` and `scout-ai llm ask` CLIs route through the same
+helper; `LLM.ask`'s `agent_save_file` option stays a caller-supplied explicit
+path (deliberately unconverted).
+
+### R5. Duplicate-agent answer attribution fixed
+
+`LLM.process_calls` paired tool outputs with agent answers via
+`agents.index(content)` (object identity); when the same Agent object answered
+two calls in one round (two `ask` calls to the same conversation, or two
+hand-offs to the same specialist), both outputs embedded the first answer.
+Pairing is now by tool-call position. Regression test:
+`test/scout/llm/tools/test_agent_pairing.rb`.
+
+### R6. Legacy `.files/log` layouts dropped (breaking)
+
+Reader-side support for `<save>.files/log/agent.chat` and
+`<save>.files/log/chats/<Agent>/<conversation>.chat` (and the
+`log/society/...` variant) is removed: provenance traversal, meta sidecar
+sweep, the `prov` CLI, and `Agent.legacy_society_dir_for` no longer see that
+tree. Nothing wrote it anymore; old trees are not migrated and are now
+invisible to provenance. Canonical layouts unchanged:
+`<files_dir>/<name>.chat` and `<save>.society/<Agent>/<conversation>/agent.chat`.
+
+### R7. Receipt field `agent_meta` renamed to `meta` (breaking)
+
+`function_call_output` receipts carry agent evidence under `meta` (an Array
+of already-deserialized field Hashes); the legacy serialized `agent_meta`
+key is no longer read, so legacy envelopes contribute no receipt evidence
+(and no warnings). Ruby identifiers (`agent_meta.rb`, `Chat.agent_meta_evidence`,
+`agent_meta_index`, the `:agent_meta` origin symbol) are unchanged — they
+name the machinery, not the persisted field.
+
+---
+
 ## Anti-patterns to Watch For
 
 These anti-patterns are drawn from the Scout-AI coding philosophy

@@ -14,16 +14,20 @@ framework contributors.
 
 ## Overview
 
-Delegation is implemented in `lib/scout/llm/agent/delegate.rb` (323 lines). It
-provides two mechanisms for one Agent to invoke another:
+Delegation is implemented in `lib/scout/llm/agent/delegate.rb` and the shared
+conversation pipeline in `lib/scout/llm/agent/conversation.rb` (moved there
+from `delegate.rb`; tool definitions are built by `LLM.tool_definition` in
+`lib/scout/llm/tools/definition.rb`). It provides two mechanisms for one
+Agent to invoke another:
 
 1. **`socialize`** — Registers a generic `ask` tool that lets the LLM delegate
    to any specialist agent by name at runtime.
 2. **`delegate`** — Registers a named `hand_off_to_<name>` tool for a specific,
    pre-loaded Agent instance.
 
-Both mechanisms build on a common infrastructure: the **template-clone
-pattern**, the **socialized chat store**, and the **inheritance modes**.
+Both mechanisms build on a common infrastructure: the **open_conversation
+pipeline**, the **template-clone pattern**, the **socialized chat store**, and
+the **inheritance modes**.
 
 ---
 
@@ -106,15 +110,8 @@ location from the save target of the *parent* agent:
   included even though they are also named `agent.chat`. Job roots keep
   their own top-level `<name>.chat` as a normal log node (renderers hide
   it), and the `:log` relation covers exactly
-  `*.files/*.chat`, `*.files/*.society/**/*.chat` and the legacy
-  `*.files/log/**/*.chat`, so `resets/` snapshots stay out.
-
-**Legacy layout (read-only).** Older scout-ai wrote
-`<chat>.files/log/agent.chat` and the society tree under
-`<chat>.files/log/society/<agent_name>/<conversation>/agent.chat`. Nothing
-writes there anymore, old files are never migrated, and provenance
-traversal still globs `log/**/*.chat` so chats saved by those versions
-remain visible.
+  `*.files/*.chat` and `*.files/*.society/**/*.chat`, so `resets/` snapshots
+  stay out.
 
 An agent with no live society writes only its own chat file and creates no
 `.files` tree at all; parent directories are created on demand by
@@ -123,14 +120,44 @@ parent save, so later independent child turns keep auto-saving in place.
 Saves are cycle-safe (visited paths + seen agents + a depth limit of 32) and
 non-fatal: a failure is logged as a warning and the run continues.
 
-### `load_chat` — get-or-create
+### The `open_conversation` pipeline — get-or-create
+
+All setup goes through one method (in `lib/scout/llm/agent/conversation.rb`),
+which runs five ordered steps:
 
 ```ruby
-def load_chat(agent_name, options = {}, conversation = nil, inherit: 'tools')
-  key = social_chat_key(agent_name, conversation)   # "Worker/work_A"
-  @chats[key] ||= start_social_chat(agent_name, options, inherit)
-end
+open_conversation(name, conversation: 'default', inherit: 'tools', options: {},
+                  preamble: nil, anchor: nil, restart: false,
+                  template: nil, adopt: nil, job: nil)
 ```
+
+1. **Resolve template** — an explicit `template:` (a pre-built Agent) wins;
+   otherwise `load_agent(name, options)` loads and caches one immutable
+   template per specialist in `@society`.
+2. **Seed** — clone via `clone_social_agent`, then build the initial chat:
+   the specialist's own `start_chat` copy, optionally the adopted template
+   delta (`adopt: :current` folds the template's progress beyond its own
+   `start_chat` into the seed), then the inherited context per `inherit:`,
+   then any `preamble:`.
+3. **Anchor** — `agent.save_file = anchor || society_save_file(name,
+   conversation)` is assigned at creation, so autosave and `restart:`
+   snapshots apply from the first round.
+4. **Register** — `@chats["<name>/<conversation>"] ||= agent`.
+5. **Restart** — `restart: true` re-branches the existing conversation in
+   place (start_chat kept, tail dropped); no new key is minted.
+
+`load_chat`, `load_agent`, and `ask_agent` remain as thin wrappers over this
+pipeline, and `ask_conversation` is the prompt-appending companion.
+`conversation_agent(key)` returns the registered live conversation (nil when
+absent). The `delegate` default hand-off block uses exactly this pipeline
+(conversation slot = the delegated name, `inherit: 'none'`, `template:` the
+passed agent, `adopt: :current`, `restart:` from `new_conversation`), so
+hand-off children persist under
+`<save>.society/<agent>/<slot>/agent.chat` and are swept by the parent save;
+the passed agent object is only the template, not the conversation holder.
+Custom blocks and non-Agent duck objects keep the legacy direct-mutation
+contract. The passed Agent is also pre-registered in `@society[name] ||=`,
+making it the template for later `ask` calls to that name.
 
 The `inherit` parameter is only consulted **once** — when the conversation is
 first created. Follow-up turns reuse the existing conversation with its
@@ -228,7 +255,7 @@ messages: the child's inference metadata and producer job reference are read
 from the paired tool output and never injected into the parent chat. Provenance
 tooling consumes them through `Chat.agent_meta_evidence` and the `:agent_job`
 relation; see [Provenance.md](Provenance.md) for the extraction, precedence
-(current `meta` over legacy `agent_meta`), and accounting rules.
+(the `meta` key only; the legacy `agent_meta` envelope is no longer read), and accounting rules.
 
 ---
 

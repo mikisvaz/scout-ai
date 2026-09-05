@@ -57,7 +57,7 @@ timestamp, `_1`, `_2`, … suffixes on name collisions) before clearing it. The
 snapshot is lazy — no reset directory is created when there is nothing to
 snapshot — and non-fatal if it fails. Reset snapshots live directly under
 `.files`, in none of the three directories the `:log` relation sweeps
-(`*.files/*.chat`, `*.files/*.society/**`, the legacy `*.files/log/**`), so
+(`*.files/*.chat`, `*.files/*.society/**`), so
 provenance traversal ignores them: they are recovery artifacts, not logs.
 
 ### Adding messages
@@ -123,10 +123,6 @@ The canonical layout is decided by *location*, not configuration:
 - `chat_task` jobs and `scout-ai agent ask` always write the agent's own chat
   at `<chat_or_job_path>.files/<name>.chat`: `agent.chat` for the default
   agent, `worker.chat`/`critic.chat` for named ones.
-
-**Legacy layout (read-only).** Older versions wrote
-`<path>.files/log/agent.chat` and `log/society/…`. Nothing writes there
-anymore, old files are not migrated, and provenance still reads them.
 
 Saving is lazy (nothing is created eagerly; parent directories are created on
 demand) and non-fatal (a failure logs a warning and the run continues). Cycle

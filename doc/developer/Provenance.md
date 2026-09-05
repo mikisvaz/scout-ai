@@ -20,7 +20,7 @@ The structural relations are:
 | chat | `job` | job | A projected response was produced by a Workflow job. |
 | chat | `agent_job` | job | A delegated tool call returned an agent whose receipt entry carries a `job` field naming the producer job. |
 | job | `dependency` | job | A normal Scout Workflow dependency. |
-| job | `log` | chat | A persisted agent conversation under `.files/*.chat`, `.files/*.society/**/*.chat`, or the legacy `.files/log/**/*.chat`. |
+| job | `log` | chat | A persisted agent conversation under `.files/*.chat` or `.files/*.society/**/*.chat`. |
 | chat | `log` | chat | A saved agent conversation under the chat's own `.files` sidecar, same three families (root copy excluded). |
 | job | `result` | chat | The job result is itself a chat file. |
 
@@ -30,14 +30,13 @@ The `log` relation covers exactly three file families under `.files`, nothing el
 
 - `.files/*.chat` — the new top-level chat files (`agent.chat` by default, `worker.chat`/`critic.chat` for named agents);
 - `.files/*.society/**/*.chat` — the new society tree (nested societies keep the plain `society` basename deeper down);
-- `.files/log/**/*.chat` — the **legacy** layout, still read for back-compat; nothing writes it anymore and old files are never migrated.
 
 Restart snapshots written by `Agent#start` live under `.files/resets/<timestamp>.chat`, directly under `.files` and **outside** all three families: they are recovery artifacts, not logs, and provenance traversal does not follow them, for jobs and for chats alike. Results of both layouts are de-duplicated and sorted, so a files dir holding both layouts is visited exactly once per chat.
 
 The two `log` parents are deliberately asymmetric:
 
-- a **job** root includes its own top-level `<job>.files/<name>.chat` (`agent.chat` and friends, and the legacy `<job>.files/log/agent.chat`) as a real log node; renderers such as `scout-ai llm prov` hide it from the tree because it duplicates the job node itself;
-- a **chat** root excludes its root copy — every top-level `<save_file>.files/<name>.chat` and the legacy `<save_file>.files/log/agent.chat` — because the save mechanism writes a full copy of the root conversation there and including it would duplicate the root as its own child. The exclusion is for the **top level** only: society conversations under `<name>.society/<agent>/<conversation>/agent.chat` (and the legacy `log/society/<agent>/<conversation>/agent.chat`) are also named `agent.chat` and **are** included.
+- a **job** root includes its own top-level `<job>.files/<name>.chat` (`agent.chat` and friends) as a real log node; renderers such as `scout-ai llm prov` hide it from the tree because it duplicates the job node itself;
+- a **chat** root excludes its root copy — every top-level `<save_file>.files/<name>.chat` — because the save mechanism writes a full copy of the root conversation there and including it would duplicate the root as its own child. The exclusion is for the **top level** only: society conversations under `<name>.society/<agent>/<conversation>/agent.chat` are also named `agent.chat` and **are** included.
 
 Imported and continued chats are **not** provenance relations. They are a chat-compilation concern resolved during `Chat.parse` and `LLM.chat`. The persisted `.chat` file already contains the full inlined conversation. Provenance traversal therefore never follows `import`, `continue`, or `last` chat references.
 
@@ -95,7 +94,7 @@ Thin collectors use the same traversal:
 Direct readers do not recurse:
 
 - `Chat.direct_job_chat_files(job)` returns chat logs owned directly by a job;
-- `Chat.direct_chat_sidecar_files(path)` returns chat logs owned directly by a persisted chat's `.files` sidecar (all three families above), excluding the top-level root copies `<save_file>.files/<name>.chat` and the legacy `<save_file>.files/log/agent.chat`;
+- `Chat.direct_chat_sidecar_files(path)` returns chat logs owned directly by a persisted chat's `.files` sidecar (all three families above), excluding the top-level root copies `<save_file>.files/<name>.chat`;
 - `Chat.job_result_chat_file(job)` returns a chat result when present.
 
 Recursion belongs only to `traverse_provenance`.
@@ -186,11 +185,11 @@ Provider call IDs are scoped to a chat; do not assume they are globally unique a
 
 Calls named `ask` or `hand_off_to_*` provide semantic evidence of delegation. Workflow-backed calls have structural job/log links. A socialized call's association with a society log may still be inferred from naming conventions, so reports should label that association as inferred rather than authoritative.
 
-## Delegated agent receipts (`meta` / legacy `agent_meta`)
+## Delegated agent receipts (`meta`)
 
 When a tool returns an `LLM::Agent`, `LLM.process_calls` embeds the child agent's inference evidence in the parent `function_call_output` JSON envelope. The envelope is generic: it is produced for any tool returning an agent, not only for `ask`.
 
-Two receipt formats exist, and the reader accepts both:
+One receipt format exists; the reader accepts only it:
 
 - **Current format — the `meta` key.** The writer deserializes the child agent's `meta` messages (`LLM.meta_receipt_from_messages`) and emits an Array of plain field Hashes, each already parsed:
 
@@ -202,15 +201,7 @@ Two receipt formats exist, and the reader accepts both:
 
   The same `function_call_output` may also carry auxiliary fields next to the receipt: `step` (the producing step of the same execution), `start_timestamp`, and `timestamp`. They are bookkeeping only: the sole receipt-driven provenance edge source is the `job` field of a receipt entry (`meta[].job`); the `step` field is never followed as a parent-child edge.
 
-- **Legacy format — the `agent_meta` key.** Older data stores serialized meta messages:
-
-  ```
-  "agent_meta":[{"role":"meta","content":"pt=100 ct=50 tt=150 inference_id=aaa"}, ...]
-  ```
-
-  This shape is **no longer written**, but it is still read: each `content` String is parsed with `Chat.parse_meta`, so historical chats remain fully addressable.
-
-When both keys are present in one envelope the current `meta` key wins and the legacy one is ignored (the current writer emits exactly one of the two).
+A legacy serialized `agent_meta` key (Array of `{role: 'meta', content: '...'}` messages) is **no longer read**: envelopes carrying only that key contribute no receipt evidence and no warnings. Chats written by older versions lose their receipt-based provenance edges unless re-saved with the current shape.
 
 See [../../research/agent-meta-provenance-integration-plan.md](../../research/agent-meta-provenance-integration-plan.md) for the design record of the original (serialized) shape; the `meta` key replaced it in commit `efd8ebbc`.
 
@@ -218,28 +209,25 @@ Receipts are embedded provenance evidence, **not** parent-chat messages, and mus
 
 ### Receipt extraction helpers
 
-- `Chat.agent_meta_evidence(chat, source: nil, warnings: nil)` returns one Hash per valid receipt entry across the paired tool outputs of a chat. Pairing is delegated to `Chat.tool_calls`; raw text is never scanned. Records carry `origin: :agent_meta` (for **both** formats), the `meta` fields (already deserialized for current-format entries, parsed from the legacy content String for legacy entries), `source`, `output_address`, `evidence_address`, `call_id`, `tool_name`, `agent_meta_index`, and `raw_message`. The evidence address suffix mirrors the persisted key: `[:meta, index]` for current-format entries and `[:agent_meta, index]` for legacy ones, so an address always points at the JSON element that is actually on disk. `raw_message` is nil for current-format entries (they are born deserialized) and `{role:, content:}` for legacy entries.
+- `Chat.agent_meta_evidence(chat, source: nil, warnings: nil)` returns one Hash per valid receipt entry across the paired tool outputs of a chat. Pairing is delegated to `Chat.tool_calls`; raw text is never scanned. Records carry `origin: :agent_meta` (the receipt origin symbol, unrelated to the persisted field name), the `meta` fields (already deserialized when written), `source`, `output_address`, `evidence_address`, `call_id`, `tool_name`, and `agent_meta_index`; `raw_message` is always nil. The evidence address suffix is `[:meta, index]`, pointing at the JSON element that is actually on disk.
 - `Chat.meta_evidence(chat, source: nil, warnings: nil)` returns the local `meta` messages (`origin: :chat_meta`, with `meta_address`) followed by the receipt records.
 - `Chat.agent_meta_job_references(chat, source: nil, warnings: nil)` filters receipt records whose parsed meta has a `job` key and adds the reference at the top level as `job:`.
 
 Malformed receipts (the receipt key not holding an Array; an entry that is not a Hash, has the wrong role, has non-String content, parses to nothing, or — current format only — is a field Hash with no fields) are skipped and never reinterpreted as provenance. When the caller supplies a `warnings` Array, each malformed item appends one warning Hash with the reason, the output address, `call_id`, `tool_name`, and the raw entry. Warning reasons are:
 
-| Reason | Applies to | Meaning |
-|---|---|---|
-| `:not_an_array` | both | The receipt value is not an Array. |
-| `:not_a_hash` | both | An entry is not a Hash. |
-| `:invalid_role` | legacy | An entry's role is not `meta`. |
-| `:invalid_content` | legacy | An entry's content is not a String. |
-| `:unparseable_meta` | legacy | The content String parses to no fields. |
-| `:empty_meta` | current | An already-deserialized field Hash carries no fields. |
+| Reason | Meaning |
+|---|---|
+| `:not_an_array` | The receipt value is not an Array. |
+| `:not_a_hash` | An entry is not a Hash. |
+| `:empty_meta` | An already-deserialized field Hash carries no fields. |
 
-Malformed warnings mirror the persisted key in their `evidence_address`, and always carry `origin: :agent_meta` regardless of format.
+Malformed warnings carry `origin: :agent_meta` (the receipt origin symbol, unrelated to the persisted field name) and use `[:meta, index]` addresses.
 
 ### The `agent_job` relation
 
 `Chat::PROVENANCE_RELATIONS` includes `agent_job`: chat to delegated producer job, resolved from the `job` field of receipt entries (`meta[].job`; the auxiliary `step` field on the tool output is not an edge source). The child is a normal Step and follows `dependency`, `log`, and `result` as usual. A job reference whose Step path and `.info` sidecar both do not exist is not followed and is reported instead.
 
-Diagnostics go through `Chat.provenance_error` with relation `:agent_job`; the error itself is a plain `ScoutException` whose message is built by `Chat.agent_meta_error_message`, and every structured fact (enclosing chat path, tool output address, receipt address, call id, tool name, malformed entry, reference, reason) travels in the `on_error` reference Hash. In strict mode (no `on_error`) a malformed receipt raises; with `on_error` each problem is reported once per receipt, while the rest of the chat's provenance still expands. Only output JSON that parses to a Hash carrying an explicit receipt key (current `meta`, legacy `agent_meta`) is ever inspected: unparseable tool outputs are never scanned for the substring `agent_meta`.
+Diagnostics go through `Chat.provenance_error` with relation `:agent_job`; the error itself is a plain `ScoutException` whose message is built by `Chat.agent_meta_error_message`, and every structured fact (enclosing chat path, tool output address, receipt address, call id, tool name, malformed entry, reference, reason) travels in the `on_error` reference Hash. In strict mode (no `on_error`) a malformed receipt raises; with `on_error` each problem is reported once per receipt, while the rest of the chat's provenance still expands. Only output JSON that parses to a Hash carrying an explicit `meta` key is ever inspected: unparseable tool outputs are never scanned for the substring `meta`.
 
 ### Provenance-aware token accounting
 
@@ -291,9 +279,9 @@ The prompt axis is contiguous and uses one canonical field order in node lines a
 
 The bare unqualified `total=` printed inside `--component` scope lines and `--evidence` rows is retained deliberately as coverage-line vocabulary: it is never summed and is not a cost figure.
 
-Delegated calls are reported from receipts (current `meta` key or legacy `agent_meta` key; both formats are accepted transparently). The tree labels a job reached through a receipt as `delegated-job`, adds one `delegated receipt: N events, total=<tt>, <tools>` annotation line under chats that carry receipts, and `--component` prints `scope local:` / `scope receipt:` / `scope aggregate:` lines when receipt evidence exists. Flow and DOT render receipt edges as `delegated_result`.
+Delegated calls are reported from receipts (the `meta` key). The tree labels a job reached through a receipt as `delegated-job`, adds one `delegated receipt: N events, total=<tt>, <tools>` annotation line under chats that carry receipts, and `--component` prints `scope local:` / `scope receipt:` / `scope aggregate:` lines when receipt evidence exists. Flow and DOT render receipt edges as `delegated_result`.
 
-`--evidence` prints the deduplicated direct inference events behind the totals: identity, raw token values, evidence locations (parent output address plus call id), and status (`counted once`, `receipt-only`, `legacy unresolved`, `conflict`), followed by receipt-only, legacy-unresolved, identity-conflict, and job-projection sections. Receipt addresses print as `base:idx[meta,i]` for current-format entries and `base:idx[agent_meta,i]` for legacy ones, mirroring the persisted key. Receipt problems and identity conflicts are listed in the trailing warnings block.
+`--evidence` prints the deduplicated direct inference events behind the totals: identity, raw token values, evidence locations (parent output address plus call id), and status (`counted once`, `receipt-only`, `legacy unresolved`, `conflict`), followed by receipt-only, legacy-unresolved, identity-conflict, and job-projection sections. `legacy unresolved` marks receipt events with no identity to deduplicate on (no `inference_id`); it is an accounting status, not a format marker. Receipt addresses print as `base:idx[meta,i]`, mirroring the persisted key. Receipt problems and identity conflicts are listed in the trailing warnings block.
 
 ## ChatAnalyst
 

@@ -168,10 +168,7 @@ Persistence, however, differs slighly between the two CLIs:
   auto-save hook fires), and also appends the new messages to `<chat>`
   itself — a dual write. The `agent.chat` should contain also the agent
   instructions. Delegated society conversations, when they exist, are written
-  under `<chat>.files/<name>.society/<agent>/<conversation>/agent.chat`
-  (older versions used `<chat>.files/log/agent.chat` and
-  `<chat>.files/log/society/…`; those files are still read by provenance but
-  never written or migrated).
+  under `<chat>.files/<name>.society/<agent>/<conversation>/agent.chat`.
 - `scout-ai llm ask ... -c <chat>` accepts an `agent_save_file:` option
   internally, but `LLM.ask` currently extracts that option and drops it
   without applying it, unless an agent is defined inside the chat, in which

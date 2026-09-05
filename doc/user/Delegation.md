@@ -105,6 +105,14 @@ agent.delegate(worker, :worker, "Delegate work to the Worker agent")
 This creates a tool called `hand_off_to_worker`. The model calls it with a
 `message` parameter.
 
+Without a custom block, the hand-off runs on the shared conversation
+pipeline: the registered conversation is a clone of the passed agent,
+persisting under `<save>.society/<agent>/<conversation>/agent.chat`, and the
+passed agent object itself does not accumulate the conversation. Reuse the
+tool to continue that conversation (`new_conversation: true` re-branches it);
+reach the live conversation agent from Ruby with
+`conversation_agent("worker/default")`.
+
 ### Custom delegation blocks
 
 You can customize what happens when the tool is called:
