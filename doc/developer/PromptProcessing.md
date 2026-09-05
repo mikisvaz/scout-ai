@@ -7,7 +7,8 @@ contributors.
 > For the user-facing guide on what happens when contexts get long, see
 > [../user/ManagingContext.md](../user/ManagingContext.md).
 > For deep code investigation, see
-> [../../research/prompt-strategies-analysis.md](../../research/prompt-strategies-analysis.md).
+> [../../research/prompt-strategies-analysis.md](../../research/prompt-strategies-analysis.md)
+> (predates `shorten_tools_epoch_increment`; the code is the source of truth).
 
 ---
 
@@ -21,36 +22,37 @@ amounts of tokens.
 
 The system works by applying named "strategies" to the message array. Each
 strategy is a function that takes an Array of message hashes and returns a
-(possibly shorter or modified) Array.
+(possibly shorter or modified) Array of message hashes.
 
 ---
 
 ## File layout
 
-Strategy implementations live in `lib/scout/llm/prompt/`:
+Strategy implementations live in `lib/scout/llm/chat/prompt/`:
 
 ```
-lib/scout/llm/
-├── chat/
-│   └── prompt.rb              # Dispatcher: prepare_prompt, shared constants
+lib/scout/llm/chat/
+├── prompt.rb                        # Dispatcher: prepare_prompt, shared constants
 └── prompt/
-    ├── shorten_tools.rb       # Default strategy (recomputes each turn)
-    └── shorten_tools_epoch.rb # Cache-friendly epoch variant
+    ├── shorten_tools.rb             # Recomputes the truncation each turn
+    ├── shorten_tools_epoch.rb       # Cache-friendly epoch variant
+    ├── shorten_tools_epoch_increment.rb # Epochs + growing compacted window (DEFAULT)
+    └── inbox.rb                     # Consume-once message inbox (NOT ephemeral)
 ```
 
-The dispatcher in `prompt.rb` requires both strategy files and delegates to
+The dispatcher in `prompt.rb` requires the strategy files and delegates to
 them via a `case` statement inside `prepare_prompt`.
 
 ---
 
-## The ephemeral design
+## The ephemeral design (and the one deliberate exception)
 
-**Prompt strategies never mutate the stored chat.** The transformation happens
-entirely inside the backend's `ask` method:
+**With one exception, prompt strategies never mutate the stored chat.** The
+transformation happens entirely inside the backend's `ask` method:
 
 ```ruby
 # lib/scout/llm/backends/default.rb
-prompt = Chat.prepare_prompt(messages, prompt_strategies)
+prompt = Chat.prepare_prompt(messages, prompt_strategies, save_file: save_file)
 ```
 
 The variable `prompt` is a local derived from `messages`. The original messages
@@ -63,12 +65,16 @@ and the underlying Chat Object are untouched. This means:
 This deliberately decouples *what the model sees* from *what the system
 remembers*.
 
+**The exception is `inbox`** (see below): it moves consumed files on disk
+(side effects survive the inference), although it still never touches the
+stored chat transcript.
+
 ---
 
 ## `prepare_prompt` entry point
 
 ```ruby
-def self.prepare_prompt(prompt, prompt_strategies = nil)
+def self.prepare_prompt(prompt, prompt_strategies = nil, save_file: nil)
 ```
 
 The method supports four input forms for `prompt_strategies`:
@@ -76,20 +82,22 @@ The method supports four input forms for `prompt_strategies`:
 | Input type | Behavior |
 |---|---|
 | `Proc` | Called directly with the prompt array — full custom hook. |
-| `nil` | Falls back to `DEFAULT_CONTEXT_STRATEGY` = `%w(shorten_tools)`. |
-| `String` | Split by comma into strategy names (e.g., `"shorten_tools,custom"`). |
+| `nil` | Falls back to `Scout::Config` (`prompt_strategies`, env `PROMPT_STRATEGY`), then `DEFAULT_CONTEXT_STRATEGY` = `%w(shorten_tools_epoch_increment)`. |
+| `String` | Split by comma into strategy names (e.g., `"inbox,shorten_tools_epoch_increment"`). |
 | `Array<String>` | Apply each named strategy in sequence. |
 
-Strategies are applied **in sequence**: each receives the output of the previous.
+Strategies are applied **in sequence**: each receives the output of the
+previous.
 
 The string `"none"` is a recognized no-op that returns the prompt unchanged.
 
+`save_file` is an optional chat-level context (the file the chat is saved to).
+It is forwarded to the strategies that declare the keyword — the single-argument
+`shorten_*` strategies are unaffected — and is currently consumed by `inbox`.
+
 ---
 
-## The `shorten_tools` strategy (default)
-
-This is the **default strategy** — it runs on every backend `ask` call unless
-explicitly disabled.
+## The `shorten_tools` strategy
 
 ### Algorithm
 
@@ -127,10 +135,10 @@ until context pressure is real.
 
 ### Motivation
 
-The default `shorten_tools` strategy recomputes the truncation boundary on
-**every single inference**. When a new tool call is added, the boundary shifts
-by one position, causing every previously-truncated message to be re-evaluated
-with a different offset. This means the prompt prefix changes on every turn,
+`shorten_tools` recomputes the truncation boundary on **every single
+inference**. When a new tool call is added, the boundary shifts by one
+position, causing every previously-truncated message to be re-evaluated with a
+different offset. This means the prompt prefix changes on every turn,
 **defeating KV-cache and prompt-cache mechanisms** offered by LLM providers.
 
 `shorten_tools_epoch` solves this by **freezing the compaction boundary** for
@@ -149,37 +157,6 @@ The conversation is divided into four regions (newest at the bottom):
 [ full-new ]     any tool calls that arrived after the epoch boundary (full fidelity)
 ```
 
-The `compacted` and `full-recent` regions are **pinned** relative to the epoch
-boundary, not the live tool-call count. Their content stays stable until the
-boundary advances.
-
-### Epoch boundary calculation
-
-```
-overflow  = total_tool_calls - threshold        # how many beyond threshold
-epoch_idx = overflow > 0 ? (overflow - 1) / epoch_size : 0
-pinned_total = threshold + (epoch_idx * epoch_size)
-new_calls = total_tool_calls - pinned_total     # tool calls that arrived this epoch
-```
-
-The `pinned_total` determines where the `full-recent` region starts. Any tool
-calls beyond `pinned_total` are treated as "new" and kept at full fidelity.
-
-### Worked example (threshold=100, full=10, compacted=40, epoch_size=10)
-
-| Tool calls | pinned_total | new_calls | keep_full | compacted | dropped |
-|---|---|---|---|---|---|
-| 100 | 100 | 0 | 10 | 40 | 50 |
-| 101 | 100 | 1 | 11 | 40 | 50 |
-| 105 | 100 | 5 | 15 | 40 | 50 |
-| 110 | 100 | 10 | 20 | 40 | 50 |
-| 111 | 110 | 1 | 11 | 40 | 60 |
-
-From tool calls 101–110 the compacted region (calls 11–50 from the pinned
-boundary) is **identical**, so the prompt prefix is cache-stable for 10
-consecutive inferences. At call 111 the boundary advances and the compacted
-region shifts.
-
 ### Configuration
 
 | Config key | ENV var | Default | Description |
@@ -189,33 +166,121 @@ region shifts.
 | `epoch_compacted_tool_calls` | `EPOCH_COMPACTED_TOOL_CALLS` | 40 | Tool calls (before full-recent) to truncate |
 | `epoch_size` | `EPOCH_SIZE` | 10 | New tool calls allowed before boundary advances |
 
-All thresholds are read via `Scout::Config.get` and memoized in class variables,
-following the same pattern as `shorten_tools`.
+All thresholds are read via `Scout::Config.get` and memoized in class
+variables, following the same pattern as `shorten_tools`.
 
-### Enabling the epoch strategy
+---
 
-To use it instead of the default, pass the strategy name:
+## The `shorten_tools_epoch_increment` strategy (default)
+
+This is the **current default** (`DEFAULT_CONTEXT_STRATEGY =
+%w(shorten_tools_epoch_increment)`, `lib/scout/llm/chat/prompt.rb`). It keeps
+the epoch-frozen compaction boundary of `shorten_tools_epoch` and grows two
+windows over the life of the conversation: the epoch size itself (periodically,
+and additionally whenever an epoch contains repeated calls) and, for each extra
+call of effective epoch size, the compacted region (growth ratio 2.0, capped at
+160 compacted calls). The amount of retained truncated history therefore
+increases as the conversation lengthens, instead of always resetting to a fixed
+window.
+
+Key extra constants (all read through `Scout::Config` accessors on
+`Chat.prompt`/`context`, same memoization pattern):
+
+| Config key | ENV var | Default | Description |
+|---|---|---|---|
+| `epoch_tool_call_threshold` | `EPOCH_TOOL_CALL_THRESHOLD` | 50 | No compaction below this many tool calls |
+| `epoch_full_tool_calls` | `EPOCH_FULL_TOOL_CALLS` | 20 | Most-recent full-fidelity tool calls |
+| `epoch_compacted_tool_calls` | `EPOCH_COMPACTED_TOOL_CALLS` | 80 | Compacted window size at epoch start |
+| `epoch_size` | `EPOCH_SIZE` | 20 | Initial epoch size |
+| `epoch_increment_epochs_per_increase` | `EPOCH_INCREMENT_EPOCHS_PER_INCREASE` | 3 | Completed epochs before the epoch grows |
+| `epoch_increment_size_increase` | `EPOCH_INCREMENT_SIZE_INCREASE` | 10 | Periodic epoch-size increase |
+| `epoch_increment_repeat_increase` | `EPOCH_INCREMENT_REPEAT_INCREASE` | 10 | Epoch-size increase for epochs with repeated calls |
+| `epoch_increment_max_size` | `EPOCH_INCREMENT_MAX_SIZE` | 60 | Upper bound for epoch growth |
+| `epoch_increment_compacted_growth_ratio` | `EPOCH_INCREMENT_COMPACTED_GROWTH_RATIO` | 2.0 | Extra compacted calls retained per extra epoch call |
+| `epoch_increment_max_compacted_tool_calls` | `EPOCH_INCREMENT_MAX_COMPACTED_TOOL_CALLS` | 160 | Upper bound of the grown compacted window |
+
+Like the other shorten strategies it is **ephemeral**: it only changes what
+the model sees; the stored chat keeps full fidelity.
+
+---
+
+## The `inbox` strategy (consume-once message inbox)
+
+`inbox` is the one strategy that deliberately breaks the ephemerality
+contract: it has **side effects on disk** (it moves files), although it still
+never writes to the chat transcript.
+
+### What it does
+
+On every real inference, when the chat has a `save_file`:
+
+1. Lists the regular files in `<save_file>.files/inbox/` (dotfiles and
+   subdirectories ignored), sorted by filename for deterministic delivery
+   order.
+2. For each file, **moves it first** into `<save_file>.files/inbox_removed/`
+   (created lazily at the moment of the first move; a name collision gets a
+   `.1`, `.2`, ... suffix so previous deliveries are never overwritten), then
+   reads it and appends `{ role: 'user', content: <file content> }` to the
+   outgoing prompt.
+3. The file's mtime is preserved through the move.
+
+**Move-before-append is deliberate**: a crash between the move and the read
+may silently drop a notice, but can never deliver the same notice twice.
+Delivery is at-most-once, not exactly-once.
+
+### Gating
+
+- No `save_file` (or blank) → returns messages untouched.
+- `<save_file>.files` or `inbox/` missing → silent no-op. **The read path
+  never creates directories**: writers (you) create `inbox/` when there is
+  something to deliver, ideally by writing the file elsewhere and renaming it
+  in, so a reader never sees a half-written file.
+
+### Robustness
+
+Per-file handling is isolated: an unreadable or unmovable file is skipped in
+place (logged at low severity) and never raises into the ask path; the other
+files are still delivered. Strategies never let a filesystem hiccup break an
+inference.
+
+### Semantics to be aware of
+
+- **Injected messages are not persisted**: the model sees them, the saved
+  chat file does not. `inbox_removed/` (with preserved mtimes) is the record
+  of what was delivered and when.
+- **Cache hits skip the inbox**. `prepare_prompt` runs inside the backend,
+  after `LLM.ask`'s persistence layer. A cached answer is replayed without
+  any backend code running, so inbox files are neither seen nor consumed on
+  that call; they stay for the next real inference.
+- **Tool-call rounds**: `prepare_prompt` runs once per round, including every
+  `chain_tools` re-entry within one logical turn. The strategy list is
+  re-threaded through `chain_tools` like `save_file`, so a user-specified list
+  applies on every round. Because a file is moved on consumption, a notice
+  delivered on round 1 is not re-delivered on round 2.
+- **Invisible to provenance**: `inbox/` and `inbox_removed/` are not matched
+  by the chat-file globs in `Chat::DIRECT_LOG_CHAT_GLOBS` (`'*.chat'`,
+  `'*.society/**/*.chat'`), so inbox files are never mistaken for chat logs.
+
+### Enabling
 
 ```ruby
-# In options
-options[:prompt_strategies] = 'shorten_tools_epoch'
+# In chat options (delivered notices are unaffected by the shortener, but
+# inbox-first keeps the semantics obvious)
+options[:prompt_strategies] = 'inbox,shorten_tools_epoch_increment'
 
-# Or directly
-Chat.prepare_prompt(messages, 'shorten_tools_epoch')
+# Or in a chat file:
+# option prompt_strategies inbox,shorten_tools_epoch_increment
 ```
 
-To switch the default system-wide, set:
-
-```ruby
-Chat::DEFAULT_CONTEXT_STRATEGY.replace(['shorten_tools_epoch'])
-```
+See [../user/ManagingContext.md](../user/ManagingContext.md) for the
+user-facing story.
 
 ---
 
 ## Configuration thresholds (`shorten_tools`)
 
-All thresholds are read via `Scout::Config.get` and **memoized** in class
-variables on first access:
+All thresholds are read via `Scout::Config.get` and **memoized in class
+variables** on first access:
 
 | Config key | ENV var | Default | Description |
 |---|---|---|---|
@@ -239,7 +304,7 @@ long-running daemons.
 When a value is truncated, `Log.truncate_string` embeds an MD5 hash prefix:
 
 ```
-Truncated (15432): The first ~70 chars...<...15432 - a1b2c...>...last ~70 chars
+Truncated (15432): The first ~70 chars...<...15432 - a1b2c3...>...last ~70 chars
 ```
 
 This allows truncated content to be matched against logs or the original chat
@@ -249,20 +314,26 @@ for debugging.
 
 ## Integration with the backend
 
-`prepare_prompt` is called inside `Backend::Default#ask`, in the normal
+`prepare_prompt` is called inside `Backend::ClassMethods#ask`, in the normal
 (non-relay) path:
 
 ```ruby
 client = prepare_client(options, messages)
-prompt = Chat.prepare_prompt(messages, prompt_strategies)
+prompt = Chat.prepare_prompt(messages, prompt_strategies, save_file: save_file)
 formatted_prompt = format_messages(prompt)
 tools = tools(formatted_prompt, options)
 response = query(client, formatted_prompt, tools, options)
 ```
 
 Key points:
-- Applied on every `ask` invocation in the normal path.
+- Applied on every `ask` invocation in the normal path, **including every
+  `chain_tools` re-entry round** (the strategy list is re-threaded through the
+  `chain_tools` options merge alongside `save_file`, so user-specified lists
+  apply on every round rather than degrading to the default).
 - **Not applied in relay mode** (raw messages are uploaded to a remote server).
+- **Not applied on a cache hit**: `LLM.ask`'s `Persist.persist` layer answers
+  before any backend code runs. This is the documented reason the `inbox`
+  strategy is consume-once *per real inference*, not per logical call.
 - Applied **before** `format_messages` — strategy output directly determines
   token consumption.
 - `prompt_strategies` comes from the `options` hash, so callers can override
@@ -272,16 +343,21 @@ Key points:
 
 ## Extension point: custom strategies
 
-Two mechanisms coexist:
+Three mechanisms coexist:
 
-1. **Hard-coded `case` dispatch** for built-in strategies (`shorten_tools`,
-   `shorten_tools_epoch`, `none`).
+1. **Hard-coded `case` dispatch** for the built-in strategies
+   (`shorten_tools`, `shorten_tools_epoch`, `shorten_tools_epoch_increment`,
+   `inbox`, `none`).
 2. **`REGISTERED_STRATEGIES` hash** for user/plugin-registered strategies.
+3. **`Chat.send(strategy)` fallback**: any unrecognized name is dispatched to
+   the Chat class method of the same name, so defining `def self.my_strategy`
+   (plus a `require` of its file) makes it selectable without touching the
+   dispatcher.
 
-> **Note:** `REGISTERED_STRATEGIES` is referenced in the code but not yet
-> populated with entries. Passing an unknown strategy name will result in
-> `nil.call(prompt)`, raising a `NoMethodError`. For now, use a `Proc` to
-> supply custom strategies.
+> **Note:** `REGISTERED_STRATEGIES` starts empty; nothing in the repo
+> populates it. It is used by tests and plugins. Its procs receive the prompt
+> array only — they do not receive the `save_file:` context; a strategy that
+> needs it belongs in the `case` dispatch or in a Chat class method.
 
 ---
 

@@ -496,7 +496,7 @@ module LLM
         else
 
           client = prepare_client options, messages
-          prompt = Chat.prepare_prompt(messages, prompt_strategies)
+          prompt = Chat.prepare_prompt(messages, prompt_strategies, save_file: save_file)
           formatted_prompt = format_messages(prompt)
           tools = tools(formatted_prompt, options)
 
@@ -567,7 +567,13 @@ module LLM
           meta['timestamp'] = timestamp
         end
 
-        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta, relay: relay, save_file: save_file)
+        # ScoutCoder: IndiferentHash.process_options deletes the keys it
+        # extracts, so anything pulled out of `options` at the top of `ask`
+        # that must still hold on tool-call re-entry (here prompt_strategies,
+        # like save_file, relay, client, current_meta) has to be re-merged
+        # into the options passed to chain_tools; otherwise the recursive
+        # `ask` re-reads a nil and silently falls back to defaults.
+        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta, relay: relay, save_file: save_file, prompt_strategies: prompt_strategies)
 
         if log_response && meta && meta.any?
           # The meta is about to become the first message of a segment that

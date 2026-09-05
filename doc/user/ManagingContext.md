@@ -1,9 +1,9 @@
 # Managing Context
 
 This page explains how Scout-AI handles conversations that grow too long for
-the model's context window, and what you can do to control this behavior. It
-is intended for workflow authors building long-running agents or workflows
-with many tool calls.
+the model's context window, and what you can do to control this behavior. It is
+intended for workflow authors building long-running agents or workflows with
+many tool calls.
 
 **You should read this if:** your agents make many tool calls, use large files,
 or run for many turns.
@@ -30,8 +30,9 @@ Scout-AI applies **prompt strategies** — transformations to the conversation
 just before sending it to the model. These are **ephemeral**: they modify only
 what the model sees, never the saved chat file.
 
-The main strategy is **tool-call pruning**. When tool calls accumulate, older
-ones are shortened or removed:
+The default strategy is `shorten_tools_epoch_increment`, a tool-call pruning
+strategy with stable compaction boundaries (so provider prompt caches stay
+useful). When tool calls accumulate, older ones are shortened or removed:
 
 | Threshold | Default | What happens |
 |-----------|---------|-------------|
@@ -46,6 +47,62 @@ This means:
 
 The model never sees a truncated prompt — it simply gets a shorter conversation
 that fits within its context window.
+
+---
+
+## The `inbox` strategy: injecting one-off notices
+
+Sometimes an external process (a workflow step, a cron job, a human dropping
+a file) needs to hand the agent a message without going through the chat file.
+The **inbox strategy** does that: on each inference it consumes the files in the
+chat's inbox directory and injects them as one-off user messages.
+
+Enable it alongside the default strategy:
+
+```text
+option prompt_strategies inbox,shorten_tools_epoch_increment
+```
+
+or programmatically:
+
+```ruby
+options[:prompt_strategies] = 'inbox,shorten_tools_epoch_increment'
+```
+
+### Where the inbox lives
+
+The inbox lives at `<save_file>.files/inbox/` — the `inbox/` directory inside
+the `.files` directory of the chat's `save_file` itself (a chat's files dir is
+its own file name plus `.files`, so the nesting doubles up):
+
+| Context | save_file | Inbox |
+|---|---|---|
+| `scout agent ask -c <chat>` | `<chat>.files/<agent>.chat` | `<chat>.files/<agent>.chat.files/inbox/` |
+| Agent workflow (`chat_task`) job | `<job>.files/<name>.chat` | `<job>.files/<name>.chat.files/inbox/` |
+
+- Drop a regular file (any name, any extension) into `inbox/`. Files are
+  delivered in **sorted filename order**, so name them (`001-first.md`,
+  `002-second.md`) if order matters.
+- On each inference the file is **moved** to the sibling `inbox_removed/`
+  directory (original modification time preserved; a name collision gets a
+  numeric suffix), and its content is appended to the prompt as a
+  `user`-role message.
+- Write files elsewhere and rename them into `inbox/` if you want to be sure
+  the agent never reads a half-written file.
+
+### What it does NOT do
+
+- **Injected messages are not persisted.** The model sees them, but the saved
+  chat file does not record them; `inbox_removed/` is the log of what was
+  delivered.
+- **Delivery is at-most-once.** The file is moved before the message is built,
+  so an interrupted inference may drop a notice but never delivers the same
+  notice twice.
+- **A cached answer skips the inbox.** Scout-AI caches inference results; when
+  a cached answer is replayed, no inference runs, so inbox files are left
+  untouched for the next real inference.
+- **No inbox, no effect.** If the inbox directory does not exist, the strategy
+  is a no-op and creates nothing.
 
 ---
 
@@ -138,6 +195,7 @@ model actually saw:
 | Tool calls | All of them, in full | Possibly truncated/pruned |
 | File contents | Full file text | Same (unless cleared) |
 | `clear:` directives | Present as markers | Everything before is removed |
+| Inbox notices | **Absent** (see `inbox_removed/`) | Injected once, then gone |
 | Conversation history | Complete | Recent turns only (after pruning) |
 
 This is by design: the saved chat is the **ground truth** of what happened;
@@ -149,8 +207,11 @@ the model's prompt is an **optimized view** for the current inference call.
 
 - **Expecting the saved chat to match the model's input**: They can differ.
   The saved chat is the record; the model's prompt is ephemeral.
+- **Expecting inbox notices in the chat transcript**: Inbox messages are
+  delivered to the model only; check `<files dir>/inbox_removed/` for the
+  delivery record.
 - **Importing too much data**: Large files eat context. Use tools for
-  on-demand data access.
+  on-demand data.
 - **Not using `clear:` between phases**: If your workflow has distinct phases,
   clearing between them keeps each phase focused.
 
@@ -158,6 +219,6 @@ the model's prompt is an **optimized view** for the current inference call.
 
 ## Next steps
 
-- [WritingChats.md](WritingChats.md) — the `clear:` directive in context.
-- [ToolCalling.md](ToolCalling.md) — tools as an alternative to pre-loading.
-- [Delegation.md](Delegation.md) — splitting work across agents.
+- [WritingChats.md](WritingChats.md) — The `clear:` directive in context.
+- [ToolCalling.md](ToolCalling.md) — Tools as an alternative to pre-loading.
+- [Delegation.md](Delegation.md) — Splitting work across agents.
