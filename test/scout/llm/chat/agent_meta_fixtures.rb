@@ -70,8 +70,9 @@ module AgentMetaFixtures
 
   # Create a job layout under `dir` for the relative reference `ref`
   # (e.g. 'Worker/ask/Default_w'): the result file, a .info sidecar with
-  # `dependencies` (always written, matching scout-gear Step), and log chats
-  # written under `<job>.files/log/<name>` (Hash name -> chat text).  Returns
+  # `dependencies` (always written, matching scout-gear Step), and agent chat
+  # logs written under `<job>.files/<name>` (Hash name -> chat text; the
+  # canonical agent-log layout, no `log/` component).  Returns
   # the job path.
   def make_job(dir, ref, result: 'answer', dependencies: [], logs: {})
     path = File.expand_path(File.join(dir, ref))
@@ -79,7 +80,7 @@ module AgentMetaFixtures
     File.write(path, result)
     File.write(path + '.info', {dependencies: dependencies}.to_json)
     logs.each do |name, text|
-      log_path = File.join(path + '.files', 'log', name)
+      log_path = File.join(path + '.files', name)
       FileUtils.mkdir_p(File.dirname(log_path))
       File.write(log_path, text)
     end
@@ -171,7 +172,7 @@ module AgentMetaFixtures
     File.write(a, (['user: start'] + a_metas + ["meta: job=#{a}"]) * "
 " + "
 ")
-    File.write(File.join(a + '.files', 'log', 'agent.chat'), a_metas * "
+    File.write(File.join(a + '.files', 'agent.chat'), a_metas * "
 " + "
 ")
 
@@ -180,7 +181,7 @@ module AgentMetaFixtures
     File.write(b, (['user: continue B'] + b_metas + ["meta: job=#{b}"]) * "
 " + "
 ")
-    File.write(File.join(b + '.files', 'log', 'agent.chat'),
+    File.write(File.join(b + '.files', 'agent.chat'),
                (["meta: job=#{a}"] + a_metas + b_metas) * "
 " + "
 ")
@@ -190,7 +191,7 @@ module AgentMetaFixtures
     File.write(c, (['user: continue C'] + [c_meta, "meta: job=#{c}"]) * "
 " + "
 ")
-    File.write(File.join(c + '.files', 'log', 'agent.chat'),
+    File.write(File.join(c + '.files', 'agent.chat'),
                (["meta: job=#{b}"] + a_metas + b_metas + [c_meta]) * "
 " + "
 ")

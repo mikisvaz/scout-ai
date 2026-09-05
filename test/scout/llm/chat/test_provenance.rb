@@ -78,7 +78,7 @@ require_relative 'agent_meta_fixtures'
 #
 #   direct delegated chat   <chat>.files/agent.chat (or <name>.chat)
 #   society chats           <chat>.files/agent.society/<Agent>/<conv>/agent.chat
-#   legacy (read-only)      <chat>.files/log/... and <chat>.files/log/society/...
+# The legacy `.files/log/**` tree is no longer read.
 #
 # These tests only exercise the traversal/read side; writing the new layout is
 # covered by test/scout/llm/agent/test_save.rb.
@@ -124,18 +124,17 @@ class TestNewLayoutProvenance < Test::Unit::TestCase
     end
   end
 
-  # (b) new-layout root copy not traversed; legacy root copy still excluded
+  # (b) canonical root copy not traversed; legacy .files/log tree invisible
   def test_new_layout_root_copy_is_not_traversed
     TmpFile.with_dir do |dir|
       chat = write_chat(dir, 'saved.chat', ROOT_CHAT)
 
       files = File.expand_path(chat + '.files')
       FileUtils.mkdir_p(File.join(files, 'agent.society', 'Direct', 'harness_test'))
+      # Leftover legacy tree: full root copy plus an old society projection.
       FileUtils.mkdir_p(File.join(files, 'log', 'society', 'Worker', 'default'))
-      # Root copies in BOTH layouts: full copy of the root conversation.
       File.write(File.join(files, 'agent.chat'), ROOT_CHAT)
       File.write(File.join(files, 'log', 'agent.chat'), ROOT_CHAT)
-      # Independent society conversations in both layouts.
       File.write(File.join(files, 'agent.society', 'Direct', 'harness_test', 'agent.chat'),
                  "user: work\nmeta: pt=10 ct=5 tt=15 inference_id=w1\nassistant: ok\n")
       File.write(File.join(files, 'log', 'society', 'Worker', 'default', 'agent.chat'),
@@ -144,22 +143,22 @@ class TestNewLayoutProvenance < Test::Unit::TestCase
       paths = visits_paths(chat)
 
       new_root_copy = File.join(files, 'agent.chat')
-      legacy_root_copy = File.join(files, 'log', 'agent.chat')
       assert_not_include paths, new_root_copy,
-                          'new-layout root copy must not become its own node'
-      assert_not_include paths, legacy_root_copy,
-                          'legacy root copy must stay excluded'
+                          'canonical root copy must not become its own node'
       assert_include paths, File.join(files, 'agent.society', 'Direct', 'harness_test', 'agent.chat')
-      assert_include paths, File.join(files, 'log', 'society', 'Worker', 'default', 'agent.chat')
+
+      # The legacy tree is no longer read at all: neither its root copy nor
+      # its society projections appear anywhere in the traversal.
+      assert_empty paths.select { |path| path.include?(File.join(files, 'log')) },
+                   'legacy .files/log tree must be invisible to traversal'
 
       edges = Chat.provenance_edges(chat).collect { |e| [e[:from].to_s, e[:to].to_s, e[:relation]] }
       assert_empty edges.select { |_from, to, _r| to == new_root_copy }
-      assert_empty edges.select { |_from, to, _r| to == legacy_root_copy }
     end
   end
 
-  # (c) legacy log/ sidecar still traversed (compat) and (d) no duplicate
-  #     visits when both layouts coexist.
+  # (c) a leftover legacy tree contributes nothing: no duplicate visits and
+  #     no tokens from the legacy files.
   def test_both_layouts_coexist_without_duplicates
     TmpFile.with_dir do |dir|
       chat = write_chat(dir, 'saved.chat', ROOT_CHAT)
@@ -175,17 +174,13 @@ class TestNewLayoutProvenance < Test::Unit::TestCase
 
       visits = Chat.traverse_provenance(chat).to_a
       paths = visits.collect { |_k, object, _pk, _p, _r, _f| object.to_s }
-      assert_equal paths.uniq.length, paths.length, 'duplicate visits when layouts coexist'
+      assert_equal paths.uniq.length, paths.length, 'duplicate visits'
 
-      # Legacy relation is unchanged.
-      legacy = visits.find do |_kind, object, _pk, _parent, relation, _first|
-        relation == :log && object.to_s.end_with?('log/society/Worker/default/agent.chat')
-      end
-      assert legacy, 'legacy log/ sidecar must keep being traversed'
-      assert_equal :chat, legacy[0]
-
-      # Tokens are counted exactly once.
-      assert_equal({pt: 32, ct: 16, tt: 48, cct: 0, cwt: 0, rt: 0},
+      # Only the canonical society chat was traversed; the legacy file was
+      # never swept and contributes no tokens.
+      assert_include paths, File.join(files, 'agent.society', 'Direct', 'harness_test', 'agent.chat')
+      assert_not_include paths, File.join(files, 'log', 'society', 'Worker', 'default', 'agent.chat')
+      assert_equal({pt: 12, ct: 6, tt: 18, cct: 0, cwt: 0, rt: 0},
                    Chat.provenance_token_totals(chat))
     end
   end

@@ -92,7 +92,7 @@ class TestProvCLI < Test::Unit::TestCase
       # must be rendered as a chat root, never loaded as a Step.
       saved = write_chat(dir, 'saved.chat',
                          "user: hi\nmeta: pt=1 ct=1 tt=2 inference_id=s1\nassistant: done\n")
-      society_chat = File.join(saved + '.files', 'log', 'society', 'Worker', 'default', 'agent.chat')
+      society_chat = File.join(saved + '.files', 'agent.society', 'Worker', 'default', 'agent.chat')
       FileUtils.mkdir_p(File.dirname(society_chat))
       File.write(society_chat,
                  "user: work\nmeta: pt=5 ct=2 tt=7 inference_id=s2\nassistant: ok\n")
@@ -114,7 +114,7 @@ class TestProvCLI < Test::Unit::TestCase
       assert_match(/root deduplicated_total=9 /, out)
 
       # The society conversation is traversed and rendered as its own node.
-      society_line = out.lines.find { |line| line.include?('log/society/Worker/default/agent.chat') }
+      society_line = out.lines.find { |line| line.include?('agent.society/Worker/default/agent.chat') }
       assert society_line, out
       assert_match(/\A\s*chat\b/, society_line, out)
       assert_include society_line, 'evidence=7', out

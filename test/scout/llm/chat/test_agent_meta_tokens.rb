@@ -112,7 +112,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
 
         chat_side = event[:evidence].find { |record| record[:origin] == :chat_meta }
         receipt_side = event[:evidence].find { |record| record[:origin] == :agent_meta }
-        assert_equal File.join(worker + '.files', 'log', 'agent.chat'), chat_side[:source]
+        assert_equal File.join(worker + '.files', 'agent.chat'), chat_side[:source]
         assert_equal [parent, 2, :agent_meta, event[:inference_id] == 'w1' ? 0 : 1],
                      receipt_side[:evidence_address]
         assert !event[:conflict]
@@ -496,8 +496,8 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
       chat_side = event[:evidence].select { |record| record[:origin] == :chat_meta }
       assert_equal 3, chat_side.length
       expected_sources = [parent,
-                          File.join(j1 + '.files', 'log', 'agent.chat'),
-                          File.join(j2 + '.files', 'log', 'agent.chat')].collect(&:to_s).sort
+                          File.join(j1 + '.files', 'agent.chat'),
+                          File.join(j2 + '.files', 'agent.chat')].collect(&:to_s).sort
       assert_equal expected_sources, chat_side.collect { |record| record[:source].to_s }.sort
 
       receipt_side = event[:evidence].select { |record| record[:origin] == :agent_meta }
@@ -545,7 +545,7 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
       # The cumulative log remains fully inspectable: its direct totals still
       # count 3 + 2 events (30 + 200 = 230), and the traversal still reaches
       # it through the ordinary :log relation.
-      log_path = File.join(b + '.files', 'log', 'agent.chat')
+      log_path = File.join(b + '.files', 'agent.chat')
       assert_equal({pt: 230, ct: 0, tt: 230, cct: 0, cwt: 0, rt: 0},
                    Chat.token_totals([Chat.load(log_path)]),
                    'the history itself is untouched and readable')

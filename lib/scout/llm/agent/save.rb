@@ -59,15 +59,6 @@ module LLM
         File.join(files_dir.to_s, "#{agent_name || 'agent'}.chat")
       end
 
-      # ScoutCoder: LEGACY root society directory (`<path>.files/log/society`)
-      # from before the flat layout change. Kept read-only: nothing writes
-      # here anymore, but provenance traversal must still glob it so chats
-      # saved by older versions remain visible (see
-      # Chat.direct_chat_sidecar_files).
-      def legacy_society_dir_for(chat_path)
-        "#{chat_path}.files/log/#{SOCIETY_DIR}"
-      end
-
       # Is `path` the chat file of a NESTED conversation, i.e. does it already
       # live inside a society tree? A nested chat file sits at
       # <society>/<agent>/<conversation>/<file>, so the directory three levels

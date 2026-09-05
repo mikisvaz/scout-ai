@@ -103,7 +103,7 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
     job = run_job(TmpFile.tmpdir, :plain)
     path = job.path
     # The unified provenance save ALWAYS writes this job agent's own chat at
-    # `<path>.files/log/agent.chat` (that is the point of the mechanism);
+    # `<path>.files/agent.chat` (that is the point of the mechanism);
     # only the society subtree stays lazy and appears with a live society.
     assert File.exist?("#{path}.files/agent.chat")
     assert !File.exist?("#{path}.files/agent.society")

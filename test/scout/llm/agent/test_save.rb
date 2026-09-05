@@ -275,6 +275,43 @@ class TestLLMAgentSave < Test::Unit::TestCase
     end
   end
 
+  # The dropped legacy layout: saving an agent (with society conversations)
+  # must NOT create a `.files/log` tree at all, while still producing the
+  # canonical files: the root chat copy and the society conversations.
+  def test_save_produces_no_legacy_log_tree
+    TmpFile.with_dir do |dir|
+      LLM::Mock.script([
+        {tool_calls: [{name: 'ask', arguments: {agent: 'Worker', prompt: 'hi'}}]},
+        'final answer'
+      ])
+
+      agent = simple_agent('root')
+      worker = simple_agent('worker')
+      agent.society = { 'Worker' => worker }
+      agent.socialize
+
+      chat_file = File.join(dir, 'root.chat')
+      agent.save_file = chat_file
+      agent.user 'root question'
+      assert_equal 'final answer', agent.chat(persist: false, endpoint: 'mock')
+      agent.save
+
+      legacy_dir = File.join(chat_file + '.files', 'log')
+      refute Open.exist?(legacy_dir),
+             'legacy .files/log tree must not be created by saving'
+
+      # Canonical files are all there: the root chat itself (a plain
+      # save_file owns no .files copy; only CLI/workflow-anchored save files
+      # live inside a .files dir) and the society conversation.
+      assert Open.exist?(chat_file), 'root chat file must be written'
+      assert_include Open.read(chat_file), 'root question'
+      society_chat = File.join(chat_file.sub(/\.chat\z/, '.society'), 'Worker', 'default', 'agent.chat')
+      assert Open.exist?(society_chat),
+             'canonical society conversation must be written'
+      assert_include Open.read(society_chat), 'hi'
+    end
+  end
+
   def test_no_auto_save_without_save_file
     TmpFile.with_dir do |dir|
       LLM::Mock.script('mock answer')

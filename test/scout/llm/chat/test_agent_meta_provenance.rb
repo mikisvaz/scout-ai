@@ -35,7 +35,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
 
       # The worker log chat is reached through the ordinary :log relation and
       # the worker dependency through :dependency.
-      worker_log = File.join(worker + '.files', 'log', 'agent.chat')
+      worker_log = File.join(worker + '.files', 'agent.chat')
       assert signature.any? { |kind, path, relation, _first| kind == :chat && path == worker_log && relation == :log }
       assert signature.any? { |_kind, path, relation, _first| relation == :dependency && path.end_with?('Dep/load/Default_1') }
 
@@ -183,7 +183,7 @@ class TestChatAgentMetaProvenance < Test::Unit::TestCase
       assert delegated.any? { |_kind, path, _first| path == worker }
       assert delegated.any? { |_kind, path, _first| path == critic }
 
-      worker_log = File.join(worker + '.files', 'log', 'agent.chat')
+      worker_log = File.join(worker + '.files', 'agent.chat')
       nested = visits.find do |kind, object, _pk, p, rel, _first|
         kind == :job && object.path.to_s == critic && rel == :agent_job && p.to_s == worker_log
       end
@@ -419,7 +419,7 @@ TXT
       chat = write_chat(dir, 'saved.chat',
                         "user: hi\nmeta: pt=2 ct=1 tt=3 inference_id=s0\nassistant: done\n")
 
-      sidecar = File.expand_path(chat + '.files/log/society/Worker/default')
+      sidecar = File.expand_path(chat + '.files/agent.society/Worker/default')
       FileUtils.mkdir_p(sidecar)
       File.write(File.join(sidecar, 'agent.chat'),
                  "user: work\nmeta: pt=10 ct=5 tt=15 inference_id=w1\nassistant: ok\n")
@@ -430,7 +430,7 @@ TXT
       assert_empty errors
 
       society = visits.find do |_kind, object, _pk, _parent, _relation, _first|
-        object.to_s.end_with?('log/society/Worker/default/agent.chat')
+        object.to_s.end_with?('agent.society/Worker/default/agent.chat')
       end
       assert society, 'society chat not visited'
       kind, object, parent_kind, parent, relation, first = society
@@ -448,12 +448,12 @@ TXT
       chat = write_chat(dir, 'saved.chat',
                         "user: hi\nmeta: pt=2 ct=1 tt=3 inference_id=s0\nassistant: done\n")
 
-      log = File.expand_path(chat + '.files/log')
-      FileUtils.mkdir_p(File.join(log, 'society/Worker/default'))
+      log = File.expand_path(chat + '.files')
+      FileUtils.mkdir_p(File.join(log, 'agent.society/Worker/default'))
       # The full-copy written by the CLI save mechanism: same content as root.
       File.write(File.join(log, 'agent.chat'),
                  "user: hi\nmeta: pt=2 ct=1 tt=3 inference_id=s0\nassistant: done\n")
-      File.write(File.join(log, 'society/Worker/default/agent.chat'),
+      File.write(File.join(log, 'agent.society/Worker/default/agent.chat'),
                  "user: work\nmeta: pt=10 ct=5 tt=15 inference_id=w1\nassistant: ok\n")
 
       visits = Chat.traverse_provenance(chat).to_a
@@ -462,7 +462,7 @@ TXT
       root_copy = File.join(log, 'agent.chat')
       assert_not_include paths, root_copy,
                           'the sidecar root copy must not become its own node'
-      assert_include paths, File.join(log, 'society/Worker/default/agent.chat')
+      assert_include paths, File.join(log, 'agent.society/Worker/default/agent.chat')
 
       # No chat -> root-copy edge either.
       edges = Chat.provenance_edges(chat).collect { |e| [e[:from].to_s, e[:to].to_s, e[:relation]] }
@@ -475,14 +475,14 @@ TXT
       chat = write_chat(dir, 'saved.chat',
                         "user: hi\nmeta: pt=2 ct=1 tt=3 inference_id=s0\nassistant: done\n")
 
-      log = File.expand_path(chat + '.files/log')
-      FileUtils.mkdir_p(File.join(log, 'society/Worker/default'))
-      FileUtils.mkdir_p(File.join(log, 'society/Critic/default'))
+      log = File.expand_path(chat + '.files')
+      FileUtils.mkdir_p(File.join(log, 'agent.society/Worker/default'))
+      FileUtils.mkdir_p(File.join(log, 'agent.society/Critic/default'))
       File.write(File.join(log, 'agent.chat'),
                  "user: hi\nmeta: pt=2 ct=1 tt=3 inference_id=s0\nassistant: done\n")
-      File.write(File.join(log, 'society/Worker/default/agent.chat'),
+      File.write(File.join(log, 'agent.society/Worker/default/agent.chat'),
                  "user: work\nmeta: pt=10 ct=5 tt=15 inference_id=w1\nassistant: ok\n")
-      File.write(File.join(log, 'society/Critic/default/agent.chat'),
+      File.write(File.join(log, 'agent.society/Critic/default/agent.chat'),
                  "user: check\nmeta: pt=4 ct=2 tt=6 inference_id=c1\nassistant: fine\n")
 
       keys = nil
@@ -501,7 +501,7 @@ TXT
     TmpFile.with_dir do |dir|
       _parent, worker, _critic, _dep = fixture_c(dir)
 
-      log = Path.setup(File.expand_path(File.join(worker.to_s + '.files', 'log')))
+      log = Path.setup(File.expand_path(File.join(worker.to_s + '.files')))
       log_chat = File.join(log.to_s, 'agent.chat')
       assert File.file?(log_chat), 'fixture did not create the job log chat'
 
