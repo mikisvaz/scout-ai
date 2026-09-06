@@ -72,6 +72,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   simplify_delegation
 
   test_simplify_delegation
+
+  overseer
+
+  inbox_test
  }
  lib=lib {
   scout-ai.rb
@@ -98,6 +102,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      tool_calls.rb
      prompt.rb
      prompt=prompt{
+      inbox.rb
       shorten_tools.rb
       shorten_tools_epoch.rb
       shorten_tools_epoch_increment.rb

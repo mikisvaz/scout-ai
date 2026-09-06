@@ -23,6 +23,7 @@ $ #{cmd} [<options>] <filename>
 -e--evidence List the deduplicated direct inference events and their evidence
 --dot* Write the flow as Graphviz DOT
 -p--plot* Render the flow as svg, png, or pdf
+--timeline* Render the execution timeline as svg, png, pdf, or dot
 
 Default-tree numbers are evidence= subtree-deduplicated closures: they overlap
 between nodes and are never per-part cost.  Job nodes add delta= (direct tokens
@@ -43,6 +44,7 @@ component = options.delete(:component)
 flow = options.delete(:flow)
 dot_file = options.delete(:dot)
 plot_file = options.delete(:plot)
+timeline_file = options.delete(:timeline)
 long = options.delete(:long)
 evidence = options.delete(:evidence)
 filename = ARGV.first
@@ -381,7 +383,7 @@ end
 # ------------------------------------------------------------------
 # Tree rendering (default mode)
 # ------------------------------------------------------------------
-unless flow || dot_file || plot_file
+unless flow || dot_file || plot_file || timeline_file
   printed = Set.new
   print_tree = lambda do |key, offset, relation, parent_key|
     # Skip already-visited nodes entirely (no "(seen)" line)
@@ -495,7 +497,7 @@ flow_edges = edges.collect do |edge|
   end
 end.uniq
 
-if flow || dot_file || plot_file
+if flow || dot_file || plot_file || timeline_file
   # Determine visible nodes using same rules as tree mode.
   hidden_keys = Set.new
   nodes.each do |key, node|
@@ -555,7 +557,7 @@ if flow || dot_file || plot_file
     end
   end
 
-  if dot_file || plot_file
+  if dot_file || plot_file || timeline_file
     # ----------------------------------------------------------------
     # Explanatory execution-flow dot (design: task/prov-svg-design-spec)
     # ----------------------------------------------------------------
@@ -823,6 +825,298 @@ if flow || dot_file || plot_file
         file.write(dot)
         file.flush
         raise ScoutException, 'Graphviz dot failed' unless system('dot', "-T#{extension}", file.path, '-o', plot_file.to_s)
+      end
+    end
+  end
+
+  if timeline_file
+    # ----------------------------------------------------------------
+    # Execution-timeline dot (design: task/prov-svg-timeline-spec).
+    # ----------------------------------------------------------------
+    # The flow view answers "what delegated what"; this one answers
+    # "what happened when".  The vertical axis IS the time axis: nodes
+    # are laid out in one single sequence ordered by the time model
+    # below, one node per rank, and every semantic edge is emitted with
+    # constraint=false so delegation topology can never stretch or
+    # reorder the axis.  Only the spine (the chain of consecutive
+    # time-neighbours) carries constraint=true.  Node classes, palette
+    # and tooltips are reused from the flow view unchanged; the deltas
+    # are the time line at label position 2, the transposed ports, the
+    # label policy (continues only) and the dropped society cluster.
+
+    # ---- Time model (spec S3), one priority list for order AND badges.
+    # Priority 1: the node's own chat file (job: its produced chat, the
+    # `produces` target; root: root.chat; society/other chats: their own
+    # file) parsed for meta records carrying `timestamp=` ISO-8601
+    # fields -> [first, last] interval.  Priority 2: File.mtime of the
+    # node path -> point event, no duration.  Tie-break on path, as the
+    # mtime ordering of the flow view does.
+    produced_chat_of = {}
+    produces.each { |edge| produced_chat_of[edge[:from]] = nodes[edge[:to]][:path] }
+    parse_iso = lambda do |value|
+      Time.iso8601(value.to_s)
+    rescue StandardError
+      nil
+    end
+    chat_interval = lambda do |path|
+      chat = begin
+        Chat.provenance_chat_load(path)
+      rescue StandardError
+        nil
+      end
+      return nil unless Array === chat
+      stamps = chat.filter_map do |message|
+        next unless message[:role].to_s == 'meta'
+        parse_iso.call(Chat.parse_meta(message[:content])[:timestamp])
+      end
+      return nil if stamps.empty?
+      [stamps.min, stamps.max]
+    end
+    node_time = lambda do |key|
+      path = nodes[key][:path]
+      chat_path = if key == root_key
+                    nodes[key][:kind] == :chat ? path : Chat.job_result_chat_file(nodes[key][:object]).to_s
+                  elsif nodes[key][:kind] == :job
+                    produced_chat_of[key] || Chat.job_result_chat_file(nodes[key][:object]).to_s
+                  else
+                    path
+                  end
+      interval = chat_path && Open.exists?(chat_path.to_s) ? chat_interval.call(chat_path) : nil
+      if interval
+        {start: interval[0], end: interval[1], source: :chat}
+      else
+        mtime = begin
+          File.mtime(path)
+        rescue StandardError
+          Time.at(0)
+        end
+        {start: mtime, end: mtime, source: :mtime}
+      end
+    end
+    time_of = {}
+    visible_keys.each { |key| time_of[key] = node_time.call(key) }
+    # Sequence: one priority list for order AND badges.  The sort key is
+    # the full time key [start, end] with the path as final tie-break, so
+    # equal starts (cumulative continuation replays share their first
+    # stamp) still order by their end, which is exactly the chain
+    # (mtime) order the flow view's continuation arcs use.  Ids are
+    # numbered along this sequence so n0 is the earliest event.
+    sequence = visible_keys.sort_by do |key|
+      [time_of[key][:start], time_of[key][:end], nodes[key][:path]]
+    end
+    ids = sequence.each_with_index.to_h { |key, index| [key, "n#{index}"] }
+    sequence_index = sequence.each_with_index.to_h { |key, index| [key, index] }
+
+    # Overlap flags (spec S3): pairwise [start,end) overlap of the
+    # node's own event, machine-checkable via class="prov-overlap".
+    overlap_keys = Set.new
+    sequence.each_with_index do |key, index|
+      interval = time_of[key]
+      ((index + 1)...sequence.length).each do |other|
+        candidate = time_of[sequence[other]]
+        next unless interval[:start] < candidate[:end] && candidate[:start] < interval[:end]
+        overlap_keys << key
+        overlap_keys << sequence[other]
+      end
+    end
+
+    # ---- Time line rendering (spec S4): `t=<HH:MM:SS>` point, or
+    # `t=<HH:MM:SS>→<HH:MM:SS>` interval, optionally ` · <dur>`.
+    format_clock = ->(time) { time.getlocal.strftime('%H:%M:%S') }
+    format_duration = lambda do |seconds|
+      seconds = seconds.to_i
+      days, seconds = seconds.divmod(86_400)
+      hours, seconds = seconds.divmod(3_600)
+      minutes, seconds = seconds.divmod(60)
+      return format('%dd', days) if days > 0
+      return format('%dh%dm%ds', hours, minutes, seconds) if hours > 0
+      return format('%dm%ds', minutes, seconds) if minutes > 0
+      format('%ds', seconds)
+    end
+    time_line = lambda do |key|
+      interval = time_of[key]
+      clock = format_clock.call(interval[:start])
+      return "t=#{clock}" if interval[:source] == :mtime || interval[:end] == interval[:start]
+      "t=#{clock}→#{format_clock.call(interval[:end])} · #{format_duration.call(interval[:end] - interval[:start])}"
+    end
+
+    # ---- Nodes: flow-view classes with the time line inserted at
+    # position 2 (the badge keeps position 3; error jobs keep the
+    # no-token-line rule).
+    qualifier = component ? 'direct' : 'evidence'
+    timeline_node_lines = sequence.collect do |key|
+      node = nodes[key]
+      path = node[:path]
+      tokens = node_tokens.call(key)[:tt]
+      badge = short_number(tokens)
+      lines =
+        if key == root_key
+          # Spec S4: root label is name / time line / evidence badge; the
+          # flow view's `Root conversation` caption is dropped (line 3 is
+          # the badge, per T8).
+          [node[:kind] == :chat ? File.basename(path) : job_label.call(key),
+           time_line.call(key),
+           "#{qualifier} #{badge}"]
+        elsif node[:kind] == :job
+          base = [job_label.call(key), time_line.call(key)]
+          base << '⚠ error' if job_failed.call(key)
+          base << badge if job_failed.call(key) == false && tokens > 0
+          base
+        elsif society_label_pair(path)
+          [node_label(node, nil, nil, key, long), time_line.call(key), badge]
+        else
+          [File.basename(path), time_line.call(key), badge]
+        end
+      attrs =
+        if key == root_key
+          'shape=box, class="prov-root", style="rounded,filled,bold", penwidth=2, ' \
+          'fillcolor="#1F3A5F", color="#142A45", fontcolor="#FFFFFF", fontsize=14'
+        elsif node[:kind] == :job && job_failed.call(key)
+          'shape=box, class="prov-job prov-error", style="rounded,filled", ' \
+          'fillcolor="#FBE3E3", color="#C0392B", fontcolor="#8E2418"'
+        elsif node[:kind] == :job
+          'shape=box, class="prov-job", style="rounded,filled", ' \
+          'fillcolor="#DCE9F7", color="#4A7EBB", fontcolor="#1F3A5F"'
+        elsif society_label_pair(path)
+          'shape=note, class="prov-society", style=filled, ' \
+          'fillcolor="#F1F3F5", color="#9AA5B1", fontcolor="#5A6672"'
+        elsif produced_keys.include?(key)
+          'shape=note, class="prov-chat", style=filled, ' \
+          'fillcolor="#FFF6DC", color="#C9A227", fontcolor="#5C5236"'
+        else
+          'shape=note, class="prov-chat", style=filled, ' \
+          'fillcolor="#F1F3F5", color="#9AA5B1", fontcolor="#5A6672"'
+        end
+      attrs = attrs.sub(/class="([^"]*)"/) { %(class="#{$1} prov-overlap") } if overlap_keys.include?(key)
+      format('  %s [%s, label=%s, tooltip=%s];',
+             ids[key], attrs, JSON.generate(lines * "\n"), JSON.generate(path))
+    end
+
+    # ---- Spine (spec S6): consecutive pairs of the time sequence.
+    # A pair already joined by a delegates or produces edge reuses that
+    # edge as the spine segment (constraint=true); every other pair gets
+    # a synthetic class="timeline" edge.  Any semantic edge not reused is
+    # demoted to constraint=false, so the time axis stays authoritative:
+    # each non-root node ends up with exactly one incoming constraint=true
+    # edge and the chain rooted at the root reaches every node in order.
+    delegates_of = {}
+    produces_of = {}
+    delegates.each { |edge| delegates_of[[edge[:from], edge[:to]]] = true }
+    produces.each { |edge| produces_of[[edge[:from], edge[:to]]] = true }
+    semantic = []
+    delegates.each { |edge| semantic << {from: edge[:from], to: edge[:to], kind: :delegates} }
+    produces.each { |edge| semantic << {from: edge[:from], to: edge[:to], kind: :produces} }
+    continues.each { |edge| semantic << {from: edge[:from], to: edge[:to], kind: :continues} }
+    log_edges.each { |edge| semantic << {from: edge[:from], to: edge[:to], kind: :log} }
+    dependency_edges.each { |edge| semantic << {from: edge[:from], to: edge[:to], kind: :dependency} }
+
+    spine_reuse = {}
+    sequence.each_cons(2) do |first, second|
+      pair = [first, second]
+      spine_reuse[pair] = :delegates if delegates_of.key?(pair)
+      spine_reuse[pair] ||= :produces if produces_of.key?(pair)
+    end
+    spine_edges = sequence.each_cons(2).collect do |first, second|
+      pair = [first, second]
+      kind = spine_reuse[pair]
+      {from: first, to: second, kind: kind || :synthetic}
+    end
+    reused_pairs = spine_edges.select { |edge| edge[:kind] != :synthetic }
+                              .collect { |edge| [edge[:from], edge[:to]] }.to_set
+    side_edges = semantic.reject { |edge| reused_pairs.include?([edge[:from], edge[:to]]) }
+
+    # ---- Temporal clusters (spec S7): one cluster per continuation
+    # chain IF AND ONLY IF its members (chain jobs + produced chats)
+    # form a contiguous block of the sequence; society chats are never
+    # enclosed (they interleave with jobs in time).
+    timeline_cluster_blocks = []
+    timeline_cluster_members = Set.new
+    chain_members.sort_by { |name, _members| name }.each do |name, members|
+      members = members.reject { |key| timeline_cluster_members.include?(key) || key == root_key }
+      next if members.empty?
+      indexes = members.collect { |key| sequence_index[key] }.compact.sort
+      next if indexes.empty?
+      contiguous = indexes.each_cons(2).all? { |a, b| b == a + 1 }
+      next unless contiguous
+      timeline_cluster_members.merge(members)
+      suffix = name.gsub(/[^A-Za-z0-9]/, '_')
+      timeline_cluster_blocks << [
+        "  subgraph cluster_#{suffix} {",
+        "    label=\"#{name} continuation chain\"; labeljust=l; fontsize=10; fontcolor=\"#1F3A5F\";",
+        '    style="rounded,filled"; fillcolor="#F7F9FB"; color="#C7D0D9";',
+        '    ' + members.collect { |key| ids[key] } * '; ' + ';',
+        '  }'
+      ] * "\n"
+    end
+
+    # ---- Edges: spine first (constraint=true), then the semantic edges
+    # transposed to TB (spec S5).  Ports rotate with the layout: the flow
+    # s/n pair becomes e/w, delegates keep their own left-margin face
+    # (headport=w) and continues the right corridor (tailport=e
+    # headport=w).  Labels survive on continues arcs only.
+    timeline_edge_lines = []
+    spine_edges.each do |edge|
+      case edge[:kind]
+      when :synthetic
+        timeline_edge_lines << format('  %s -> %s [color="#C7D0D9", penwidth=0.8, class="timeline", constraint=true];',
+                                      ids[edge[:from]], ids[edge[:to]])
+      when :delegates
+        timeline_edge_lines << format('  %s -> %s [color="#1F3A5F", penwidth=1.6, class="delegated_result", headport=w, constraint=true];',
+                                      ids[edge[:from]], ids[edge[:to]])
+      when :produces
+        timeline_edge_lines << format('  %s -> %s [color="#4A7EBB", penwidth=1.1, class="dependency", headport=w, constraint=true];',
+                                      ids[edge[:from]], ids[edge[:to]])
+      end
+    end
+    side_edges.each do |edge|
+      case edge[:kind]
+      when :delegates
+        timeline_edge_lines << format('  %s -> %s [color="#1F3A5F", penwidth=1.6, class="delegated_result", headport=w, constraint=false];',
+                                      ids[edge[:from]], ids[edge[:to]])
+      when :produces
+        timeline_edge_lines << format('  %s -> %s [color="#4A7EBB", penwidth=1.1, class="dependency", headport=w, constraint=false];',
+                                      ids[edge[:from]], ids[edge[:to]])
+      when :continues
+        timeline_edge_lines << format('  %s -> %s [label="continues", color="#6E5AA8", fontcolor="#6E5AA8", ' \
+                                      'penwidth=1.3, constraint=false, tailport=e, headport=w];',
+                                      ids[edge[:from]], ids[edge[:to]])
+      when :dependency
+        timeline_edge_lines << format('  %s -> %s [color="#8A93A0", penwidth=0.9, class="dependency", constraint=false];',
+                                      ids[edge[:from]], ids[edge[:to]])
+      when :log
+        timeline_edge_lines << format('  %s -> %s [style=dashed, color="#B0B7C3", penwidth=0.9];',
+                                      ids[edge[:from]], ids[edge[:to]])
+      end
+    end
+
+    timeline_lines = [
+      'digraph prov_timeline {',
+      '  graph [rankdir=TB, splines="spline", bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.45, ' \
+      'fontname="Helvetica", fontsize=11];',
+      '  node [shape=box, style=filled, fontname="Helvetica", fontsize=11, margin="0.14,0.09"];',
+      '  edge [fontname="Helvetica", fontsize=9, fontcolor="#6B7280", arrowsize=0.8, color="#8A93A0"];',
+      '',
+      timeline_node_lines,
+      '',
+      timeline_cluster_blocks,
+      '',
+      "  {rank=source; #{ids[sequence.first]};}",
+      '',
+      timeline_edge_lines,
+      '}'
+    ].flatten
+    timeline_dot = timeline_lines * "\n"
+
+    timeline_extension = File.extname(timeline_file).sub(/^\./, '').downcase
+    timeline_extension = 'svg' if timeline_extension.empty?
+    if timeline_extension == 'dot'
+      Open.write(timeline_file, timeline_dot)
+    else
+      raise ParameterException, "Unsupported timeline format: #{timeline_extension}" unless %w[svg png pdf].include?(timeline_extension)
+      Tempfile.create(['scout-ai-provenance', '.dot']) do |file|
+        file.write(timeline_dot)
+        file.flush
+        raise ScoutException, 'Graphviz dot failed' unless system('dot', "-T#{timeline_extension}", file.path, '-o', timeline_file.to_s)
       end
     end
   end
