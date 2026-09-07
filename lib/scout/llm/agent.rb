@@ -83,14 +83,20 @@ module LLM
           end
 
           job = workflow.job(:ask, chat: Chat.print(messages))
-          self.job = job
-          Open.mkdir job.files_dir
-          Chat.allow_job job
+          job.save_info
+
+          self.message(:meta, Chat.serialize_meta(job: job.short_path))
+          self.save
+
           job.clean if ENV['SCOUT_NO_ASK_CACHE'] == 'true'
           job.recursive_clean if ENV['SCOUT_NO_ASK_CACHE'] == 'recursive'
+
+          Open.mkdir job.files_dir
+          Chat.allow_job job
+
           job.produce
           
-          messages = Chat.project(job.short_path, LLM.chat(job.path))
+          messages = Chat.load(job.path)
           if options[:return_messages]
             Chat.setup(messages)
           else

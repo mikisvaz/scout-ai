@@ -116,7 +116,13 @@ module LLM
                   id: info[:id] || info[:call_id] || "call_#{@index}" }
               end
 
-              new_calls = LLM.process_calls(tool_definitions, script_calls, &block).flatten
+              # ScoutCoder: the real backends thread the caller's save_file
+              # into process_calls (Backend::ClassMethods#process_response,
+              # default.rb: save_file = options[:save_file]; LLM.process_calls(
+              # ..., save_file: save_file, &block)) so the <base>.jobs sidecar
+              # and per-round saves work during tool rounds; the mock must do
+              # the same or tool-round probes/tests silently lose both.
+              new_calls = LLM.process_calls(tool_definitions, script_calls, save_file: options[:save_file], &block).flatten
               tool_calls.concat new_calls
               # next round sees the original messages plus the tool call
               # round, exactly like Backend#chain_tools does

@@ -120,6 +120,49 @@ parent save, so later independent child turns keep auto-saving in place.
 Saves are cycle-safe (visited paths + seen agents + a depth limit of 32) and
 non-fatal: a failure is logged as a warning and the run continues.
 
+#### Sibling state: the one-derivation convention
+
+Every piece of derived agent state is a **sibling of the save_file**, never a
+nested `.files` entry and never an appended suffix on the full chat path. For
+save_file `<dir>/<base>.chat` the siblings are:
+
+| Sibling | Written by | Meaning |
+|---|---|---|
+| `<base>.society/` | `Agent#save` (society tree) | delegated conversations, layout above |
+| `<base>.inbox/` | inbox strategy (`Chat.inbox_dir`) | files delivered into the next round |
+| `<base>.inbox_removed/` | `Chat.inbox_removed_target` | delivered files moved out of the inbox, kept with collision suffixes |
+| `<base>.jobs` | `LLM.process_calls` | transient snapshot of in-flight workflow jobs |
+
+Derivation strips only a **trailing** `.chat` and appends the suffix
+(`Chat.inbox_stem` + suffix in `lib/scout/llm/chat/prompt/inbox.rb`;
+`Chat.jobs_file` for `.jobs`); an extension-less basename keeps its whole
+name, and a multi-dot base strips only the last extension. The
+`<job>.chat.files/agent.chat` path shape never appears as a state base: the
+canonical agent chat of a job is `<job>.files/<name>.chat`, and its siblings
+are `<job>.files/<name>.inbox` etc.
+
+#### Live traceability of delegated work
+
+Delegation is observable *while it runs*, not only afterwards:
+
+- **Type 4 (ask/hand_off)** — each delegated conversation is its own
+  `agent.chat` under the society tree, and `Agent#chat` auto-saves after every
+  round, so the file grows round by round while the parent's tool round is
+  open. Its sibling inbox is honoured by the child's next real round.
+- **Type 5 (tool-calling delegation)** — `LLM.process_calls` writes the
+  caller's `<base>.jobs` sidecar just before `Workflow.produce` and removes it
+  in an `ensure`, so the in-flight workload is visible for the whole blocking
+  window (child `.info` follows within a fraction of a second of the fork).
+- **Type 3 (chat_task `ask`)** — the chat_task writes an immediate `job=`
+  `meta` line into the agent's current_chat and saves agent state *before* the
+  task completes, so the job reference exists while the answer is still being
+  computed.
+
+After conclusion the forensic trail takes over: `step:` short paths, receipts
+under the `meta` key of the `function_call_output` envelope, and the projected
+chat_task answer in the conversation. See
+[Provenance.md](Provenance.md#live-workload---live) for the consumer side.
+
 ### The `open_conversation` pipeline — get-or-create
 
 All setup goes through one method (in `lib/scout/llm/agent/conversation.rb`),

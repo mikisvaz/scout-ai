@@ -19,12 +19,16 @@ class TestPrompt < Test::Unit::TestCase
   end
 
   def inbox_for(save_file, names_and_contents = {})
-    inbox_dir = File.join(save_file.to_s + '.files', 'inbox')
+    inbox_dir = Chat.inbox_dir(save_file)
     FileUtils.mkdir_p inbox_dir
     names_and_contents.each do |name, content|
       Open.write(File.join(inbox_dir, name), content)
     end
     inbox_dir
+  end
+
+  def removed_for(save_file)
+    Chat.inbox_removed_dir(save_file)
   end
 
   def user_tail(messages, count = nil)
@@ -43,31 +47,84 @@ class TestPrompt < Test::Unit::TestCase
     TmpFile.with_file do |save_file|
       result = Chat.prepare_prompt(messages, ['inbox'], save_file: nil)
       assert_equal 1, result.length
-      # Nothing is created anywhere: not the files dir, not inbox/, not
-      # inbox_removed/.
-      assert !Open.exist?(save_file + '.files')
+      # Nothing is created anywhere: not the inbox, not the removed dir.
+      assert !Open.exist?(Chat.inbox_dir(save_file))
+      assert !Open.exist?(Chat.inbox_removed_dir(save_file))
     end
   end
 
   def test_inbox_missing_inbox_dir_is_noop_and_creates_nothing
     TmpFile.with_file do |save_file|
-      Open.mkdir(save_file + '.files')
-
+      # The save_file directory exists but holds no inbox sibling; the old
+      # `<save_file>.files/` tree is gone under the sibling layout (a missing
+      # files dir is subsumed by the missing inbox dir).
       result = Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
 
       assert_equal 1, result.length
       # The read path never creates the inbox, nor the removed dir
-      assert !Open.exist?(File.join(save_file + '.files', 'inbox'))
-      assert !Open.exist?(File.join(save_file + '.files', 'inbox_removed'))
+      assert !Open.exist?(Chat.inbox_dir(save_file))
+      assert !Open.exist?(Chat.inbox_removed_dir(save_file))
     end
   end
 
-  def test_inbox_missing_files_dir_is_noop
-    TmpFile.with_file do |save_file|
-      result = Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+  def test_inbox_dir_derivation_strips_only_the_last_extension
+    # Pure path rule: canonical, multi-dot and extension-less basenames.
+    assert_equal '/a/x.files/agent.inbox', Chat.inbox_dir('/a/x.files/agent.chat')
+    assert_equal '/a/x.files/agent.inbox_removed', Chat.inbox_removed_dir('/a/x.files/agent.chat')
+    assert_equal '/a/a.b.inbox', Chat.inbox_dir('/a/a.b.chat')
+    assert_equal '/a/a.b.inbox_removed', Chat.inbox_removed_dir('/a/a.b.chat')
+    assert_equal '/a/agent.inbox', Chat.inbox_dir('/a/agent')
+    assert_equal '/a/agent.inbox_removed', Chat.inbox_removed_dir('/a/agent')
+  end
 
-      assert_equal 1, result.length
-      assert !Open.exist?(save_file + '.files')
+  def test_jobs_file_derivation_strips_only_a_trailing_chat
+    # Pure path rule, mirroring the inbox derivations above: the save_file
+    # basename loses its LAST extension and gains '.jobs', all inside the
+    # save_file's own directory.
+    assert_equal '/a/agent.jobs', Chat.jobs_file('/a/agent.chat')
+
+    # Pathological case: a '.chat' inside an ANCESTOR component must never be
+    # touched (the historical unanchored sub(/\.chat/) rewrote
+    # '<job>.chat.files/agent.chat' into '<job>.files/agent.chat.jobs').
+    assert_equal '/a/cli.chat.files/agent.jobs',
+                 Chat.jobs_file('/a/cli.chat.files/agent.chat')
+
+    # Multi-dot basenames strip only the last extension; extension-less
+    # basenames keep the whole name (same convention as inbox_stem).
+    assert_equal '/a/a.b.jobs', Chat.jobs_file('/a/a.b.chat')
+    assert_equal '/a/agent.jobs', Chat.jobs_file('/a/agent')
+  end
+
+  def test_inbox_non_canonical_save_file_uses_the_sibling_rule
+    TmpFile.with_file(extension: 'chat') do |save_file|
+      assert_equal '.chat', File.extname(save_file)
+      assert save_file.end_with?('.chat')
+
+      inbox_dir = inbox_for(save_file, 'a_msg.md' => 'canonical message')
+      result = Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      assert_equal ['canonical message'], user_tail(result, 1)
+      assert_equal ['a_msg.md'], Dir.glob(File.join(removed_for(save_file), '*')).collect{|f| File.basename(f) }
+    end
+
+    # Multi-dot save_file: only the LAST extension is stripped
+    TmpFile.with_file(extension: 'b') do |save_file|
+      inbox_dir = inbox_for(save_file, 'a_msg.md' => 'multi-dot message')
+      result = Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      assert_equal ['multi-dot message'], user_tail(result, 1)
+      assert Open.directory?(Chat.inbox_dir(save_file))
+      assert_equal save_file.sub(/\.b\z/, ''), Chat.inbox_dir(save_file).sub(/\.inbox\z/, '')
+    end
+
+    # Extension-less save_file: whole basename is the stem
+    TmpFile.with_file(extension: 'plain') do |save_file|
+      assert save_file.end_with?('.plain')
+      stem = save_file.sub(/\.plain\z/, '')
+
+      inbox_dir = inbox_for(stem, 'a_msg.md' => 'extension-less message')
+      assert_equal "#{stem}.inbox", inbox_dir
+      result = Chat.prepare_prompt(base_messages, ['inbox'], save_file: stem)
+      assert_equal ['extension-less message'], user_tail(result, 1)
+      assert_equal ['a_msg.md'], Dir.glob(File.join("#{stem}.inbox_removed", '*')).collect{|f| File.basename(f) }
     end
   end
 
@@ -94,7 +151,7 @@ class TestPrompt < Test::Unit::TestCase
       assert_equal expected_contents, user_tail(result, 5)
 
       assert_equal [], Dir.glob(File.join(inbox_dir, '*'))
-      removed = File.join(save_file + '.files', 'inbox_removed')
+      removed = removed_for(save_file)
       removed_files = Dir.glob(File.join(removed, '*')).sort
       assert_equal expected_order, removed_files.collect{|f| File.basename(f) }
       removed_files.each do |file|
@@ -113,10 +170,10 @@ class TestPrompt < Test::Unit::TestCase
 
       assert_equal 2, result.length
       assert_equal ['real message'], user_tail(result, 1)
-      # Directories and dotfiles are left alone, not moved into inbox_removed/
+      # Directories and dotfiles are left alone, not moved into the removed dir
       assert Open.directory?(File.join(inbox_dir, 'subdir'))
-      assert_equal ['a_msg.md'], Dir.glob(File.join(save_file + '.files', 'inbox_removed', '*')).collect{|f| File.basename(f) }
-      assert !Open.exist?(File.join(save_file + '.files', 'inbox_removed', 'subdir'))
+      assert_equal ['a_msg.md'], Dir.glob(File.join(removed_for(save_file), '*')).collect{|f| File.basename(f) }
+      assert !Open.exist?(File.join(removed_for(save_file), 'subdir'))
     end
   end
 
@@ -136,7 +193,7 @@ class TestPrompt < Test::Unit::TestCase
   def test_inbox_collision_in_removed_gets_numeric_suffix
     TmpFile.with_file do |save_file|
       inbox_for(save_file, 'a_msg.md' => 'original delivery')
-      removed_dir = File.join(save_file + '.files', 'inbox_removed')
+      removed_dir = removed_for(save_file)
       FileUtils.mkdir_p removed_dir
       Open.write(File.join(removed_dir, 'a_msg.md'), 'previous delivery')
       previous_mtime = File.mtime(File.join(removed_dir, 'a_msg.md'))
@@ -174,7 +231,7 @@ class TestPrompt < Test::Unit::TestCase
       locked = File.join(inbox_dir, 'z_locked.md')
       assert Open.exist?(locked)
       # Only the readable file was delivered; the locked one was not moved
-      assert_equal ['a_msg.md'], Dir.glob(File.join(save_file + '.files', 'inbox_removed', '*')).collect{|f| File.basename(f) }
+      assert_equal ['a_msg.md'], Dir.glob(File.join(removed_for(save_file), '*')).collect{|f| File.basename(f) }
     end
   end
 
@@ -189,27 +246,125 @@ class TestPrompt < Test::Unit::TestCase
     end
   end
 
+  # --- reserved `abort` filename ---
+
+  def test_inbox_abort_file_aborts_inference_and_is_consumed_once
+    TmpFile.with_file do |save_file|
+      inbox_for(save_file, 'abort' => '')
+
+      result = nil
+      assert_raise(Aborted) do
+        result = Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      end
+      assert_nil result
+
+      # consumed exactly once: moved out of the inbox, into the removed dir
+      assert_equal [], Dir.glob(File.join(Chat.inbox_dir(save_file), '*'))
+      assert_equal ['abort'], Dir.glob(File.join(removed_for(save_file), '*')).collect{|f| File.basename(f) }
+
+      # a second run picks up nothing new and does not raise again
+      second = nil
+      assert_nothing_raised do
+        second = Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      end
+      assert_equal 1, second.length
+      assert_equal ['abort'], Dir.glob(File.join(removed_for(save_file), '*')).collect{|f| File.basename(f) }
+    end
+  end
+
+  def test_inbox_abort_file_content_is_the_reason_and_never_reaches_the_prompt
+    TmpFile.with_file do |save_file|
+      inbox_for(save_file, 'abort' => 'user asked to stop because of budget')
+
+      error = assert_raise(Aborted) do
+        Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      end
+      # the content becomes the abort reason...
+      assert_include error.message, 'user asked to stop because of budget'
+      # ...and is NOT delivered as a user message: nothing was appended
+      assert_equal ['abort'], Dir.glob(File.join(removed_for(save_file), '*')).collect{|f| File.basename(f) }
+
+      # the reserved name is exact: any other name aborts nothing
+      inbox_for(save_file, 'abort.txt' => 'not reserved')
+      result = Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      assert_equal ['not reserved'], user_tail(result, 1)
+    end
+  end
+
+  def test_inbox_files_before_abort_are_delivered_and_consumed
+    TmpFile.with_file do |save_file|
+      # 'a_first' sorts before 'abort', 'z_after' sorts after it
+      inbox_for(save_file,
+                'z_after.md' => 'should wait for the next run',
+                'a_first.md' => 'delivered before the abort',
+                'abort' => 'stop now')
+
+      # The raise happens while building the prompt, so the delivered
+      # messages are lost to the caller -- that is the designed semantics:
+      # files before the abort are consumed (moved) and never re-delivered.
+      assert_raise(Aborted) do
+        Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      end
+
+      assert_equal ['z_after.md'], Dir.glob(File.join(Chat.inbox_dir(save_file), '*')).collect{|f| File.basename(f) }
+      assert_equal ['a_first.md', 'abort'], Dir.glob(File.join(removed_for(save_file), '*')).sort.collect{|f| File.basename(f) }
+
+      # the next run delivers what was left behind, and does not raise
+      result = Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      assert_equal ['should wait for the next run'], user_tail(result, 1)
+      assert_equal ['a_first.md', 'abort', 'z_after.md'], Dir.glob(File.join(removed_for(save_file), '*')).sort.collect{|f| File.basename(f) }
+    end
+  end
+
+  def test_inbox_empty_abort_still_aborts_with_default_reason
+    TmpFile.with_file do |save_file|
+      inbox_for(save_file, 'abort' => "   \n")
+
+      error = assert_raise(Aborted) do
+        Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      end
+      # blank content falls back to a path-qualified default reason
+      assert_include error.message, 'Inbox abort'
+      assert !error.message.include?('whitespace only reason')
+      assert_equal ['abort'], Dir.glob(File.join(removed_for(save_file), '*')).collect{|f| File.basename(f) }
+    end
+  end
+
+  def test_inbox_non_abort_files_behave_as_before_around_an_abort
+    TmpFile.with_file do |save_file|
+      # Regression shape of the whole previous behaviour, with no abort
+      # file present: sorting, mtime preservation and consume-once are
+      # untouched by the reserved-name handling.
+      inbox_dir = inbox_for(save_file,
+                            'z_third.md' => 'a file whose name merely starts with abort',
+                            'b_second.md' => 'second',
+                            'a_first.md' => 'first')
+
+      result = Chat.prepare_prompt(base_messages, ['inbox'], save_file: save_file)
+      # sorted pickup order is preserved, and no prefix of 'abort' is treated
+      # as the reserved filename
+      assert_equal ['first', 'second', 'a file whose name merely starts with abort'], user_tail(result, 3)
+      assert_equal [], Dir.glob(File.join(inbox_dir, '*'))
+    end
+  end
+
   def test_inbox_composes_with_shorten_tools_epoch_increment_in_both_orders
     messages = Chat.setup([
+      { role: 'user', content: 'long ' * 2000 },
+      { role: 'assistant', content: 'answer' },
       { role: 'user', content: 'question' },
-      { role: 'function_call', content: { 'name' => 'echo', 'arguments' => {}, 'call_id' => 'c1' }.to_json },
-      { role: 'function_call_output', content: 'output' },
     ])
 
     TmpFile.with_file do |save_file|
       inbox_for(save_file, 'a_msg.md' => 'injected notice')
 
       inbox_first = Chat.prepare_prompt(messages, ['inbox', 'shorten_tools_epoch_increment'], save_file: save_file)
-      # Inbox first: appended user message must survive the shortener and
-      # remain the last message.
       assert Chat === inbox_first
       assert_equal 'injected notice', inbox_first.last[:content]
       assert_equal 'user', inbox_first.last[:role].to_s
 
       inbox_for(save_file, 'b_msg.md' => 'second notice')
       inbox_last = Chat.prepare_prompt(messages, ['shorten_tools_epoch_increment', 'inbox'], save_file: save_file)
-      # Shortener first: still applies and the single-argument shorten
-      # strategy is unaffected by the new save_file keyword.
       assert Chat === inbox_last
       assert_equal 'second notice', inbox_last.last[:content]
     end

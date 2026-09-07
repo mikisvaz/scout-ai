@@ -87,7 +87,7 @@ module LLM
           next
         when 'tool_use'
           tool_call = parse_tool_call(output)
-          LLM.process_calls(tools, [tool_call], &block)
+          LLM.process_calls(tools, [tool_call], save_file: options[:save_file], &block)
         when 'web_search_call'
           next
         else

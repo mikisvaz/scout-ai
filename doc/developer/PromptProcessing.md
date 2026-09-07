@@ -82,7 +82,7 @@ The method supports four input forms for `prompt_strategies`:
 | Input type | Behavior |
 |---|---|
 | `Proc` | Called directly with the prompt array — full custom hook. |
-| `nil` | Falls back to `Scout::Config` (`prompt_strategies`, env `PROMPT_STRATEGY`), then `DEFAULT_CONTEXT_STRATEGY` = `%w(shorten_tools_epoch_increment)`. |
+| `nil` | Falls back to `Scout::Config` (`prompt_strategies`, env `PROMPT_STRATEGY`), then `DEFAULT_CONTEXT_STRATEGY` = `%w(shorten_tools_epoch_increment inbox)`. |
 | `String` | Split by comma into strategy names (e.g., `"inbox,shorten_tools_epoch_increment"`). |
 | `Array<String>` | Apply each named strategy in sequence. |
 
@@ -214,15 +214,34 @@ never writes to the chat transcript.
 
 On every real inference, when the chat has a `save_file`:
 
-1. Lists the regular files in `<save_file>.files/inbox/` (dotfiles and
+1. Lists the regular files in the chat's inbox directory (dotfiles and
    subdirectories ignored), sorted by filename for deterministic delivery
    order.
-2. For each file, **moves it first** into `<save_file>.files/inbox_removed/`
-   (created lazily at the moment of the first move; a name collision gets a
-   `.1`, `.2`, ... suffix so previous deliveries are never overwritten), then
-   reads it and appends `{ role: 'user', content: <file content> }` to the
-   outgoing prompt.
+2. For each file, **moves it first** into the matching `.inbox_removed`
+   sibling (created lazily at the moment of the first move; a name collision
+   gets a `.1`, `.2`, ... suffix so previous deliveries are never
+   overwritten), then reads it and appends
+   `{ role: 'user', content: <file content> }` to the outgoing prompt.
 3. The file's mtime is preserved through the move.
+
+### Reserved filename: `abort`
+
+`abort` (exactly, no extension, case-sensitive) is a reserved inbox filename:
+when the sorted pickup reaches it, the file is consumed like any other (moved
+into `.inbox_removed`, mtime preserved, exactly once) but its content is
+**never appended to the prompt**. Instead the strategy raises the
+framework-native `Aborted` exception (`scout-essentials`
+`lib/scout/exceptions.rb`, the class scout-gear's `Step` raises for SIGTERM
+and records as `:aborted` rather than `:error`), so the surrounding job ends
+up visibly interrupted instead of silently succeeding. The stripped file
+content becomes the abort reason (blank content falls back to a reason
+carrying the consumed file's path).
+
+Files that sort **before** `abort` in the same pickup have already been
+consumed normally (moved and appended; those appends are lost with the raise,
+they are not re-delivered); files sorting **after** it stay in the inbox for
+the next run. No other filename is special: `abort.txt`, `Abort`, or a file
+whose name merely contains the word are delivered as ordinary messages.
 
 **Move-before-append is deliberate**: a crash between the move and the read
 may silently drop a notice, but can never deliver the same notice twice.
@@ -231,10 +250,26 @@ Delivery is at-most-once, not exactly-once.
 ### Gating
 
 - No `save_file` (or blank) → returns messages untouched.
-- `<save_file>.files` or `inbox/` missing → silent no-op. **The read path
-  never creates directories**: writers (you) create `inbox/` when there is
+- Inbox directory missing → silent no-op. **The read path never creates
+  directories**: writers (you) create the `<stem>.inbox` sibling when there is
   something to deliver, ideally by writing the file elsewhere and renaming it
   in, so a reader never sees a half-written file.
+
+### Paths (the sibling rule)
+
+The inbox is a **sibling of the chat's save_file**, in the save_file's own
+directory. The rule: take the save_file basename, strip its **last**
+extension if one exists (an extension-less basename keeps the whole name),
+and append the suffix:
+
+| save_file | inbox | removed log |
+|---|---|---|
+| `<X>.files/agent.chat` | `<X>.files/agent.inbox` | `<X>.files/agent.inbox_removed` |
+| `dir/a.b.chat` | `dir/a.b.inbox` | `dir/a.b.inbox_removed` |
+| `dir/agent` (no extension) | `dir/agent.inbox` | `dir/agent.inbox_removed` |
+
+Use `Chat.inbox_dir(save_file)` / `Chat.inbox_removed_dir(save_file)` rather
+than deriving the paths by hand.
 
 ### Robustness
 
@@ -246,8 +281,8 @@ inference.
 ### Semantics to be aware of
 
 - **Injected messages are not persisted**: the model sees them, the saved
-  chat file does not. `inbox_removed/` (with preserved mtimes) is the record
-  of what was delivered and when.
+  chat file does not. The `.inbox_removed` sibling (with preserved mtimes) is
+  the record of what was delivered and when.
 - **Cache hits skip the inbox**. `prepare_prompt` runs inside the backend,
   after `LLM.ask`'s persistence layer. A cached answer is replayed without
   any backend code running, so inbox files are neither seen nor consumed on
@@ -257,11 +292,17 @@ inference.
   re-threaded through `chain_tools` like `save_file`, so a user-specified list
   applies on every round. Because a file is moved on consumption, a notice
   delivered on round 1 is not re-delivered on round 2.
-- **Invisible to provenance**: `inbox/` and `inbox_removed/` are not matched
-  by the chat-file globs in `Chat::DIRECT_LOG_CHAT_GLOBS` (`'*.chat'`,
-  `'*.society/**/*.chat'`), so inbox files are never mistaken for chat logs.
+- **Invisible to provenance**: the `.inbox` and `.inbox_removed` siblings are
+  not matched by the chat-file globs in `Chat::DIRECT_LOG_CHAT_GLOBS`
+  (`'*.chat'`, `'*.society/**/*.chat'`), so inbox files are never mistaken
+  for chat logs.
 
 ### Enabling
+
+`inbox` is part of `DEFAULT_CONTEXT_STRATEGY`, so it is **on by default** for
+every chat that passes a `save_file`. You only need to name it when you want
+to *extend* the default list (a user-supplied `prompt_strategies` **replaces**
+the default rather than appending to it), or to *reorder* it:
 
 ```ruby
 # In chat options (delivered notices are unaffected by the shortener, but
@@ -271,6 +312,9 @@ options[:prompt_strategies] = 'inbox,shorten_tools_epoch_increment'
 # Or in a chat file:
 # option prompt_strategies inbox,shorten_tools_epoch_increment
 ```
+
+To disable it, set `prompt_strategies` to a list without `inbox` (the string
+`"none"` is the recognized no-op that turns every strategy off).
 
 See [../user/ManagingContext.md](../user/ManagingContext.md) for the
 user-facing story.

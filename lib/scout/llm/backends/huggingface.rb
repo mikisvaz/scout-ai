@@ -156,7 +156,7 @@ module LLM
       end.compact
 
       if tool_calls.any?
-        output.concat LLM.process_calls(tools, tool_calls, &block)
+        output.concat LLM.process_calls(tools, tool_calls, save_file: options[:save_file], &block)
       elsif output.empty?
         output << IndiferentHash.setup(role: :assistant, content: '') if message.include?(:content)
       end

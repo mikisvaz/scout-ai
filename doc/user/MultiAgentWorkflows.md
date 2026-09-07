@@ -228,6 +228,23 @@ Restart snapshots (`.files/resets/<timestamp>.chat`, taken by `agent.start`
 when a prior non-empty chat existed) sit outside `log/` and are recovery
 artifacts, not provenance logs.
 
+Sibling state next to that chat file follows one convention: `<base>.society/`,
+`<base>.inbox/`, `<base>.inbox_removed/` and the transient `<base>.jobs`
+(trailing `.chat` stripped). Add `--live` to see the in-flight workflow
+workload of an agent while it runs:
+
+```bash
+scout-ai llm prov --live /path/to/saved.chat
+```
+
+`chat_task` inputs are plain text parsed into a Chat, so they can declare
+arbitrary tooling or run arbitrary code; that is why Scout-AI never exposes
+chat_tasks directly — higher layers (e.g. Cortex) expose them through
+prompt-only interfaces that append to conversations the agent has limited or
+indirect control over. The five ways of asking, and what is visible live vs
+after the fact, are tabulated in
+[Delegation.md](Delegation.md#the-five-ways-of-asking-and-what-you-can-see).
+
 See [../developer/Provenance.md](../developer/Provenance.md) for provenance
 internals and [BuildingAgents.md](BuildingAgents.md) for save semantics.
 

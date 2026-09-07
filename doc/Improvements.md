@@ -233,13 +233,15 @@ Pairing is now by tool-call position. Regression test:
 
 ### R6. Legacy `.files/log` layouts dropped (breaking)
 
-Reader-side support for `<save>.files/log/agent.chat` and
-`<save>.files/log/chats/<Agent>/<conversation>.chat` (and the
+Reader-side support for the legacy `log/` subtree inside the chat files dir
+(`<files_dir>/log/agent.chat` and
+`<files_dir>/log/chats/<Agent>/<conversation>.chat`, plus the
 `log/society/...` variant) is removed: provenance traversal, meta sidecar
 sweep, the `prov` CLI, and `Agent.legacy_society_dir_for` no longer see that
 tree. Nothing wrote it anymore; old trees are not migrated and are now
 invisible to provenance. Canonical layouts unchanged:
-`<files_dir>/<name>.chat` and `<save>.society/<Agent>/<conversation>/agent.chat`.
+`<files_dir>/<name>.chat` and `<save>.society/<Agent>/<conversation>/agent.chat`
+(and, since the inbox feature, `<save>.inbox` / `<save>.inbox_removed`).
 
 ### R7. Receipt field `agent_meta` renamed to `meta` (breaking)
 
@@ -249,6 +251,38 @@ key is no longer read, so legacy envelopes contribute no receipt evidence
 (and no warnings). Ruby identifiers (`agent_meta.rb`, `Chat.agent_meta_evidence`,
 `agent_meta_index`, the `:agent_meta` origin symbol) are unchanged — they
 name the machinery, not the persisted field.
+
+### R8. Live workload: one sibling sidecar, all jobs, consumer-side classification
+
+Three design decisions turned the live view from an idea into a small,
+verifiable contract:
+
+1. **Sibling-state unification** — every piece of derived agent state is now
+   a sibling of the save_file (`<base>.society/`, `<base>.inbox/`,
+   `<base>.inbox_removed/`, `<base>.jobs`), derived by stripping only a
+   trailing `.chat`. This replaces both the legacy nested
+   `<save_file>.files/...` derivations and the historical unanchored
+   `sub(/\.chat/)` that mangled paths such as
+   `Default.chat.files/agent.chat`. One derivation rule
+   (`Chat.inbox_stem` + suffix) backs all four helpers.
+2. **Flat transient `.jobs`, not a pointer directory** — an earlier design
+   sketched a `<save_file>.files/jobs/` directory of per-dispatch pointer
+   JSON files annotated in place. It was deliberately **not** built that way:
+   the sidecar is a single flat file, rewritten per tool round as a snapshot
+   of the current in-flight set (newline-joined short paths) and removed in
+   an `ensure` when `Workflow.produce` returns. Snapshot semantics beat an
+   append log here: no orphaned pointer files to GC, no partial writes to
+   reconcile, and the absent file is unambiguously "nothing in flight".
+3. **List all jobs; classify in the consumer** — `.jobs` deliberately lists
+   *every* in-flight workflow job, not only chat_tasks. The writer stays
+   dumb (short paths only); `Chat.live_workload` owns the discriminators:
+   live chat_task = `step.type.to_s == 'chat'`, reconciliation through
+   `.info` status plus `/proc/<pid>` liveness (with the `kill -9` and
+   LocalExecutor-retry caveats documented at the consumer, where they can
+   actually be acted on).
+
+The consumer is rendered by `scout-ai llm prov --live`; the forensic
+behaviour of the command is untouched.
 
 ---
 

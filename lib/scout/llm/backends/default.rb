@@ -380,7 +380,8 @@ module LLM
           end
         end.compact
 
-        tool_call_outputs = LLM.process_calls(tools, tool_calls, &block)
+        save_file = options[:save_file]
+        tool_call_outputs = LLM.process_calls(tools, tool_calls, save_file: save_file, &block)
 
         output = response['output'].collect do |output|
           case output['type']
@@ -537,7 +538,7 @@ module LLM
         reasoning = reasoning response
 
         output = begin
-                   process_response messages, response, tools, options, &block
+                   process_response messages, response, tools, options.merge(save_file: save_file), &block
                  rescue Exception => e
 
                    Log.debug 'Processing response error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))

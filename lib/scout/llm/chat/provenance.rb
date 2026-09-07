@@ -843,6 +843,143 @@ module Chat
     provenance_token_totals(root, **options)
   end
 
+  # ------------------------------------------------------------------
+  # Live workload: the transient <base>.jobs sidecar
+  # ------------------------------------------------------------------
+  # `LLM.process_calls` writes the short paths of the workflow jobs it is
+  # currently producing (Workflow.produce blocking) to `Chat.jobs_file`,
+  # rewriting per round and removing the file in an `ensure` when produce
+  # returns.  This section turns that transient snapshot into the LIVE view
+  # of an agent's workload, complementing the FORENSIC traversal above:
+  # absent file is a non-event, never an error.
+
+  # Terminal statuses as recorded in a job `.info` after Workflow.produce
+  # returns (or an abort/clean sweep).  Anything else is in-flight or stale,
+  # decided by pid liveness below.
+  LIVE_TERMINAL_STATUSES = %w[done error aborted cleaned].freeze
+
+  # Is `pid` a live process right now?  Mirrors Misc.pid_alive? but adds the
+  # zombie guard: a child that exited without being reaped still answers
+  # kill(0, 0), yet produces nothing, so a zombie is NOT running work.
+  def self.live_pid?(pid)
+    return false if pid.nil? || pid.to_s.empty?
+    pid = pid.to_i
+    return false unless pid > 0
+    return true if pid == Process.pid
+    stat = File.read("/proc/#{pid}/stat") rescue nil
+    return false if stat.nil?
+    # field 3 of /proc/<pid>/stat is the state; Z = zombie
+    state = stat.split(')')[-1].split[0]
+    state != 'Z'
+  rescue Errno::ENOENT, Errno::ESRCH
+    false
+  end
+
+  # Classify one in-flight workload entry from its `.info`:
+  #   [:running, status]    non-terminal status + live pid
+  #   [:crashed, status]    non-terminal status + dead/absent pid
+  #   [:finished, status]   terminal status (done/error/aborted/cleaned)
+  #
+  # Reconciliation caveats (inherent to the snapshot contract):
+  #   * `kill -9` leaves `.info` non-terminal forever; pid liveness is the
+  #     only way to distinguish running from crashed.  The LocalExecutor
+  #     retry can RESURRECT such a job by overwriting `.info` with a new
+  #     pid, so a :crashed verdict is valid only for the moment it was
+  #     computed.
+  #   * a listed job may complete between reading `<base>.jobs` and reading
+  #     its `.info`: the snapshot race is expected, and the classification
+  #     simply reports what was seen (often :finished).
+  #   * `.info` may be missing entirely (job cleaned between reads); the
+  #     entry reports :crashed with a nil status.
+  def self.classify_live_job(step)
+    status = begin
+      info = step.info
+      info[:status].to_s
+    rescue
+      nil
+    end
+
+    return [:finished, status] if LIVE_TERMINAL_STATUSES.include?(status.to_s)
+    pid = begin
+      (step.info[:pid] rescue nil)
+    end
+    state = live_pid?(pid) ? :running : :crashed
+    [state, status]
+  end
+
+  # Resolve one short-path entry of the live sidecar to a Step.
+  #
+  # The Workflow jobs tree root (`Workflow.directory`) is tried FIRST because
+  # that is where process_calls actually produced the job: the sidecar stores
+  # SHORT paths, and Step.load rewrites a bare short path through
+  # Path.find/Step.relocate, which can land on a different (empty) mirror of
+  # the tree (e.g. `~/.scout/var/jobs/...` while the real job lives under the
+  # run's Workflow.directory).  Falling back to the forensic
+  # `load_job_reference` chain keeps unresolved entries diagnosable.
+  def self.load_live_job_reference(reference)
+    return reference if Step === reference
+    ref_str = reference.to_s
+
+    base = Workflow.directory.respond_to?(:find) ? Workflow.directory.find : Workflow.directory
+    candidate = File.join(base.to_s, ref_str)
+    return Step.load(candidate) if job_reference_candidate?(candidate)
+
+    step = Step.load(ref_str)
+    return step if job_reference_candidate?(step.path.to_s)
+
+    load_job_reference(ref_str)
+  end
+
+  # Resolve each entry of the live sidecar of `save_file` (or the chat/job
+  # path it stands for) into a Step with its live classification.  Returns an
+  # Array of Hashes (one per sidecar entry, order preserved):
+  #
+  #   {reference: 'WF/task/name', step: Step, path: <job dir>,
+  #    status: 'running'|..., state: :running/:crashed/:finished,
+  #    chat_task: true|false}
+  #
+  # `chat_task` uses the LIVE discriminator `step.type.to_s == 'chat'`
+  # (chat_task annotation; a hand-written task declaring :chat is inference
+  # by definition).  The CONCLUDED discriminator (output JSON with exactly
+  # `meta` and `content` keys) belongs to the forensic traversal and is NOT
+  # re-checked here: the sidecar only ever lists in-flight jobs.
+  #
+  # An absent sidecar is a NON-EVENT: returns [].  Resolution uses the same
+  # fallback chain as forensic job references (`load_job_reference`), so a
+  # short path resolves against the workflow jobs tree.
+  def self.live_workload(reference)
+    base = reference.respond_to?(:path) ? reference.path.to_s : reference.to_s
+
+    # Accept a chat file, a job path (result chat) or a bare save_file: the
+    # sidecar is always derived from the save_file base via Chat.jobs_file.
+    candidates = [base, base.sub(/\.chat\z/, '')]
+    sidecar = candidates.collect { |c| Chat.jobs_file(c) }
+                         .find { |f| File.exist?(f) }
+
+    return [] if sidecar.nil?
+
+    entries = Open.read(sidecar).split("\n")
+                  .collect(&:strip).reject(&:empty?)
+
+    entries.collect do |entry|
+      step = load_live_job_reference(entry)
+      state, status = classify_live_job(step)
+      type = begin
+        step.type.to_s
+      rescue
+        nil
+      end
+      {
+        reference: entry,
+        step: step,
+        path: step.path.to_s,
+        status: status,
+        state: state,
+        chat_task: type == 'chat'
+      }
+    end
+  end
+
   def self.timestamp
     Time.now.utc.iso8601(3)
   end

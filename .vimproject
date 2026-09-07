@@ -15,24 +15,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    from_pretrained
    previous_response
   }
-  test=test{
-   agent_chat.rb
-   block
-   file
-   imports
-   imports.rb
-   prev
-   rf.rb
-   tool
-
-   save_reponse
-
-   tokens
-   patch
-   relay
-
-   cpus.rb
-  }
   web=web{
    chat
    cmd
@@ -76,6 +58,20 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   overseer
 
   inbox_test
+
+  test_meta_follow
+  test_meta_follow_ask
+
+  test_workflow
+
+  meta_follow
+  test=test{
+   task
+   clean
+   direct
+   ask
+   cortex
+  }
  }
  lib=lib {
   scout-ai.rb

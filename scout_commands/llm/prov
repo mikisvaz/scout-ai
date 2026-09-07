@@ -21,6 +21,7 @@ $ #{cmd} [<options>] <filename>
 -f--flow Print a compact provenance flow
 -l--long Show full filesystem paths instead of abbreviated names
 -e--evidence List the deduplicated direct inference events and their evidence
+--live Show the live workload: in-flight workflow jobs from the <base>.jobs sidecar
 --dot* Write the flow as Graphviz DOT
 -p--plot* Render the flow as svg, png, or pdf
 --timeline* Render the execution timeline as svg, png, pdf, or dot
@@ -47,6 +48,7 @@ plot_file = options.delete(:plot)
 timeline_file = options.delete(:timeline)
 long = options.delete(:long)
 evidence = options.delete(:evidence)
+live = options.delete(:live)
 filename = ARGV.first
 raise MissingParameterException, :filename if filename.nil?
 
@@ -63,19 +65,30 @@ job_evidence = Open.exists?(filename + '.info')
 root_type = job_evidence ? :job : :chat
 root = root_type == :job ? Step.load(filename) : Path.setup(File.expand_path(filename))
 warnings = []
-records = Chat.traverse_provenance(
-  root,
-  root_type: root_type,
-  on_error: lambda do |error, kind, object, relation, reference|
-    warnings << {
-      error: error,
-      kind: kind,
-      object: object,
-      relation: relation,
-      reference: reference
-    }
+
+# With --live the run must still work when the root chat is not yet on disk:
+# the caller's save_file is flushed only at round end, so a chat observed
+# MID-round exists only as its `<base>.jobs` sidecar (transient workload
+# snapshot) plus the child job tree. The live section does not depend on the
+# transcript at all, so tolerate an absent root here instead of failing.
+records =
+  if live && root_type == :chat && !File.file?(filename)
+    []
+  else
+    Chat.traverse_provenance(
+      root,
+      root_type: root_type,
+      on_error: lambda do |error, kind, object, relation, reference|
+        warnings << {
+          error: error,
+          kind: kind,
+          object: object,
+          relation: relation,
+          reference: reference
+        }
+      end
+    ).to_a
   end
-).to_a
 
 # ------------------------------------------------------------------
 # Build graph: nodes keyed by [kind, path], edges as {from, to, relation}
@@ -107,6 +120,30 @@ root_key = Chat.provenance_key(root_type, root)
 # hash.  Counted once here, before any rendering, so tree, flow and dot modes
 # disambiguate identically.  A constant (like RELATION_ORDER below) because
 # node_label is a def, and defs cannot close over top-level locals.
+# An empty graph (records == [], the --live-only case for a chat that is not
+# yet on disk) has nothing to label or render: skip the pre-render passes and
+# every rendering mode below rather than dereferencing a missing root node.
+if nodes.empty?
+  # --live with a chat that is not yet on disk: no transcript, but the sidecar
+  # and the job tree are real evidence.  Render the same live section the
+  # normal path appends (shared lambda, so the two paths cannot diverge).
+  if live
+    workload = Chat.live_workload(root)
+    unless workload.empty?
+      puts 'Live workload (in-flight while this prov run executes)'
+      puts '===================================================='
+      workload.each do |entry|
+        kind = entry[:chat_task] ? 'chat_task' : 'workflow'
+        state = entry[:state]
+        state = 'crashed/stale' if state == :crashed
+        puts format('  %-40s %-10s %-14s info=%s',
+                    entry[:reference], kind, state, entry[:status] || '(no .info)')
+      end
+    end
+  end
+  exit 0
+end
+
 JOB_NAME_COUNTS = Hash.new(0)
 nodes.each_value do |node|
   next unless node[:kind] == :job
@@ -1240,6 +1277,30 @@ if evidence
       location = evidence_location_str(detail[:evidence_address])
       tool = detail[:tool_name] || '?'
       puts "  job=#{object.path} at #{location} call=#{detail[:call_id]} tool=#{tool} (delegated_result edge)"
+    end
+  end
+end
+
+# ------------------------------------------------------------------
+# Live workload (--live): the transient <base>.jobs sidecar
+# ------------------------------------------------------------------
+# The sidecar exists only while Workflow.produce blocks inside a tool round
+# of THIS chat's agent, so it is read opportunistically: absent file is a
+# non-event and prints nothing (silence, not an error).  Entry
+# classification lives in the Chat utility layer (Chat.live_workload), so
+# the CLI only renders what the utility resolved.
+if live
+  workload = Chat.live_workload(root)
+  unless workload.empty?
+    puts
+    puts 'Live workload (in-flight while this prov run executes)'
+    puts '===================================================='
+    workload.each do |entry|
+      kind = entry[:chat_task] ? 'chat_task' : 'workflow'
+      state = entry[:state]
+      state = 'crashed/stale' if state == :crashed
+      puts format('  %-40s %-10s %-14s info=%s',
+                  entry[:reference], kind, state, entry[:status] || '(no .info)')
     end
   end
 end

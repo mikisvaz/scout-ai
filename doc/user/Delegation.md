@@ -93,6 +93,45 @@ can be traced afterwards with `scout-ai llm prov --evidence`. See the
 
 ---
 
+## Two views: the official conversation and the agent view
+
+When you run inference there are two distinct records, and provenance tools
+navigate both:
+
+- **The official conversation** — the main chat plus the answers of delegated
+  `chat_task` jobs projected into it. This is *the* conversation: what the
+  answer is, who said what, in what order.
+- **The agent view** — each agent's own save_file plus the state Scout-AI
+  keeps next to it: society logs of delegated conversations, the inbox, restart
+  snapshots, and the transient in-flight workload file. This is the working
+  record of *how* each agent produced its part.
+
+## The five ways of asking, and what you can see
+
+| # | Way of asking | While it runs (live) | After it ends (forensic) |
+|---|---|---|---|
+| 1 | Plain `LLM.ask` / endpoint call (no agent) | the save_file is written **inside** the ask stacks, so persisted state appears mid-run | persisted chat with token metas |
+| 2 | A normal agent ask | `<base>.chat` grows after each completed round; `<base>.inbox` is honoured; `<base>.jobs` appears while its own workflow tools produce | save_file transcript plus `step:`/`job=` receipts |
+| 3 | An `ask` **chat_task** (workflow answering for the agent) | the `job=` meta line lands in the agent's current chat and is saved **before** the task completes | the `job=` meta in the agent save_file; the answer projected into the conversation |
+| 4 | Delegation through `ask`/`hand_off_to_*` | the delegated conversation `<owner>.files/<name>.society/<Agent>/<conversation>/agent.chat` grows round by round; its sibling inbox is honoured | receipts under the `meta` key of the parent's `function_call_output` |
+| 5 | A tool call that runs a workflow job | `<base>.jobs` lists the in-flight job while `Workflow.produce` blocks | `function_call_output` JSON with exactly `{meta, content}` plus the `step:` short path |
+
+`scout-ai llm prov --live <chat>` renders the live half: the in-flight
+workload of an agent whose `.jobs` sidecar currently exists. Everything else
+the command shows is forensic (concluded work).
+
+## `chat_task` power, and why it is never exposed directly
+
+A `chat_task` input is text that gets parsed into a Chat — and a Chat can
+declare arbitrary tooling or execute arbitrary code. That makes chat_tasks
+extremely powerful and completely unsafe to hand to an untrusted model as a
+raw input. For that reason Scout-AI never exposes chat_tasks directly:
+higher layers (for example the Cortex workspace) expose them through
+prompt-only interfaces that append to conversations the agent has limited or
+indirect control over.
+
+---
+
 ## Named hand-off tools (delegate)
 
 `delegate` creates a specific tool for a pre-loaded agent:

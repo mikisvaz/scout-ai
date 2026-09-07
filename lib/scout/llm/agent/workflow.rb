@@ -56,6 +56,11 @@ module AgentWorkflow
     agent.save_file = LLM::Agent.canonical_chat_file(files_dir, name)
 
     if job_path_message
+      # ScoutCoder: agent.start_chat.system ... in this helper runs in the
+      # JOB process (fork), not the caller's process, so any test observing
+      # the system prompt must read the persisted <job>.files/<name>.chat
+      # after produce, or stub the helper; in-process instrumentation placed
+      # around job.produce never sees these lines.
       agent.start_chat.system <<-EOF
 Your current working directory is #{Dir.pwd}.
 You are working through an ask job with path #{self.path} and files_dir #{self.files_dir}.

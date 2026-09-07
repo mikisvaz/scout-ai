@@ -45,7 +45,7 @@ module LLM
     end.compact
   end
 
-  def self.process_calls(tools, calls, &block)
+  def self.process_calls(tools, calls, save_file: nil, &block)
     max_content_length = LLM.max_content_length
     IndiferentHash.setup tools
 
@@ -134,11 +134,23 @@ module LLM
     end
 
     jobs = tool_call_content.collect{|p| p.last }.select{|c| Step === c }
-    
-    if jobs.reject{|job| job.done? }.any?
+    workload = jobs.reject{|job| job.done? }
+    if workload.any?
+      # Live-workload sidecar to help provenance traversal: a SIBLING of the
+      # chat save_file holding the short paths of every workflow job still in
+      # flight, rewritten per round (it is a snapshot of the CURRENT set, not
+      # an append log) and removed in the ensure once Workflow.produce returns
+      # -- on success AND on error. Path derivation goes through
+      # Chat.jobs_file, the one trailing-strip sibling rule shared with
+      # .inbox/.inbox_removed.
+      jobs_file = Chat.jobs_file(save_file) if save_file
+      workload.each{|job| job.rec_dependencies.each{|job| job.init_info }; job.init_info }
+      Open.write(jobs_file, workload.collect{|j| j.short_path } * "\n") if jobs_file
       begin
         Workflow.produce jobs
       rescue
+      ensure
+        Open.rm jobs_file if jobs_file && Open.exists?(jobs_file)
       end
     end
 

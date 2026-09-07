@@ -91,7 +91,7 @@ module LLM
 
       if tool_calls && tool_calls.any?
         tool_calls = tool_calls.collect { |tool_call| parse_tool_call(tool_call) }
-        LLM.process_calls(tools, tool_calls, &block)
+        LLM.process_calls(tools, tool_calls, save_file: options[:save_file], &block)
       else
         [IndiferentHash.setup(message)]
       end

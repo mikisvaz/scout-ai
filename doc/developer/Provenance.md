@@ -266,6 +266,7 @@ Usage:
     scout-ai llm prov path/to/chat --dot flow.dot
     scout-ai llm prov path/to/chat --plot flow.svg
     scout-ai llm prov path/to/chat --evidence
+    scout-ai llm prov path/to/chat --live
 
 Root classification uses the `.info` sidecar only: a path is a job iff `<path>.info` exists, and is loaded with `Step.load`. The presence of a `.files` sidecar is **not** evidence of a job, because saved agent chats also carry one; a chat root is simply `Path.setup`'d.
 
@@ -282,6 +283,56 @@ The bare unqualified `total=` printed inside `--component` scope lines and `--ev
 Delegated calls are reported from receipts (the `meta` key). The tree labels a job reached through a receipt as `delegated-job`, adds one `delegated receipt: N events, total=<tt>, <tools>` annotation line under chats that carry receipts, and `--component` prints `scope local:` / `scope receipt:` / `scope aggregate:` lines when receipt evidence exists. Flow and DOT render receipt edges as `delegated_result`.
 
 `--evidence` prints the deduplicated direct inference events behind the totals: identity, raw token values, evidence locations (parent output address plus call id), and status (`counted once`, `receipt-only`, `legacy unresolved`, `conflict`), followed by receipt-only, legacy-unresolved, identity-conflict, and job-projection sections. `legacy unresolved` marks receipt events with no identity to deduplicate on (no `inference_id`); it is an accounting status, not a format marker. Receipt addresses print as `base:idx[meta,i]`, mirroring the persisted key. Receipt problems and identity conflicts are listed in the trailing warnings block.
+
+## Live workload (`--live`)
+
+Everything above is **forensic**: it needs concluded work, because receipts and
+saved transcripts only exist after a round completes. `--live` adds the one
+view that exists *while inference runs*: the transient `<base>.jobs` sidecar
+that `LLM.process_calls` maintains for the agent whose save_file base is
+`<base>`.
+
+Contract (see [DelegationInternals.md](DelegationInternals.md) for the full
+sibling-state convention):
+
+- **Discovery** — for save_file `<dir>/<base>.chat`, the sidecar is
+  `<dir>/<base>.jobs`, derived by `Chat.jobs_file` (strip only a *trailing*
+  `.chat`, append `.jobs`; a base with no `.chat` extension keeps its whole
+  name). `Chat.live_workload(reference)` accepts a chat file, a job path or a
+  bare save_file and reads the sidecar opportunistically: the file exists only
+  while `Workflow.produce` blocks inside a tool round of this chat's agent, so
+  an absent file is a **non-event** (returns `[]`, prints nothing — silence,
+  never an error).
+- **Content** — newline-separated job **short paths** (e.g.
+  `ProbeP5WF/slow_child/one`) of *all* in-flight workflow jobs, not only
+  chat_tasks; it is a snapshot rewritten per round and removed in an `ensure`
+  when produce returns (success or failure). Consumers classify; the writer
+  does not filter.
+- **Classification** — the live chat_task discriminator is
+  `step.type.to_s == 'chat'` (the `chat_task` annotation; a hand-written task
+  declaring `:chat` is inference by definition). This is deliberately
+  different from the concluded-work discriminator used by the forensic
+  traversal (output JSON with exactly the `meta` and `content` keys), which is
+  *not* re-checked here: the sidecar only ever lists in-flight jobs.
+- **Reconciliation** — each entry is resolved with
+  `Chat.load_live_job_reference` (the run's `Workflow.directory` is tried
+  first, because `Step.load` can relocate a bare short path onto an empty
+  mirror of the jobs tree) and its `.info` read: terminal status
+  (`done|error|aborted|cleaned`) → `finished`; non-terminal + live pid
+  (`/proc/<pid>` exists and is not a zombie) → `running`; non-terminal + dead
+  or absent pid → `crashed`.
+- **Caveats** — `kill -9` leaves `.info` non-terminal forever, so the observer
+  must reconcile through pid liveness; the LocalExecutor can resurrect a
+  "dead" job by overwriting `.info` with a new pid; and a listed job may
+  finish between the sidecar read and the `.info` read — snapshot races are
+  expected, and the renderer reports what it saw instead of erroring.
+
+Rendering: `--live` adds a clearly-labelled `Live workload (in-flight while
+this prov run executes)` section listing each entry as
+`<reference> chat_task|workflow running|finished|crashed/stale info=<status>`.
+It changes nothing else: no forensic output, receipt format or default CLI
+behaviour is touched, and a `--live` run over a root chat that is not yet on
+disk still works (no transcript, sidecar only).
 
 ## ChatAnalyst
 

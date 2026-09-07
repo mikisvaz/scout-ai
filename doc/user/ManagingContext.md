@@ -57,7 +57,11 @@ a file) needs to hand the agent a message without going through the chat file.
 The **inbox strategy** does that: on each inference it consumes the files in the
 chat's inbox directory and injects them as one-off user messages.
 
-Enable it alongside the default strategy:
+The strategy is **on by default**: `inbox` is part of
+`DEFAULT_CONTEXT_STRATEGY`, so every chat that passes a `save_file` gets it.
+You only need to set `prompt_strategies` to *extend* the default list (a
+user-supplied list **replaces** the default rather than appending to it) or to
+reorder it:
 
 ```text
 option prompt_strategies inbox,shorten_tools_epoch_increment
@@ -69,32 +73,58 @@ or programmatically:
 options[:prompt_strategies] = 'inbox,shorten_tools_epoch_increment'
 ```
 
+To turn it off, set `prompt_strategies` to a list without `inbox` (the string
+`none` is the recognized no-op that disables every strategy).
+
 ### Where the inbox lives
 
-The inbox lives at `<save_file>.files/inbox/` — the `inbox/` directory inside
-the `.files` directory of the chat's `save_file` itself (a chat's files dir is
-its own file name plus `.files`, so the nesting doubles up):
+The inbox is a **sibling of the chat's `save_file`**, in the save_file's own
+directory: take the save_file basename, strip its **last** extension if it has
+one (an extension-less basename keeps the whole name), and append `.inbox`.
+The log of delivered files is the same derivation with `.inbox_removed`:
 
-| Context | save_file | Inbox |
-|---|---|---|
-| `scout agent ask -c <chat>` | `<chat>.files/<agent>.chat` | `<chat>.files/<agent>.chat.files/inbox/` |
-| Agent workflow (`chat_task`) job | `<job>.files/<name>.chat` | `<job>.files/<name>.chat.files/inbox/` |
+| Context | save_file | Inbox | Removed log |
+|---|---|---|---|
+| `scout agent ask -c <chat>` | `<chat>.files/<agent>.chat` | `<chat>.files/<agent>.inbox` | `<chat>.files/<agent>.inbox_removed` |
+| Agent workflow (`chat_task`) job | `<job>.files/<name>.chat` | `<job>.files/<name>.inbox` | `<job>.files/<name>.inbox_removed` |
 
-- Drop a regular file (any name, any extension) into `inbox/`. Files are
-  delivered in **sorted filename order**, so name them (`001-first.md`,
-  `002-second.md`) if order matters.
-- On each inference the file is **moved** to the sibling `inbox_removed/`
-  directory (original modification time preserved; a name collision gets a
-  numeric suffix), and its content is appended to the prompt as a
-  `user`-role message.
-- Write files elsewhere and rename them into `inbox/` if you want to be sure
+A multi-dot save_file strips only the last extension (`a.b.chat` ->
+`a.b.inbox`); an extension-less save_file keeps its whole name (`agent` ->
+`agent.inbox`).
+
+- Drop a regular file (any name, any extension) into the inbox directory.
+  Files are delivered in **sorted filename order**, so name them
+  (`001-first.md`, `002-second.md`) if order matters.
+- On each inference the file is **moved** to the `.inbox_removed` sibling
+  (original modification time preserved; a name collision gets a numeric
+  suffix), and its content is appended to the prompt as a `user`-role
+  message.
+- Write files elsewhere and rename them into the inbox if you want to be sure
   the agent never reads a half-written file.
+
+### Reserved filename: `abort`
+
+One filename is special: a file named exactly `abort` (no extension,
+case-sensitive). When the pickup reaches it, the file is consumed like any
+other (moved to `.inbox_removed`, never delivered again) but its content is
+**not** sent to the model: the inference is aborted instead, with the file
+content as the abort reason. The job ends up marked as interrupted/aborted
+rather than failing with an ordinary error.
+
+Use it to stop a running agent from outside: `touch <inbox>/abort` for a
+plain abort, or write a short reason into the file (`stop, budget exhausted`)
+to have it recorded in the job's abort message.
+
+Files that sort before `abort` are consumed in that same run (and not
+delivered again); files sorting after it stay in the inbox for the next
+inference. No other filename is special: `abort.txt` or `Abort` are ordinary
+messages.
 
 ### What it does NOT do
 
 - **Injected messages are not persisted.** The model sees them, but the saved
-  chat file does not record them; `inbox_removed/` is the log of what was
-  delivered.
+  chat file does not record them; the `.inbox_removed` sibling is the log of
+  what was delivered.
 - **Delivery is at-most-once.** The file is moved before the message is built,
   so an interrupted inference may drop a notice but never delivers the same
   notice twice.
@@ -195,7 +225,7 @@ model actually saw:
 | Tool calls | All of them, in full | Possibly truncated/pruned |
 | File contents | Full file text | Same (unless cleared) |
 | `clear:` directives | Present as markers | Everything before is removed |
-| Inbox notices | **Absent** (see `inbox_removed/`) | Injected once, then gone |
+| Inbox notices | **Absent** (see the `.inbox_removed` sibling) | Injected once, then gone |
 | Conversation history | Complete | Recent turns only (after pruning) |
 
 This is by design: the saved chat is the **ground truth** of what happened;
@@ -208,7 +238,8 @@ the model's prompt is an **optimized view** for the current inference call.
 - **Expecting the saved chat to match the model's input**: They can differ.
   The saved chat is the record; the model's prompt is ephemeral.
 - **Expecting inbox notices in the chat transcript**: Inbox messages are
-  delivered to the model only; check `<files dir>/inbox_removed/` for the
+  delivered to the model only; check the `<files dir>/<name>.inbox_removed`
+  sibling of the save_file for the
   delivery record.
 - **Importing too much data**: Large files eat context. Use tools for
   on-demand data.

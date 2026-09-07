@@ -24,7 +24,7 @@ class TestLLMToolCallAgentPairing < Test::Unit::TestCase
   end
 
   def shared_worker
-    LLM::Agent.new(start_chat: Chat.setup([{role: :system, content: 'worker helper'}]))
+    LLM::Agent.new(start_chat: Chat.setup([{role: :system, content: 'worker helper'}]), endpoint: :mock)
   end
 
   def call(id, prompt)
