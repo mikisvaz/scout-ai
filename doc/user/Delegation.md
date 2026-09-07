@@ -116,9 +116,35 @@ navigate both:
 | 4 | Delegation through `ask`/`hand_off_to_*` | the delegated conversation `<owner>.files/<name>.society/<Agent>/<conversation>/agent.chat` grows round by round; its sibling inbox is honoured | receipts under the `meta` key of the parent's `function_call_output` |
 | 5 | A tool call that runs a workflow job | `<base>.jobs` lists the in-flight job while `Workflow.produce` blocks | `function_call_output` JSON with exactly `{meta, content}` plus the `step:` short path |
 
-`scout-ai llm prov --live <chat>` renders the live half: the in-flight
-workload of an agent whose `.jobs` sidecar currently exists. Everything else
+`scout-ai llm prov --live <chat>` renders the live half. Everything else
 the command shows is forensic (concluded work).
+
+### Watching live work with `--live`
+
+While a run is in flight, `scout-ai llm prov --live <chat>` appends a
+`Live work` section after the normal report. Each line names one piece of
+actually-running work, in plain language:
+
+- **`chat_task`** — an inference job that is running right now (the running
+  chat task of the delegation, including the dependency behind a wrapper
+  tool call such as a workspace `continue`); its agent log path is shown.
+- **`agent_active`** — an agent mid-turn (prompt dispatched, tool round in
+  flight, or next round pending), named by its save file.
+- **`dangling_job`** — a specialist agent whose `job=` reference is on disk
+  while the job behind it still runs.
+- **`workflow`** — other in-flight workflow jobs: non-chat work, or a
+  waiting wrapper whose dependency is the running `chat_task` line above.
+
+Work the normal report already shows is not repeated, and when nothing is in
+flight the section disappears entirely: a quiet `--live` run prints exactly
+what plain `prov` prints. Two things to keep in mind:
+
+- a just-finished round may not yet show as active — the save file is
+  rewritten at round boundaries, so there is a brief instant where a running
+  agent looks idle (never the reverse); and
+- run the command from the same working directory as the run you are
+  watching, because the in-flight job references resolve against the
+  `var/jobs` tree of the current directory.
 
 ## `chat_task` power, and why it is never exposed directly
 

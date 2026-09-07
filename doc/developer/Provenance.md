@@ -327,12 +327,142 @@ sibling-state convention):
   finish between the sidecar read and the `.info` read — snapshot races are
   expected, and the renderer reports what it saw instead of erroring.
 
-Rendering: `--live` adds a clearly-labelled `Live workload (in-flight while
-this prov run executes)` section listing each entry as
-`<reference> chat_task|workflow running|finished|crashed/stale info=<status>`.
-It changes nothing else: no forensic output, receipt format or default CLI
-behaviour is touched, and a `--live` run over a root chat that is not yet on
-disk still works (no transcript, sidecar only).
+`Chat.live_workload` is the sidecar half only; the CLI renders the unified
+live report, `Chat.live_report` (next section), which folds this pass with
+two more. It changes nothing else: no forensic output, receipt format or
+default CLI behaviour is touched, and a `--live` run over a root chat that
+is not yet on disk still works (empty forensic graph, live section only).
+
+## Live work (`--live`)
+
+`Chat.live_report(save_file, captured:)` is the unified, data-only live unit
+the CLI renders. It folds three passes and returns:
+
+    Chat.live_report(save_file, captured: ids)
+    # => {entries: [...], scanned: {sidecar:, agent_view:, society:}}
+
+| Pass | Reads | Closes |
+|---|---|---|
+| sidecar | `<base>.jobs` through `Chat.live_workload` (contract above), then `Chat.expand_live_jobs` | running dependencies of a listed wrapper (way 5) |
+| agent view | the root agent save file, `Chat.agent_view_live` | plain-agent activity and dangling `job=` metas (ways 2 and 3) |
+| society | `<base>.society/**`, `Chat.society_live` | delegated conversations the forensic `:log` relation excludes (way 4) |
+
+The "ways" are those of the five-ways table in
+[Delegation.md](../user/Delegation.md#the-five-ways-of-asking-and-what-you-can-see).
+
+### Sidecar pass with dependency expansion
+
+`Chat.expand_live_jobs` walks each sidecar entry through its **direct**
+`dependencies` (`Chat.walk_live_job`) — deliberately not `rec_dependencies`,
+which is itself a recursive, cycle-safe flattener and would return the whole
+transitive closure on the first hop, making the depth cap dead code —
+collecting only `classify_live_job == :running` jobs. A visited-path cycle
+guard and `LIVE_DEPENDENCY_DEPTH_LIMIT` (5) are two independent bounds.
+Running chat tasks become the inference entries, with
+`Chat.live_chat_task_agent_log` attaching `<job>.files/<name>.chat` and its
+activity; running non-chat jobs stay as workload context, so nothing the
+sidecar view reported before disappears. `via:` records which sidecar entry
+reached each job, keeping the wrapper visible without duplicating the
+inference.
+
+**Waiting-wrapper fallback.** Scout-gear writes a job's `dependencies:` into
+`.info` only at `reset_info(status: :setup)`, which runs *after*
+`run_dependencies` returns: while a chat_task dependency runs, the wrapper
+`.info` is still `{"status":"waiting"}` with no pid and no dependencies, so
+the plain pid rule classifies it `:crashed` and there are no recorded edges
+to walk. `Chat.live_dependency_candidates` covers exactly that window: when
+a step has no recorded dependencies and no terminal status, it scans the
+wrapper's own **workflow namespace** (`var/jobs/<Workflow>/*/*.info`, sibling
+task directories — globbing `.info` files, not directories, because a
+chat_task job path is itself a file) for running jobs. The workflow
+definition is never loaded (the `workflows` pathmap cannot see an arbitrary
+jobs tree), attribution stays bounded to the wrapper's own workflow
+directory, and the scan is read-only and fail-soft. `Chat.live_report` then
+reports the wrapper once as workload context with `state: :waiting`.
+
+### Agent view pass
+
+`Chat.agent_log_activity` classifies an agent save file from its trailing
+messages, skipping control roles (`meta`, `option`, `sticky_option`,
+`previous_response_id`, `agent`, `import`, `socialize`, `attachments`):
+
+| trailing conversational message | verdict |
+|---|---|
+| `user` | active, `:dispatched` |
+| `function_call` with no later `function_call_output` | active, `:tool_round_in_flight` |
+| `function_call_output` | active, `:next_round_pending` |
+| `assistant` with no open call | inactive, `:idle` |
+| empty file / unreadable or missing file | inactive, `:no_messages` / `:unreadable` |
+| any other role (system, introduce, tool) | inactive, `:no_inference` |
+
+`rounds:` counts `assistant` messages. Accepted false negative: an
+`assistant`-terminated file reads idle during the round-boundary window in
+which a completed round is already saved but the next dispatch is not
+flushed yet, so a mid-conversation agent can be missed for that instant
+(never a false positive). The predicate is sound because two writers rewrite
+the file on that cadence: the backend with the outgoing transcript at every
+round boundary, and the agent layer with the completed round afterwards
+(`Agent#chat` ensure → `save_if_configured`).
+
+`Chat.dangling_agent_job_metas` reads the save file's `job=` metas with
+`Chat#jobs` — the same reader the forensic traversal uses for the captured
+set, not receipt-borne `:agent_job` references, which stay forensic-only —
+and follows each reference to a running job. The `job=` meta is written at
+dispatch, before `job.produce` blocks, so it dangles for exactly the
+duration of the child run; references to terminal jobs and to already
+captured ids are not reported.
+
+### Society pass
+
+The forensic `:log` relation for a chat root excludes society files
+(`direct_chat_sidecar_files`); society conversations are live-only territory,
+visible to the main report only once their receipt lands in the parent chat.
+`Chat.society_dir_of` reuses the agent layer's society layout rules (with a
+literal fallback while the agent class is not loaded), `Chat.society_agent_chats`
+scans `<base>.society/` for files named `agent.chat` — bounded to
+`SOCIETY_SCAN_DEPTH_LIMIT` (128) directory levels, symlinks skipped, sorted
+output — and `Chat.society_live` reports each child whole: `kind:
+:dangling_job` when the child is workflow-backed (its own save file holds
+the dangling `job=` meta) and `kind: :agent_activity` otherwise, the
+activity hash riding along either way. A child whose job reference is
+already captured is skipped entirely — its whole current turn *is* that job.
+
+### Folding, dedup and rendering
+
+Entries are keyed by job id (the sidecar short path, the same form a `job=`
+meta stores, so cross-pass matching is plain string equality) or by
+agent-log path when no job exists. Rules:
+
+- a job id in `captured` — ids normalized by `Chat.live_captured_ids` from
+  the forensic report's job nodes — is dropped in **every** pass: the main
+  report already holds it;
+- the same job arriving from two passes merges into one entry
+  (`Chat.merge_live_entries`): hashes are deep-merged, `source` tags are
+  united, and scalar facts of the earlier entry win unless empty — so a
+  sidecar `:inference` entry keeps its kind when an agent-side entry names
+  the same job;
+- per agent-log file the two agent-side signals collapse to one entry, the
+  dangling job winning as the kind;
+- a log file whose running `job=` references are all captured drops its bare
+  activity entry too; files with no running reference at all (the plain
+  agent, way 2) keep it.
+
+The CLI appends a `Live work (in-flight while this prov run executes)`
+section after the normal report, one line per entry:
+`<kind label> <reference> <state or reason> <sources> [log=<path>]
+[info=<status>]`, kinds relabelled `chat_task` (`:inference`),
+`dangling_job`, `agent_active` (`:agent_activity`) and `workflow`
+(`:workload_context`), inference first. The section — header included — is
+omitted when there are no entries, so a quiescent `--live` run is identical
+to plain `prov`; a `--live` run on a chat root that is not yet on disk
+proceeds with an empty forensic graph and renders the live section alone.
+
+`.jobs` short references resolve through `Workflow.directory`, whose default
+is the PWD-relative `var/jobs`: the observer must run in the working
+directory that owns the jobs tree. Live entries carry no token figures:
+in-flight jobs have no receipts yet, and the offline mock backend emits no
+usage or cost fields at all, so live cost attribution is deferred to a
+backend that reports usage.
 
 ## ChatAnalyst
 
@@ -357,6 +487,8 @@ ChatAnalyst is expected to consume the receipt primitives above — `Chat.agent_
 | `lib/scout/llm/chat/tool_calls.rb` | Tool-call pairing and common status interpretation. |
 | `lib/scout/llm/backends/default.rb` | Direct token metadata and inference identities. |
 | `lib/scout/llm/agent/workflow.rb` | Agent log persistence and chat-task projection. |
+| `lib/scout/llm/agent/save.rb` | Save-file and society-tree layout the live passes read. |
+| `lib/scout/llm/tools/call.rb` | `<base>.jobs` sidecar writer/removal in `LLM.process_calls`. |
 | `scout_commands/llm/prov` | Tree, flow, DOT, and plot rendering. |
 
 ## Cross-references

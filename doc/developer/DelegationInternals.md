@@ -158,10 +158,76 @@ Delegation is observable *while it runs*, not only afterwards:
   task completes, so the job reference exists while the answer is still being
   computed.
 
+**Plain agents (no workflow)** never write a `job=` meta at all: their `ask`
+calls `LLM.ask` directly with `save_file: self.save_file`, producing no
+workflow job, so their liveness is observable only through save-file growth.
+
+#### The activity predicate
+
+The live pass classifies an agent save file from its **trailing
+conversational message**, skipping control roles (`meta`, `option`,
+`sticky_option`, `previous_response_id`, `agent`, `import`, `socialize`,
+`attachments`) so a file that ends with the dispatch-time `meta: job=…`
+line still reads as its real trailing turn. Encoded rules
+(`Chat.agent_log_activity`):
+
+| trailing message | verdict |
+|---|---|
+| `user` | active, `:dispatched` |
+| `function_call` with no later `function_call_output` | active, `:tool_round_in_flight` |
+| `function_call_output` | active, `:next_round_pending` |
+| `assistant` with no open call | inactive, `:idle` |
+| empty file | inactive, `:no_messages` |
+| unreadable/missing file | inactive, `:unreadable` |
+| any other role (system, introduce, tool) | inactive, `:no_inference` |
+
+`rounds:` is the count of `assistant` messages. The predicate is sound only
+because two writers rewrite the save file on a known cadence: the backend
+writes the outgoing transcript at every round boundary, and the agent layer
+rewrites the completed round afterwards (`Agent#chat` ensure →
+`save_if_configured`). Accepted false negative: an `assistant`-terminated
+file reads idle during the brief round-boundary window in which a completed
+round is saved but the next dispatch is not flushed yet — a mid-conversation
+agent can be missed for that instant, never falsely reported.
+
+#### The dangling `job=` meta lifecycle
+
+Type-3 dispatch (`Agent#ask` on a workflow-backed agent) writes
+`self.message(:meta, Chat.serialize_meta(job: job.short_path))` and
+immediately `self.save`, both **before** `job.produce` blocks: the reference
+is on disk in the agent's own save file — for a societal child, the society
+child file itself, never the parent's root chat — for exactly the duration
+of the child run, and stays there afterwards pointing at a terminal job.
+The live pass follows these references to jobs and reports only the ones
+that are still running; the parent's root chat gets no `function_call`
+record for the child until the tool round completes, which is why the
+society tree and the child save files, not the parent chat, are the live
+evidence for type 4.
+
+#### Waiting wrappers and the dependency fallback
+
+`LLM.process_calls` calls `init_info` on every in-flight job **and its
+`rec_dependencies`** before writing the sidecar, so `.info` files exist for
+reconciliation even for dependency-nested running work. But scout-gear
+records a job's `dependencies:` in `.info` only at
+`reset_info(status: :setup)`, which runs after `run_dependencies` returns:
+while a chat_task dependency runs, the wrapper `.info` is still
+`{"status":"waiting"}` — no pid, no dependencies. The live traversal covers
+that window by scanning the wrapper's own workflow namespace
+(`var/jobs/<Workflow>/*/*.info`, sibling task directories; `.info` glob, not
+a directory glob, because a chat_task job path is itself a file) for running
+jobs, reporting the wrapper once as workload context with `state:
+:waiting`. The workflow definition is never loaded (the `workflows` pathmap
+cannot see an arbitrary jobs tree), attribution stays bounded to the
+wrapper's workflow directory, the walk uses direct `dependencies` with a
+visited-path cycle guard plus a depth cap (`LIVE_DEPENDENCY_DEPTH_LIMIT` 5),
+and everything is fail-soft: absent sidecar, absent save file, absent
+society tree and unreadable jobs each yield nothing, never an error.
+
 After conclusion the forensic trail takes over: `step:` short paths, receipts
 under the `meta` key of the `function_call_output` envelope, and the projected
 chat_task answer in the conversation. See
-[Provenance.md](Provenance.md#live-workload---live) for the consumer side.
+[Provenance.md](Provenance.md#live-work---live) for the consumer side.
 
 ### The `open_conversation` pipeline — get-or-create
 
@@ -353,6 +419,8 @@ New code should use `conversation` and `inherit` as separate parameters.
 | `lib/scout/llm/agent.rb` | `Agent` class, `ask` entry point, `load_agent` class method |
 | `lib/scout/llm/agent/chat.rb` | `start_chat`, `current_chat`, Chat proxy via `method_missing` |
 | `lib/scout/llm/agent/workflow.rb` | `chat_task`, `log_agent` — workflow integration |
+| `lib/scout/llm/chat/provenance.rb` | Live passes over save files, society trees and `.jobs` sidecars |
+| `lib/scout/llm/tools/call.rb` | `<base>.jobs` writer/removal in `LLM.process_calls` |
 
 ---
 

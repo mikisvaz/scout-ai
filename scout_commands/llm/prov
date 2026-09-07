@@ -21,7 +21,7 @@ $ #{cmd} [<options>] <filename>
 -f--flow Print a compact provenance flow
 -l--long Show full filesystem paths instead of abbreviated names
 -e--evidence List the deduplicated direct inference events and their evidence
---live Show the live workload: in-flight workflow jobs from the <base>.jobs sidecar
+--live Show live work: in-flight inference from the .jobs sidecar, agent logs and society trees, beyond the captured report
 --dot* Write the flow as Graphviz DOT
 -p--plot* Render the flow as svg, png, or pdf
 --timeline* Render the execution timeline as svg, png, pdf, or dot
@@ -113,6 +113,61 @@ records.each do |kind, object, parent_kind, parent, relation, first_visit, _deta
 end
 root_key = Chat.provenance_key(root_type, root)
 
+# ------------------------------------------------------------------
+# Live section machinery (--live): render the unified live report
+# ------------------------------------------------------------------
+# Captured ids: the job references the forensic report already resolves.
+# Taken from the SAME traversal records this script renders - :job edges
+# (chat.jobs metas) and :agent_job edges (receipts) - so the live section
+# never re-defines "captured"; whatever the normal report shows as a job
+# node counts as captured.  Both the Step#path form and the raw reference
+# string form are included because live entries carry the sidecar's short
+# form while edges carry Step objects.
+captured_references = records.collect do |kind, object, parent_kind, _parent, relation, _first|
+  next nil unless parent_kind == :chat && kind == :job
+  next nil unless relation == :job || relation == :agent_job
+  [object.respond_to?(:path) ? object.path.to_s : object.to_s]
+end.compact.flatten
+
+# One renderer for both call sites (appended section after the normal
+# report, and the --live-only fallback below), so the two cannot diverge.
+# Renders nothing - not even the header - when nothing is live: `--live`
+# output then equals the normal report exactly.
+render_live_section = lambda do |live_base|
+  report = Chat.live_report(live_base, captured: captured_references)
+  entries = report[:entries]
+  next if entries.empty?
+
+  puts
+  puts 'Live work (in-flight while this prov run executes)'
+  puts '================================================='
+  # Stable order: kind first (inference before dangling_job before the
+  # rest - LIVE_KIND_ORDER below), then identifying path.
+  LIVE_KIND_ORDER = {inference: 0, dangling_job: 1, agent_activity: 2, workload_context: 3}
+  entries.sort_by! do |entry|
+    [LIVE_KIND_ORDER[entry[:kind]] || 99, entry[:path].to_s]
+  end
+  entries.each do |entry|
+    kind = LIVE_KIND_LABEL[entry[:kind]] || entry[:kind].to_s
+    # The identifying reference: the job's short path when the entry has
+    # one, else the agent-log path.
+    reference = entry[:reference].to_s
+    reference = entry[:agent_file].to_s if reference.empty?
+    detail = entry[:reason] || entry[:state]
+    detail = 'crashed/stale' if detail == :crashed
+    detail = detail.to_s if detail.is_a?(Symbol)
+    sources = [entry[:source]].flatten.compact.uniq.collect(&:to_s) * ','
+    extra = []
+    extra << "log=#{entry[:agent_log]}" if entry[:agent_log] && entry[:agent_log] != reference
+    extra << "info=#{entry[:status]}" if entry[:status]
+    line = format('  %-12s %-40s %-14s %-18s', kind, reference, detail, sources)
+    line += ' ' + extra.join(' ') unless extra.empty?
+    puts line
+  end
+end
+LIVE_KIND_LABEL = {inference: 'chat_task', dangling_job: 'dangling_job',
+                   agent_activity: 'agent_active', workload_context: 'workflow'}
+
 # Job nodes whose jobname (Step#clean_name) is not the `Default` sentinel
 # label with the jobname instead of the input-hash excerpt.  Jobnames are not
 # unique: a conversation continued twice shares one jobname, so names used by
@@ -124,23 +179,11 @@ root_key = Chat.provenance_key(root_type, root)
 # yet on disk) has nothing to label or render: skip the pre-render passes and
 # every rendering mode below rather than dereferencing a missing root node.
 if nodes.empty?
-  # --live with a chat that is not yet on disk: no transcript, but the sidecar
-  # and the job tree are real evidence.  Render the same live section the
-  # normal path appends (shared lambda, so the two paths cannot diverge).
-  if live
-    workload = Chat.live_workload(root)
-    unless workload.empty?
-      puts 'Live workload (in-flight while this prov run executes)'
-      puts '===================================================='
-      workload.each do |entry|
-        kind = entry[:chat_task] ? 'chat_task' : 'workflow'
-        state = entry[:state]
-        state = 'crashed/stale' if state == :crashed
-        puts format('  %-40s %-10s %-14s info=%s',
-                    entry[:reference], kind, state, entry[:status] || '(no .info)')
-      end
-    end
-  end
+  # --live with a chat that is not yet on disk: no transcript, but the
+  # sidecar, the agent save file and the job tree are real evidence.
+  # Routed through the same shared renderer the normal path appends, so
+  # the two paths cannot diverge.
+  render_live_section.call(root) if live
   exit 0
 end
 
@@ -1289,21 +1332,10 @@ end
 # non-event and prints nothing (silence, not an error).  Entry
 # classification lives in the Chat utility layer (Chat.live_workload), so
 # the CLI only renders what the utility resolved.
-if live
-  workload = Chat.live_workload(root)
-  unless workload.empty?
-    puts
-    puts 'Live workload (in-flight while this prov run executes)'
-    puts '===================================================='
-    workload.each do |entry|
-      kind = entry[:chat_task] ? 'chat_task' : 'workflow'
-      state = entry[:state]
-      state = 'crashed/stale' if state == :crashed
-      puts format('  %-40s %-10s %-14s info=%s',
-                  entry[:reference], kind, state, entry[:status] || '(no .info)')
-    end
-  end
-end
+# --live: the unified live report (sidecar with dependency expansion, the
+# root agent's own view, and the society tree), minus everything the
+# forensic report above already captured.  Silent when nothing is live.
+render_live_section.call(root) if live
 
 warnings.each do |warning|
   error = warning[:error]

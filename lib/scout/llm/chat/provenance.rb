@@ -980,6 +980,861 @@ module Chat
     end
   end
 
+  # ------------------------------------------------------------------
+  # Dependency expansion + unified live report
+  # ------------------------------------------------------------------
+  # expand_live_jobs below walks the dependencies a wrapper job RECORDS in
+  # its `.info`; live_report folds the three live passes.  Between them
+  # sits one repair: the waiting-wrapper fallback.
+
+  # ------------------------------------------------------------------
+  # Waiting-wrapper fallback: definition-blind dependency discovery
+  # ------------------------------------------------------------------
+  # Gap-4 repair.  A wrapper job whose chat_task dependency is still
+  # running sits at `{"status":"waiting"}` with NO pid and NO
+  # `dependencies` key: scout-gear's Step#run records the dependency list
+  # in `.info` only at reset_info(status: :setup) inside the persist
+  # block, i.e. AFTER run_dependencies returns (probe: p4-fix-probe.md —
+  # `dependencies` appears only after the dependency itself flipped to
+  # done).  A file-based reader that only consults `step.dependencies`
+  # is therefore structurally blind in exactly the window the live pass
+  # exists for.
+  #
+  # Fallback used here (direction 1 in step 4's design): when a wrapper
+  # Step carries no recorded dependencies, look for running jobs in the
+  # wrapper's own TASK namespace on disk — `var/jobs/<Workflow>/<task>`.
+  # Scout-gear materializes every dependency of a job under the SAME
+  # workflow namespace (its job directory is <workflow_dir>/<task>), so a
+  # sibling job directory in that namespace that is itself running is a
+  # dependency candidate.  This deliberately does NOT try to load the
+  # workflow definition (require_workflow resolves names through the
+  # `workflows` pathmap, which points at ~/.scout/workflows and cannot
+  # see an arbitrary jobs tree — probe (b)); the namespace scan is local
+  # to the data the pass already owns.  Attribution stays bounded: only
+  # jobs in the SAME workflow directory as the wrapper are considered,
+  # and captured ids keep their dedup role.
+
+  # Candidate dependency jobs of a wrapper Step whose `.info` predates
+  # dependency recording: running job directories in the wrapper's WORKFLOW
+  # namespace (`File.dirname(File.dirname(step.path))`), i.e. sibling task
+  # directories — where scout-gear materializes every dependency of the
+  # wrapper.  Returns [] when the step is fine (has recorded dependencies),
+  # is in a terminal phase, or nothing on disk qualifies.  Never raises.
+  def self.live_dependency_candidates(step)
+    return [] unless Step === step
+    info = begin
+      step.info
+    rescue StandardError
+      return []
+    end
+    return [] if Array === info[:dependencies] && !info[:dependencies].empty?
+
+    status = info[:status].to_s
+    return [] if LIVE_TERMINAL_STATUSES.include?(status)
+
+    # Workflow namespace, one level ABOVE the wrapper's task dir: probe (c)
+    # confirmed dependencies materialize as sibling TASK directories under
+    # var/jobs/<Workflow>/ (CortexWF/continue beside CortexWF/cortex_continue),
+    # never inside the wrapper's own task dir.  Definition-driven resolution
+    # (the first choice) is infeasible from a jobs tree: require_workflow
+    # resolves names through the `workflows` pathmap (~/.scout/workflows),
+    # which cannot see an arbitrary Workflow.directory (probe (b)).
+    workflow_dir = begin
+      File.dirname(File.dirname(step.path.to_s))
+    rescue StandardError
+      return []
+    end
+    return [] unless File.directory?(workflow_dir)
+
+    step_path = step.path.to_s
+    candidates = []
+    # Glob `.info` files, not job directories: a chat_task's job path is
+    # itself a FILE (`<name>.chat`, the result), with `.files` beside it;
+    # a directory-only scan sees `<name>.chat.files` and misses the job.
+    Dir.glob(File.join(workflow_dir, '*', '*.info')).sort.each do |info_file|
+      entry = info_file.sub(/\.info\z/, '')
+      next if entry == step_path
+
+      begin
+        dep_info = Step.load_info(info_file)
+      rescue StandardError
+        next
+      end
+      state, _status = classify_live_job_info(dep_info)
+      next unless state == :running
+
+      dep_step = begin
+        Step.load(entry)
+      rescue StandardError
+        next
+      end
+      candidates << dep_step
+    end
+    candidates
+  end
+
+  # Same classification as classify_live_job but from an already-loaded
+  # info Hash (no Step round-trip); used by live_dependency_candidates.
+  def self.classify_live_job_info(info)
+    return [:unknown, nil] unless Hash === info
+    status = info[:status]
+    if LIVE_TERMINAL_STATUSES.include?(status.to_s)
+      return [:finished, status]
+    end
+    state = live_pid?(info[:pid]) ? :running : :crashed
+    [state, status]
+  end
+
+  # ------------------------------------------------------------------
+  # Unified live report: sidecar + agent view + society, deduplicated
+
+  # ------------------------------------------------------------------
+  # Closes the fourth live gap: the `.jobs` sidecar lists the job the tool
+  # call RESOLVED (a plain wrapper such as Cortex#cortex_continue), while
+  # the actually-running inference lives in a DEPENDENCY job (the chat task
+  # Cortex#continue).  `LLM.process_calls` already walks
+  # `job.rec_dependencies` to init their `.info` before producing
+  # (tools/call.rb), so the dependency chain is exactly where the live
+  # inference is; the sidecar entry alone is not.
+  #
+  # This section also folds the three live passes (sidecar, agent view,
+  # society) into one data-only report, `Chat.live_report`, which is the
+  # unit the CLI will render.
+
+  # Depth cap for the dependency walk.  Step#rec_dependencies is itself
+  # cycle-safe (it threads a seen-set through the recursion, scout-gear
+  # lib/scout/workflow/step/dependencies.rb), so this cap is a second,
+  # independent guard against a hand-built or stubbed dependency graph and
+  # against pathological depth; it is not load-bearing for real graphs.
+  LIVE_DEPENDENCY_DEPTH_LIMIT = 5
+
+  # Agent log file of a running chat task: the chat_task machinery anchors
+  # its agents under the JOB's files dir (AgentWorkflow log_agent,
+  # agent/workflow.rb: `agent.save_file = Agent.canonical_chat_file(
+  # files_dir, agent_name)`), so the log lives at
+  # `<job>.files/<agent_name>.chat` and defaults to `agent.chat` when the
+  # agent was unnamed.  Returns nil when no such file exists.
+  def self.live_chat_task_agent_log(step, agent_name: nil)
+    return nil unless Step === step
+    files_dir = begin
+      step.files_dir
+    rescue
+      return nil
+    end
+    return nil if files_dir.nil?
+
+    names = agent_name ? [agent_name] : ['agent', nil]
+    names.each do |name|
+      begin
+        candidate = LLM::Agent.canonical_chat_file(files_dir, name)
+      rescue
+        return nil
+      end
+      return candidate if File.exist?(candidate)
+    end
+
+    nil
+  end
+
+  # Expand sidecar job entries into the set of RUNNING jobs reachable from
+  # them (each entry plus its rec_dependencies), with cycle (visited-set)
+  # and depth (LIVE_DEPENDENCY_DEPTH_LIMIT) guards.  Returns an Array of
+  # Hashes:
+  #
+  #   {step: Step, path:, reference:, status:, state: :running,
+  #    chat_task: true|false, agent_log: <path or nil>,
+  #    activity: <agent_log_activity hash or nil>,
+  #    via: <short path of the sidecar entry that reached it>}
+  #
+  # Only `classify_live_job == :running` jobs are kept (finished/crashed
+  # dependencies are not live work), and `chat_task` uses the same LIVE
+  # discriminator as live_workload (`step.type.to_s == 'chat'`).  Running
+  # non-chat dependencies are kept as workload CONTEXT (information the
+  # sidecar view reported before must not disappear); the unified report
+  # below separates inference from context, this method keeps both.
+  #
+  # `via` records which sidecar entry each job was reached through, so the
+  # wrapper's presence stays visible without duplicating the inference.
+  def self.expand_live_jobs(entries)
+    entries = entries.respond_to?(:each) ? entries : [entries]
+    collected = []
+    visited = Set.new
+
+    entries.each do |entry|
+      step = Step === entry ? entry : load_live_job_reference(entry)
+      # `via` is the sidecar ENTRY (short path) for a String entry, or the
+      # job's own short path for a Step entry, so the reported `reference`
+      # stays in the same form the sidecar and a `job=` meta both use.
+      via = Step === entry ? begin
+        step.short_path
+      rescue StandardError
+        step.path.to_s
+      end : entry.to_s
+      walk_live_job(step, via, 0, visited, collected)
+    end
+
+    collected
+  end
+
+  # One visited node of the dependency walk: classify, keep if running,
+  # recurse into rec_dependencies while under the depth cap.  Fail-soft per
+  # job: an entry whose job cannot be loaded or classified is skipped
+  # silently (the forensic traversal is the place to diagnose it).
+  def self.walk_live_job(step, via, depth, visited, collected)
+    return nil unless Step === step
+
+    path = begin
+      step.path.to_s
+    rescue
+      return nil
+    end
+    return nil if visited.include?(path)
+    visited << path
+
+    state, status = classify_live_job(step)
+    if state == :running
+      type = begin
+        step.type.to_s
+      rescue
+        nil
+      end
+      chat_task = type == 'chat'
+      agent_log = chat_task ? live_chat_task_agent_log(step) : nil
+      reference = begin
+        step.short_path
+      rescue StandardError
+        via
+      end
+      collected << {
+        step: step,
+        path: path,
+        reference: reference,
+        status: status,
+        state: state,
+        chat_task: chat_task,
+        agent_log: agent_log,
+        activity: agent_log ? agent_log_activity(agent_log) : nil,
+        via: via
+      }
+    end
+
+    return nil if depth >= LIVE_DEPENDENCY_DEPTH_LIMIT
+
+    # One level at a time, NOT Step#rec_dependencies: rec_dependencies is
+    # itself a recursive, cycle-safe flattener, so walking it would return
+    # the whole transitive set on the first hop and make the depth cap
+    # below meaningless (it can never fire past depth one).  Walking
+    # `dependencies` (the direct, recorded edges) keeps BOTH guards of this
+    # walk operative: the visited-set here and the depth cap, each an
+    # independent second line of defense for stubbed or hand-built graphs.
+    deps = begin
+      step.dependencies
+    rescue StandardError
+      []
+    end
+
+    # Waiting-wrapper repair (see the fallback section above): a wrapper in
+    # a pre-dependency phase (waiting, no `dependencies` key yet, no pid)
+    # records nothing for `step.dependencies` to walk — fall back to the
+    # definition-blind sibling scan of its task namespace.  Only invoked
+    # when the recorded set is empty AND the step itself is in that phase,
+    # so a DONE wrapper or a genuinely dependency-free task is unaffected.
+    if Array(deps).empty?
+      candidates = live_dependency_candidates(step)
+      unless candidates.empty?
+        collected << {
+          step: step,
+          path: path,
+          reference: begin
+            step.short_path
+          rescue StandardError
+            via
+          end,
+          status: status,
+          state: :waiting,
+          chat_task: false,
+          agent_log: nil,
+          activity: nil,
+          via: via
+        }
+      end
+      deps = candidates
+    end
+    Array(deps).each do |dep|
+      walk_live_job(dep, via, depth + 1, visited, collected)
+    end
+    nil
+  end
+
+  # Merge two same-job entries, keeping the union of their facts.  Keys
+  # present in only one entry win as-is; keys present in both (e.g. nil vs
+  # a real agent_log, or two different :source tags) resolve to the
+  # non-nil/non-empty side, so a job reached by the sidecar pass AND by a
+  # dangling `job=` meta keeps the richest view, never two entries.
+  def self.merge_live_entries(one, other)
+    merged = one.dup
+    other.each do |key, value|
+      current = merged[key]
+      if current.nil? || current.respond_to?(:empty?) && current.empty?
+        merged[key] = value
+      elsif value.is_a?(Hash) && current.is_a?(Hash)
+        merged[key] = current.merge(value)
+      end
+    end
+    merged[:source] = [one[:source], other[:source]].flatten.compact.uniq if one[:source] || other[:source]
+    merged
+  end
+
+  # Unified LIVE report for the chat (or job) at `save_file`/`reference`:
+  # the single data-only unit that folds the three live passes and that the
+  # CLI will render.
+  #
+  #   Chat.live_report(save_file, captured: ids)
+  #   # => {entries: [...], scanned: {sidecar: bool, agent_view: bool,
+  #   #                              society: bool}}
+  #
+  # Entry schema (superset per kind; kind is one of :inference,
+  # :workload_context, :agent_activity, :dangling_job):
+  #
+  #   {kind:, source: [:sidecar|:agent_view|:society|...],
+  #    reference:, path:, state:, status:, chat_task:,
+  #    agent_log:, activity:, agent:, conversation:, via:, parent:}
+  #
+  # Folding and dedup rules:
+  #   * entries whose job id is in `captured` (live_captured_ids) are
+  #     dropped in EVERY pass: the forensic main report already holds them;
+  #   * cross-pass dedup is by job id (reference/path), merging facts
+  #     (merge_live_entries), never emitting two entries for one job;
+  #   * per agent-log file the two agent-side signals (:agent_activity vs
+  #     :dangling_job) collapse to one entry exactly like society_live does:
+  #     the dangling job wins as the kind, the activity hash is carried
+  #     either way;
+  #   * a running sidecar job that is a chat task becomes an :inference
+  #     entry; a running non-chat job becomes :workload_context (the plain
+  #     information live_workload already reported must not disappear).
+  #
+  # Everything is fail-soft: absent sidecar, absent agent save file, absent
+  # society tree and unreadable jobs each yield nothing and never raise.
+  def self.live_report(save_file, captured: [])
+    captured_ids = live_captured_ids(captured)
+    base = save_file.respond_to?(:path) ? save_file.path.to_s : save_file.to_s
+
+    # Entries are keyed by job id where one exists (the sidecar SHORT path,
+    # the same form a `job=` meta stores, so cross-pass matches are plain
+    # string equality) and by agent-log path otherwise.
+    entries = {}
+
+    # --- sidecar pass with dependency expansion (gap 4) ---
+    # `live_workload` keeps its contract untouched: entries only, no
+    # expansion.  The expansion walks each entry plus its rec_dependencies
+    # so the dependency job actually running the inference is reported, not
+    # just the wrapper the tool call resolved.
+    sidecar_entries = begin
+      expand_live_jobs(live_workload(base).collect { |e| e[:step] })
+    rescue StandardError
+      []
+    end
+    sidecar_entries.each do |entry|
+      job_id = entry[:reference].to_s
+      next if job_id.empty?
+      next if captured_ids.include?(job_id) ||
+              captured_ids.include?(entry[:path].to_s)
+
+      folded = entry.merge(kind: entry[:chat_task] ? :inference : :workload_context,
+                           source: [:sidecar])
+      # A waiting wrapper surfaced only by the fallback is neither running
+      # inference nor finished: report it as workload context (it is live
+      # state — its dependency is running) instead of letting classify's
+      # :crashed verdict drop it.
+      if entry[:state] == :waiting && !entry[:chat_task]
+        folded = folded.merge(kind: :workload_context,
+                              state: :waiting,
+                              status: entry[:status])
+      end
+      entries[job_id] = entries.key?(job_id) ?
+                           merge_live_entries(entries[job_id], folded) : folded
+    end
+    scanned_sidecar = begin
+      [base, base.sub(/\.chat\z/, '')].any? { |b| File.exist?(Chat.jobs_file(b)) }
+    rescue StandardError
+      false
+    end
+
+    # --- agent view pass (gaps 1-2) on the root agent save file ---
+    agent_entries = begin
+      agent_view_live(base, captured: captured)
+    rescue StandardError
+      []
+    end
+
+    # --- society pass (gap 3) ---
+    society_entries = begin
+      society_live(base, captured: captured)
+    rescue StandardError
+      []
+    end
+
+    # --- fold the agent-side passes: per agent-log file at most ONE entry
+    #     (the dangling job wins as the kind, the activity hash rides
+    #     along), then merge into the job-id space so a job the sidecar
+    #     already reported and a dangling `job=` meta name once. ---
+    agent_side = {}
+    ([[:agent_view, agent_entries], [:society, society_entries]]).each do |source, list|
+      list.each do |entry|
+        log_file = entry[:agent_file] || entry[:path]
+        next if log_file.nil?
+
+        entry = entry.merge(source: [source])
+        if agent_side.key?(log_file)
+          agent_side[log_file] = merge_live_entries(agent_side[log_file], entry)
+        else
+          agent_side[log_file] = entry
+        end
+      end
+    end
+
+    agent_side.each_value do |entry|
+      # A log file whose RUNNING `job=` references were all captured has
+      # its liveness already represented by those jobs: drop the bare
+      # activity entry too (the same rule society_live applies to its
+      # children).  Files with no running reference at all (the
+      # Clean-type gap) keep their activity entry.
+      if entry[:kind] == :agent_activity
+        running_refs = begin
+          dangling_agent_job_metas(entry[:agent_file].to_s, captured: [])
+        rescue StandardError
+          []
+        end
+        next if !running_refs.empty? &&
+                running_refs.all? { |ref| captured_ids.include?(ref[:reference].to_s) }
+      end
+
+      job_id = entry[:reference].to_s
+      job_id = entry[:job].to_s if job_id.empty?
+      next if !job_id.empty? && (captured_ids.include?(job_id) ||
+                                 captured_ids.include?(entry[:path].to_s))
+
+      folded = entry.merge(source: [entry[:source]].flatten.compact.uniq)
+      if !job_id.empty? && entries.key?(job_id)
+        entries[job_id] = merge_live_entries(entries[job_id], folded)
+      elsif !job_id.empty?
+        entries[job_id] = folded
+      else
+        entries[entry[:agent_file].to_s] = folded
+      end
+    end
+
+    society_dir = begin
+      society_dir_of(base)
+    rescue StandardError
+      nil
+    end
+    {
+      entries: entries.values,
+      scanned: {sidecar: scanned_sidecar,
+                agent_view: begin
+                  File.exist?(base)
+                rescue StandardError
+                  false
+                end,
+                society: !society_dir.nil? && Dir.exist?(society_dir)}
+    }
+  end
+
+  # ------------------------------------------------------------------
+  # Agent view: live state of the agent's own save file
+  # ------------------------------------------------------------------
+  # The `.jobs` sidecar above only sees jobs dispatched through the
+  # backend tool round (Workflow.produce inside process_calls).  Two live
+  # states never appear there:
+  #
+  #   * a "Clean"-type agent (no inference workflow) creates no workflow
+  #     jobs at all; its only live state is its save file, rewritten at
+  #     every round boundary by the backend (outgoing-transcript flush)
+  #     and per completed round by Agent#chat's ensure hook
+  #     (save_if_configured).
+  #   * an agent backed by an AgentWorkflow `ask` task writes the
+  #     immediate `job=` meta at dispatch (Agent#ask) and saves BEFORE
+  #     producing the job, so the reference dangles in the save file for
+  #     the whole duration of the running chat task.
+  #
+  # Save-file location (pinned for callers): a root chat `<base>` keeps
+  # its agent conversation at `<base>.files/<agent>.chat`, derived by
+  # LLM::Agent.canonical_chat_file(base + '.files', agent_name) where the
+  # agent name comes from the chat's `agent:` line (nil means the plain
+  # `agent.chat`).  This layer takes the save-file PATH as input; the
+  # caller resolves it because only it knows the agent name.
+
+  # Roles that annotate or steer a chat without marking inference state.
+  # Trailing ones are skipped when the activity predicate looks for the
+  # last conversational message: a file ending in `meta: job=...`
+  # (dispatch in flight) still classifies by the prompt that triggered
+  # it, and the job reference itself is reported separately by
+  # dangling_agent_job_metas.
+  AGENT_CONTROL_ROLES = %w[
+    meta option sticky_option previous_response_id agent import socialize attachments
+  ].freeze
+
+  # Classify the live activity of one agent save file from its trailing
+  # messages.  Predicate rules (user-approved heuristic, encoded
+  # exactly):
+  #
+  #   last message `user`                     -> active, :dispatched
+  #     (prompt flushed; the turn's first inference round is running or
+  #     pending)
+  #   trailing `function_call` with no
+  #   `function_call_output` after it         -> active, :tool_round_in_flight
+  #   trailing `function_call_output`         -> active, :next_round_pending
+  #   last message `assistant` with no
+  #   unresolved function call                -> inactive, :idle
+  #   empty file                              -> inactive, :no_messages
+  #   unreadable/missing file                 -> inactive, :unreadable
+  #
+  # Control roles (AGENT_CONTROL_ROLES) are skipped when finding the
+  # trailing conversational message; any other trailing role (system,
+  # introduce, tool) means no inference has been dispatched yet and
+  # yields inactive :no_inference.  Caveat, accepted by design: an
+  # `assistant`-terminated file is classified idle even during the brief
+  # round-boundary window in which a completed round has been saved but
+  # the next dispatch has not flushed yet, so a mid-conversation agent
+  # can be missed for that instant (false negative, never a false
+  # positive).
+  #
+  # ScoutCoder: this predicate is only sound because the backend rewrites
+  # the save file with the OUTGOING transcript at every round boundary
+  # (the ensure hooks of LLM::Backend::Default#ask) while the agent layer
+  # rewrites it with the completed round afterwards (Agent#chat ensure ->
+  # save_if_configured).  That write cadence is documented nowhere and
+  # had to be derived from lib/scout/llm/backends/default.rb.
+  def self.agent_log_activity(path)
+    path = path.to_s
+
+    messages = begin
+      Chat.load(path)
+    rescue StandardError
+      return {active: false, reason: :unreadable, last_role: nil,
+              message_count: 0, rounds: 0}
+    end
+
+    counts = {
+      message_count: messages.length,
+      rounds: messages.count { |message| message[:role].to_s == 'assistant' }
+    }
+
+    conversational = messages.reject do |message|
+      AGENT_CONTROL_ROLES.include?(message[:role].to_s)
+    end
+    last = conversational.last
+
+    return {active: false, reason: :no_messages, last_role: nil}.merge(counts) if last.nil?
+
+    role = last[:role].to_s
+    case role
+    when 'user'
+      {active: true, reason: :dispatched, last_role: role}.merge(counts)
+    when 'function_call'
+      {active: true, reason: :tool_round_in_flight, last_role: role}.merge(counts)
+    when 'function_call_output'
+      {active: true, reason: :next_round_pending, last_role: role}.merge(counts)
+    when 'assistant'
+      {active: false, reason: :idle, last_role: role}.merge(counts)
+    else
+      {active: false, reason: :no_inference, last_role: role}.merge(counts)
+    end
+  end
+
+  # Normalize the forensic "captured" set into plain strings a live
+  # reference can be compared against.  Entries may be Step objects (the
+  # traversal's nodes), Path objects or strings; both the verbatim string
+  # and its expanded form are kept, so a short path, a resolved path and
+  # a Step all match the same job.
+  def self.live_captured_ids(captured)
+    entries = captured.respond_to?(:each) ? captured : [captured]
+    ids = Set.new
+    entries.each do |entry|
+      next if entry.nil?
+      case entry
+      when Step
+        path_str = entry.path.to_s
+        ids << path_str
+        ids << File.expand_path(path_str)
+      else
+        str = entry.to_s
+        ids << str
+        ids << File.expand_path(str)
+      end
+    end
+    ids
+  end
+
+  # Collect the `job=` meta references recorded in one agent save file
+  # that the forensic report has NOT captured and whose job is still
+  # RUNNING.  This is the gap-2 reader: Agent#ask writes the immediate
+  # `job=` meta and saves before `job.produce`, so while the chat task
+  # runs the reference dangles in the save file, invisible both to the
+  # `.jobs` sidecar (which never lists the agent's own ask dispatch) and
+  # to the forensic traversal (whose result chat does not exist yet).
+  #
+  # `captured` is the set of job identities the forensic main report
+  # already contains (Step, Path or String entries; matched by verbatim
+  # reference and by resolved path).  Only `:running` jobs survive:
+  # finished, crashed, unresolvable and already-captured references are
+  # silently dropped, so the method never raises and never reports
+  # concluded work.  Receipt-borne references (the `meta` arrays inside
+  # function_call_output JSON) are deliberately NOT scanned here; they
+  # belong to the forensic `:agent_job` relation and describe work whose
+  # answer was already consumed.
+  def self.dangling_agent_job_metas(path, captured: [])
+    path = path.to_s
+    captured_ids = live_captured_ids(captured)
+
+    chat = begin
+      Chat.load(path)
+    rescue StandardError
+      return []
+    end
+
+    references = begin
+      chat.jobs
+    rescue StandardError
+      return []
+    end
+
+    references.collect do |reference|
+      ref_str = reference.to_s
+      next nil if ref_str.empty?
+      next nil if captured_ids.include?(ref_str)
+
+      step = begin
+        load_live_job_reference(ref_str)
+      rescue StandardError
+        next nil
+      end
+
+      step_id = begin
+        File.expand_path(step.path.to_s)
+      rescue StandardError
+        step.path.to_s
+      end
+      next nil if captured_ids.include?(step_id)
+
+      state, status = begin
+        classify_live_job(step)
+      rescue StandardError
+        next nil
+      end
+      next nil unless state == :running
+
+      {
+        kind: :dangling_job,
+        agent_file: path,
+        reference: ref_str,
+        step: step,
+        path: step.path.to_s,
+        status: status,
+        state: state
+      }
+    end.compact
+  end
+
+  # Live view of ONE agent save file: its trailing-message activity (the
+  # Clean-type gap) plus its dangling `job=` metas reconciled to running
+  # jobs (the Direct-type gap).  Returns a data-only Array, empty when
+  # nothing is live.  Entry kinds:
+  #
+  #   :agent_activity -> {kind:, agent_file:, active: true, reason:,
+  #                       last_role:, message_count:, rounds:}
+  #   :dangling_job   -> {kind:, agent_file:, reference:, step:, path:,
+  #                       status:, state:}
+  #
+  # An inactive agent contributes no activity entry, and a dangling
+  # running job is reported on its own, so an agent mid-dispatch (file
+  # ending in `meta: job=...`) yields the :dangling_job entry plus the
+  # activity entry derived from its trailing conversational message.
+  # Fail-soft everywhere: missing or malformed input yields [].
+  def self.agent_view_live(save_file, captured: [])
+    entries = []
+
+    activity = agent_log_activity(save_file)
+    entries << {kind: :agent_activity, agent_file: save_file.to_s}.merge(activity) if activity[:active]
+
+    entries.concat(dangling_agent_job_metas(save_file, captured: captured))
+    entries
+  end
+
+  # ------------------------------------------------------------------
+  # Societal view: live state under <base>.society/
+  # ------------------------------------------------------------------
+  # Closes the third live gap: ask/hand_off delegation runs in NESTED
+  # specialist conversations whose only on-disk trace while running is the
+  # society tree written by Agent#save_society
+  # (<society_dir>/<agent>/<conversation>/agent.chat, save.rb:239).  The
+  # forensic traversal deliberately excludes society files
+  # (direct_chat_sidecar_files), so a running delegation is invisible to
+  # the main report until it completes and its receipt lands in the parent
+  # chat.  Societal agents therefore have NO main chat to diff against:
+  # they are reported whole (activity level), with the stronger dangling
+  # `job=` detail added when the child is workflow-backed.
+
+  # Conservative directory-depth cap for the society scan.  One nesting
+  # level of society costs three directories (agent/conversation/society),
+  # so 128 comfortably covers the agent layer's own SAVE_DEPTH_LIMIT of 32
+  # while still bounding a pathological tree.
+  SOCIETY_SCAN_DEPTH_LIMIT = 128
+
+  # Society directory of the agent whose save file is `save_file`.
+  #
+  # Layout (mirrors LLM::Agent#society_dir, save.rb: the ROOT rule
+  # <name>.chat -> <name>.society sibling, and the NESTED rule where a
+  # chat already inside a society tree owns a plain `society` sibling, so
+  # the tree nests instead of minting new `.files` trees):
+  #
+  #   <base>.files/<name>.chat                      -> <base>.files/<name>.society
+  #   <base>.chat                                   -> <base>.society
+  #   .../<agent>/<conversation>/agent.chat (nested) -> .../<agent>/<conversation>/society
+  #
+  # The derivation delegates to the agent class (LLM::Agent.society_dir_for
+  # / LLM::Agent.nested_save?) so the two cannot drift; the literal mirror
+  # below is the fallback when the agent layer is not loaded yet, because
+  # chat/provenance is required before scout/llm/agent.  Returns nil only
+  # when nothing can be derived (empty/nil input); a directory that does
+  # not exist on disk is still returned, because existence is the scan's
+  # concern, not the derivation's.
+  def self.society_dir_of(save_file)
+    path = save_file.to_s
+    return nil if path.empty?
+
+    if defined?(LLM::Agent)
+      return File.join(File.dirname(path), LLM::Agent::SOCIETY_DIR) if LLM::Agent.nested_save?(path)
+      return LLM::Agent.society_dir_for(path)
+    end
+
+    # Mirror of save.rb (keep in sync): nested chat -> sibling 'society';
+    # root chat -> <name>.society sibling.
+    parent = File.basename(File.dirname(File.dirname(File.dirname(path))))
+    if parent == 'society' || parent.end_with?('.society')
+      File.join(File.dirname(path), 'society')
+    else
+      p = path
+      p = File.dirname(p) unless p =~ /\.chat\z/
+      File.join(File.dirname(p), File.basename(p).sub(/\.chat\z/, '.society'))
+    end
+  end
+
+  # Every saved specialist conversation under the society of `save_file`,
+  # as a sorted Array of absolute agent.chat paths.  Silent [] when the
+  # society directory is missing or unreadable.
+  #
+  # The scan is bounded and closed: it never follows symlinks (a link out
+  # of the tree would report work that is not this agent's) and stops at
+  # SOCIETY_SCAN_DEPTH_LIMIT directory levels.  Only files named
+  # `agent.chat` (Agent::SOCIETY_CHAT_FILE, the sole name save_society
+  # ever writes) are collected, so a renamed or foreign file is visible as
+  # an omission rather than silently reinterpreted.
+  def self.society_agent_chats(save_file)
+    dir = society_dir_of(save_file)
+    return [] if dir.nil? || !File.directory?(dir)
+
+    chats = []
+    scan = lambda do |directory, depth|
+      return if depth > SOCIETY_SCAN_DEPTH_LIMIT
+
+      entries = Dir.entries(directory)
+      entries.each do |entry|
+        next if entry == '.' || entry == '..'
+
+        full = File.join(directory, entry)
+        next if File.symlink?(full)
+
+        if File.directory?(full)
+          scan.call(full, depth + 1)
+        elsif entry == 'agent.chat' && File.file?(full)
+          chats << full
+        end
+      end
+    rescue StandardError
+      nil
+    end
+
+    scan.call(dir, 0)
+    chats.sort
+  end
+
+  # Live view of every specialist conversation under the society of
+  # `save_file`.  Data-only Array, empty when nothing is live.
+  #
+  # Per child (path shape <society>/<agent>/<conversation>/agent.chat, with
+  # deeper societies nesting under <agent>/<conversation>/society):
+  #
+  #   {kind:, agent:, conversation:, path:, relative:, activity:,
+  #    job:, job_path:, state:, dangling:}
+  #
+  # - kind is :dangling_job when the child is WORKFLOW-BACKED and holds a
+  #   `job=` meta that resolves to a still-running job (the immediate
+  #   dispatch meta written by Agent#ask before job.produce; the stronger
+  #   signal, so it wins over activity when both hold), and
+  #   :agent_activity otherwise.
+  # - activity is always included (agent_log_activity of the child file):
+  #   it is the ONLY signal for PLAIN (non-workflow) children, which
+  #   dispatch through LLM.ask and never write a `job=` meta at all.
+  # - A child is reported when it has a running dangling job OR an active
+  #   activity classification; finished/idle children are silent.
+  # - Dedup: job ids already in `captured` (the forensic main report's set,
+  #   same matching as dangling_agent_job_metas) never produce a
+  #   :dangling_job entry; a child whose only live job is captured and
+  #   whose conversation has concluded is skipped entirely.
+  #
+  # Fail-soft: missing society dir, unreadable chats, malformed content and
+  # unresolvable job references all degrade to silence, never a raise.
+  def self.society_live(save_file, captured: [])
+    dir = society_dir_of(save_file)
+    return [] if dir.nil?
+
+    prefix = Regexp.quote(dir) + '/'
+    captured_ids = live_captured_ids(captured)
+
+    society_agent_chats(save_file).collect do |child|
+      activity = agent_log_activity(child)
+      dangling = dangling_agent_job_metas(child, captured: captured)
+
+      # Dedup against the main report: a child whose job reference is
+      # already captured IS that job (a workflow-backed child's whole
+      # current turn is its ask job), so an entry here would report the
+      # same work twice.  Skip the child entirely; its conversation is
+      # represented by the captured job in the forensic traversal.
+      child_chat = begin
+        Chat.load(child)
+      rescue StandardError
+        nil
+      end
+      next nil if child_chat && (child_chat.jobs || []).any? { |ref| captured_ids.include?(ref.to_s) }
+
+      next nil if dangling.empty? && !activity[:active]
+
+      relative = child.sub(/\A#{prefix}/, '')
+      parts = relative.split(File::SEPARATOR)
+
+      entry = {
+        kind: dangling.any? ? :dangling_job : :agent_activity,
+        agent: parts.first,
+        conversation: parts[1],
+        path: child,
+        relative: relative,
+        activity: activity
+      }
+
+      unless dangling.empty?
+        first = dangling.first
+        entry[:job] = first[:reference]
+        entry[:job_path] = first[:path]
+        entry[:state] = first[:state]
+        entry[:dangling] = dangling
+      end
+
+      entry
+    end.compact
+  end
+
   def self.timestamp
     Time.now.utc.iso8601(3)
   end
