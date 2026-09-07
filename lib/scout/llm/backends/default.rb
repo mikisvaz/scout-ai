@@ -537,6 +537,13 @@ module LLM
 
         reasoning = reasoning response
 
+        if log_response
+          meta = self.update_meta response, current_meta
+          meta['reas'] = reasoning if reasoning
+          meta['timestamp'] = timestamp
+          messages_with_meta = Chat.setup(messages + [{role: :meta, content: Chat.serialize_meta(meta)}])
+        end
+
         output = begin
                    process_response messages, response, tools, options.merge(save_file: save_file), &block
                  rescue Exception => e
@@ -548,7 +555,7 @@ module LLM
                      if previous_response_id_error
                        message.unshift IndiferentHash.setup({role: :previous_response_id, content: previous_response_id_error})
                      end
-                     Open.write save_file + ".error", Chat.print(messages) if save_file
+                     Open.write save_file + ".error", Chat.print(messages_with_meta) if save_file
                      Open.write tmpfile + ".chat", Chat.print(messages)
                      Open.write tmpfile + ".options", options.except(:messages, :tools).to_json
                      Open.write tmpfile + ".meta", current_meta.to_json
@@ -559,14 +566,8 @@ module LLM
                    end
                    raise e
                  ensure
-                   Open.write save_file, Chat.print(messages) if save_file
+                   Open.write save_file, Chat.print(messages_with_meta) if save_file
                  end
-
-        if log_response
-          meta = self.update_meta response, current_meta
-          meta['reas'] = reasoning if reasoning
-          meta['timestamp'] = timestamp
-        end
 
         # ScoutCoder: IndiferentHash.process_options deletes the keys it
         # extracts, so anything pulled out of `options` at the top of `ask`

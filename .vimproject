@@ -65,6 +65,11 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   test_workflow
 
   meta_follow
+  live_meta
+
+  cortex_coder
+
+  test_live_meta
   test=test{
    task
    clean
