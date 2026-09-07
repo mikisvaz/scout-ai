@@ -15,13 +15,13 @@ module Chat
   def self.shorten_string(string, size = DEFAULT_SHORT_STRING_LENGTH, step: nil)
     new = Log.truncate_string(string, size)
     if new.length < string.length
-      new = ['CONTEXT-COMPACTED', 'Historical account compacted for context efficiency; it does not faithfully represent what happened',  "Original content length: #{string.length}"]
+      new_array = ['CONTEXT-COMPACTED', 'Historical account compacted for context efficiency; it does not faithfully represent what happened',  "Original content length: #{string.length}"]
       if step
-        new << "Full output found in job: #{step}"
+        new_array << "Full output found in job: #{step}"
       end
-      new << 'Do not execute, copy or otherwise use this string as-is.'
-      new << "Preview: <<#{new}>>"
-      new = "[#{new * ' - '}]"
+      new_array << 'Do not execute, copy or otherwise use this string as-is.'
+      new_array << "Preview: <<#{new}>>"
+      new = "[#{new_array * ' - '}]"
     end
     new
   end
