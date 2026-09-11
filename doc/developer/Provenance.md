@@ -40,6 +40,27 @@ The two `log` parents are deliberately asymmetric:
 
 Imported and continued chats are **not** provenance relations. They are a chat-compilation concern resolved during `Chat.parse` and `LLM.chat`. The persisted `.chat` file already contains the full inlined conversation. Provenance traversal therefore never follows `import`, `continue`, or `last` chat references.
 
+Two consequences of that inlining are worth naming, because both are easy to
+misread as provenance defects:
+
+- **Byte-duplicated agent-log entries are inlined child-chat transcripts, not
+  double execution.** When a delegated tool call returns an `LLM::Agent`,
+  `LLM.process_calls` splices the child's returned messages into the parent's
+  current chat (`Chat#follow` via `LLM::Agent#chat`, `lib/scout/llm/tools/call.rb`)
+  before the parent log is persisted. The child transcript therefore appears
+  verbatim inside every parent that consumed it; the originals remain single
+  files. Token accounting is unaffected: deduplication is by `inference_id`, so
+  N copies of one inference are one event. Only record-counting readers inflate.
+- **`meta: job=` is a second, cross-conversation channel that behaves like an
+  import.** Delegation with shared context (`adopt: :current`, surfaced as
+  `chat: current`) makes each participating job persist the shared conversation
+  as a `meta: job=` message, and `Chat.jobs` exposes **every** `meta job=`
+  reference to traversal through the `:job` relation. The "never follows
+  imports" rule above is therefore literally true while the closure still
+  crosses conversations: the meta schema carries only `job=` plus token fields,
+  with no discriminator that could say "this reference is shared context, not
+  this conversation's work".
+
 ## Safe persisted-chat loading
 
 Provenance inspection uses `Chat.load(file)`. It parses the persisted messages without compiling the chat. It therefore does not execute `task`, `job`, `file`, `import`, tool, or other control roles.
@@ -211,9 +232,7 @@ One receipt format exists; the reader accepts only it:
 
   The same `function_call_output` may also carry auxiliary fields next to the receipt: `step` (the producing step of the same execution), `start_timestamp`, and `timestamp`. They are bookkeeping only: the sole receipt-driven provenance edge source is the `job` field of a receipt entry (`meta[].job`); the `step` field is never followed as a parent-child edge.
 
-A legacy serialized `agent_meta` key (Array of `{role: 'meta', content: '...'}` messages) is **no longer read**: envelopes carrying only that key contribute no receipt evidence and no warnings. Chats written by older versions lose their receipt-based provenance edges unless re-saved with the current shape.
-
-See [../../research/agent-meta-provenance-integration-plan.md](../../research/agent-meta-provenance-integration-plan.md) for the design record of the original (serialized) shape; the `meta` key replaced it in commit `efd8ebbc`.
+A legacy serialized `agent_meta` key (Array of `{role: 'meta', content: '...'}` messages) is **no longer read**: envelopes carrying only that key contribute no receipt evidence and no warnings. Chats written by older versions lose their receipt-based provenance edges unless re-saved with the current shape. The `meta` key replaced that serialized shape in commit `efd8ebbc` (the design record of the serialized shape has since been retired).
 
 Receipts are embedded provenance evidence, **not** parent-chat messages, and must never be injected into the parent chat. `Chat#meta`, `chat.role_messages(:meta)`, and `Chat.token_totals([chat])` keep describing the local chat only. A receipt is read as an observation attached to the paired tool output.
 
