@@ -21,7 +21,7 @@ What is my name?
     # mock backend records what the agent actually sent.
     LLM::Mock.script('Your name is Miguel')
 
-    res = agent.prompt chat, persist: false, endpoint: 'mock'
+    res = agent.prompt chat, persist: false, endpoint: 'mock', backend: :mock
 
     assert_equal 'Your name is Miguel', res
 

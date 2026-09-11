@@ -57,7 +57,7 @@ call graphs, implementation discoveries, and design rationale.
 | **Configure inference** | user/RunningInference → user/ManagingContext |
 | **Understand the internals** | developer/Architecture → developer/ChatLifecycle → developer/Backends |
 | **Track and inspect provenance** | developer/Provenance → research/provenance-analysis |
-| **Write idiomatic code** | developer/DesignPrinciples → research/coding-philosophy-analysis |
+| **Write idiomatic code** | developer/DesignPrinciples |
 | **Use the CLI** | user/Cookbook (quick reference) → research/commands-analysis (full detail) |
 
 ---
@@ -98,7 +98,6 @@ doc/
     ├── tools-system-analysis.md
     ├── provenance-analysis.md
     ├── multi-agent-patterns-analysis.md
-    ├── coding-philosophy-analysis.md
     ├── commands-analysis.md
     └── synthesis-report.md
 ```

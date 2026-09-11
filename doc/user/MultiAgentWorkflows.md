@@ -30,8 +30,9 @@ The core building block is `chat_task` — a Scout workflow task that runs an
 agent:
 
 ```ruby
-module MyWorkflow 
+module MyWorkflow
   extend Workflow
+  include_workflow AgentWorkflow
   chat_task :analyze do
     agent = self.agent('Analyst', chat: chat)
     agent.start
@@ -43,7 +44,16 @@ end
 ```
 
 The `chat_task` helper and the `agent` method are available in any workflow
-that includes the `AgentWorkflow` mixin.
+that includes the `AgentWorkflow` mixin. `chat_task` itself is defined on
+`Workflow`, so a bare `extend Workflow` module *can* declare one — but the
+block shown here calls `self.agent`, which needs the mixin: `extend Workflow`
+alone raises `NoMethodError`.
+
+Mix the mixin in with `include_workflow AgentWorkflow`, not plain `include`:
+the helpers are class-level state that only `include_workflow` merges, so a
+plain `include` leaves the task without `self.agent`/`self.chat`/`log_agent`
+at run time (the helpers list would be empty; `test/scout/llm/agent/test_workflow.rb`
+covers it).
 
 ### What `chat_task` gives you
 
@@ -75,7 +85,7 @@ Here's a three-step pipeline: Plan → Execute → Review.
 ```ruby
 module Pipeline 
   extend Workflow
-  include AgentWorkflow
+  include_workflow AgentWorkflow
 
   chat_task :plan do |objective|
     agent = self.agent('Planner', chat: chat)
@@ -152,10 +162,10 @@ chat_task :run do
 end
 ```
 
-The model decides when to delegate and to whom. Each delegation creates its
-own provenance entry.
-
-See [Delegation.md](Delegation.md) for the full delegation API.
+Delegation semantics — the `ask`/`hand_off_to_<name>` tool pair, the
+inheritance modes and their one-turn scope, conversation persistence and the
+safe-delegation rules — are documented once in
+[Delegation.md](Delegation.md); nothing here repeats them.
 
 ---
 
@@ -202,8 +212,26 @@ combines results.
 
 ## Logging agent activity
 
-When agents run inside workflow tasks, the agent's own conversation is saved
-to `<job>.files/<name>.chat` (the full chat; `agent.chat` by default,
+The `agent` helper seeds the spawned agent's `start_chat` with the current
+job's tooling (`tool:`, `kb:`, `mcp:`, `introduce:` roles). That extraction
+is **destructive**: `Chat#remove_role` strips those roles out of the job's
+own chat permanently. The memoized helper can only run once per task — a
+second `agent` call in the same task finds no tooling left to extract. Use
+`tooling_intro` (the non-destructive half, the `introduce:` messages only,
+intended for specialists) when the job's chat must keep its roles, or pass
+`tooling:` explicitly to override what is inherited.
+
+When agents run inside workflow tasks, the seeded `start_chat` also receives
+system notes about the working directory, the job path, the job's
+dependencies and any other jobs found in the incoming chat; the incoming
+`You have been assigned …` and those note prefixes are stripped before the
+rest of the chat is followed in. (One of those prefixes relies on a
+misspelled "depencencies" literal that the recycle filter matches — do not
+"fix" the spelling in `lib/scout/llm/agent/workflow.rb` without updating the
+filter.)
+
+The agent's own conversation is saved to `<job>.files/<name>.chat` (the full
+chat; `agent.chat` by default,
 `worker.chat` for a `worker` agent), the job result keeps only
 this run's delta, and delegated specialist conversations — when they exist —
 are saved under `<job>.files/<name>.society/<agent_name>/<conversation>/…`.
@@ -261,6 +289,9 @@ internals and [BuildingAgents.md](BuildingAgents.md) for save semantics.
 - **Forgetting that tasks are cached**: If you change an agent's `start_chat`
   but not the task input, you may get a cached result. Clear the cache or
   change the input.
+- **Calling `agent` twice in one task**: the tooling extraction behind it is
+  destructive and memoized, so the second call finds nothing left to extract —
+  pass `tooling:` explicitly instead.
 
 ---
 

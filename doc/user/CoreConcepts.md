@@ -102,7 +102,7 @@ kinds:
 
 | Tool source | How you declare it | What it gives the model |
 |-------------|-------------------|----------------------|
-| **Scout Workflow** | `tool:` or `introduce:` in chat, or auto-wired from agent workflow | Tasks with typed inputs/outputs become callable functions |
+| **Scout Workflow** | `tool:` in chat (bare workflow or `workflow task`), or auto-wired from agent workflow; `introduce:` adds documentation only | Tasks with typed inputs/outputs become callable functions |
 | **Knowledge Base** | `kb:` in chat | Database lookups (gene→protein, drug→disease, etc.) |
 | **MCP Server** | `mcp:` in chat | Any MCP-compatible external tool |
 
@@ -116,16 +116,16 @@ is appended to the conversation.
 
 ## Inference endpoint: provider abstraction
 
-An **endpoint** is a named bundle of provider + model + credentials. You
-configure endpoints once and reference them by name everywhere:
+An **endpoint** is a named bundle of provider + model + credentials: a
+hand-written `~/.scout/etc/AI/<name>.yaml`. You configure endpoints once and
+reference them by name everywhere:
 
 ```bash
 # Use the 'anthropic' endpoint for this conversation
 scout-ai llm ask -e anthropic "Hello"
 ```
 
-Scout-AI supports OpenAI, Anthropic, Ollama, vLLM, and other OpenAI-compatible
-providers. Endpoints are provider-agnostic from the application's perspective —
+Endpoints are provider-agnostic from the application's perspective —
 you write your agent once and switch models by changing the endpoint name.
 
 → See [RunningInference.md](RunningInference.md) for endpoint configuration
@@ -166,7 +166,7 @@ responds with plain text.
 | Run a saved conversation | `scout-ai llm ask -c file.chat` |
 | Create a reusable persona with tools | An Agent (directory with `start_chat`) |
 | Give the model data to query | Knowledge Base tools (`kb:`) |
-| Give the model code to run | Workflow tools (`tool:` / `introduce:`) |
+| Give the model code to run | Workflow tools (`tool:`) |
 | Use external tools | MCP (`mcp:`) |
 | Build multi-agent systems | Delegation (`socialize` / `delegate`) |
 | Build reproducible pipelines | AgentWorkflow (Scout Workflow + Agent) |

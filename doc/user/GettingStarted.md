@@ -48,27 +48,29 @@ bundle install
 ### Set your API key
 
 ```bash
-# For OpenAI
-export OPENAI_API_KEY="sk-..."
-
-# For Anthropic
-export ANTHROPIC_API_KEY="sk-ant-..."
+export ANTHROPIC_KEY="sk-ant-..."   # or OPENAI_KEY, GLM_KEY, ...
 ```
+
+(Or put `key:` in the endpoint YAML below.)
 
 ---
 
 ## Configure your first endpoint
 
-An **endpoint** is a named configuration for a provider + model. Configure one
-once and reference it by name.
+An **endpoint** is a named configuration for a provider + model. There is no
+CLI command for this: endpoints are YAML files under `~/.scout/etc/AI/`, one
+per endpoint, that you write by hand.
 
-```bash
-# OpenAI
-scout-ai config set openai model=gpt-4o
-
-# Anthropic
-scout-ai config set anthropic provider=anthropic model=claude-sonnet-4-20250514
+```yaml
+# ~/.scout/etc/AI/anthropic.yaml
+backend: anthropic
+model: claude-sonnet-4-20250514
+key: sk-ant-...   # optional; ANTHROPIC_KEY is read when absent
 ```
+
+[RunningInference.md](RunningInference.md) is the canonical endpoint
+reference: full key set (`backend`, `url`, `key`, `model`), the `-ck` option,
+and the provider table.
 
 ---
 

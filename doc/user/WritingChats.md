@@ -10,8 +10,9 @@ or construct chat inputs for agents and workflows.
 
 ## The basic format
 
-A chat file is plain text. Each message is a **role name** followed by a colon,
-a blank line, then the content:
+A chat file is plain text. Each message is a **role name** followed by a
+colon, then the content (a blank line in between is the convention, not a
+parser requirement):
 
 ```text
 system:
@@ -29,8 +30,10 @@ assistant:
 
 Rules:
 - The role name is the first non-blank token on the line, followed by `:`.
-- A blank line separates the role header from the content.
+- A blank line separates the role header from the content (a readability
+  convention; the parser does not require it).
 - Content continues until the next role header or end of file.
+- There is **no comment syntax**: a `#` line is message content.
 
 ---
 
@@ -71,12 +74,17 @@ model: claude-sonnet-4-20250514
 ### Declaring tools
 
 ```text
+tool: MyWorkflow
 tool: MyWorkflow task_name input1=value1 input2=value2
 introduce: MyWorkflow
 ```
 
-- `tool:` exposes a specific workflow task.
-- `introduce:` exposes an entire workflow (all its tasks).
+- `tool: MyWorkflow` exposes the whole workflow (its exports, or all its
+  tasks if it has none exported).
+- `tool: MyWorkflow task_name ...` exposes one task; `name=value` tokens
+  pre-fill and hide that input.
+- `introduce:` injects the workflow's documentation only; it generates no
+  tools. Combine it with `tool:` when you want both.
 
 ### Importing files
 
@@ -119,20 +127,6 @@ see them in saved agent sessions.
 
 ---
 
-## Comments
-
-Lines starting with `#` are comments and are ignored:
-
-```text
-# This is a comment
-system:
-
-# So is this
-You are a helpful assistant.
-```
-
----
-
 ## Metadata and provenance
 
 When Scout-AI saves a conversation (e.g., as a workflow job output), it
@@ -151,26 +145,23 @@ trees.
 ## Complete example
 
 Here is a realistic chat file that configures an endpoint, declares tools,
-imports a file, and asks a question:
+imports a file, and asks a question. There is **no comment syntax**: a
+line starting with `#` is parsed as a user message.
 
 ```text
-# Configuration
 endpoint: anthropic
 model: claude-sonnet-4-20250514
 
-# System prompt
 system:
 
 You are a code analyst. Use the provided tools to answer questions about
 the codebase.
 
-# Give the model a workflow as tools
 introduce: CodeAnalyzer
+tool: CodeAnalyzer
 
-# Import context
 file: src/main.rb
 
-# The question
 user:
 
 What design patterns are used in main.rb?
@@ -180,8 +171,11 @@ What design patterns are used in main.rb?
 
 ## Common mistakes
 
-- **Forgetting the blank line** between the role header and content. Without
-  it, the role header and content may merge.
+- **Using `#` as a comment marker.** There is no comment syntax; a `#` line
+  is a user message and will be sent to the model.
+- **Forgetting the blank line** between the role header and content. This is
+  the established convention in Scout-AI's own files; keep it for
+  readability, but the parser does not require it.
 - **Using unknown role names.** Only recognized roles are processed; unknown
   ones are treated as literal user messages.
 - **Expecting configuration roles to appear in the model's prompt.** Roles

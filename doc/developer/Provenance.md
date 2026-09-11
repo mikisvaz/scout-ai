@@ -21,17 +21,17 @@ The structural relations are:
 | chat | `agent_job` | job | A delegated tool call returned an agent whose receipt entry carries a `job` field naming the producer job. |
 | job | `dependency` | job | A normal Scout Workflow dependency. |
 | job | `log` | chat | A persisted agent conversation under `.files/*.chat` or `.files/*.society/**/*.chat`. |
-| chat | `log` | chat | A saved agent conversation under the chat's own `.files` sidecar, same three families (root copy excluded). |
+| chat | `log` | chat | A saved agent conversation under the chat's own `.files` sidecar, same two globs (root copy excluded). |
 | job | `result` | chat | The job result is itself a chat file. |
 
 Relations describe root-outward discovery. A renderer may reverse `job` or `dependency` when drawing natural data flow.
 
-The `log` relation covers exactly three file families under `.files`, nothing else:
+The `log` relation covers exactly two globs under `.files`, nothing else:
 
 - `.files/*.chat` — the new top-level chat files (`agent.chat` by default, `worker.chat`/`critic.chat` for named agents);
-- `.files/*.society/**/*.chat` — the new society tree (nested societies keep the plain `society` basename deeper down);
+- `.files/*.society/**/*.chat` — the new society tree (nested societies keep the plain `society` basename deeper down).
 
-Restart snapshots written by `Agent#start` live under `.files/resets/<timestamp>.chat`, directly under `.files` and **outside** all three families: they are recovery artifacts, not logs, and provenance traversal does not follow them, for jobs and for chats alike. Results of both layouts are de-duplicated and sorted, so a files dir holding both layouts is visited exactly once per chat.
+Restart snapshots written by `Agent#start` live under `.files/resets/<timestamp>.chat`, directly under `.files` and **outside** both globs: they are recovery artifacts, not logs, and provenance traversal does not follow them, for jobs and for chats alike. (A legacy `.files/log/` layout still exists on old trees but is no longer read.)
 
 The two `log` parents are deliberately asymmetric:
 
@@ -57,6 +57,16 @@ Do not use `LLM.chat` to inspect historical evidence: that method compiles contr
     end
 
 Without a block it returns an Enumerator.
+
+There is also an optional seventh value: on `agent_job` edges the traversal
+additionally yields `detail`, the `agent_meta` receipt entry
+(`Chat.agent_meta_job_references` record) that produced the edge — so the
+originating function output address, the receipt address, the call id and the
+tool name stay auditable without re-parsing the parent chat. It is `nil` for
+every other relation and is only delivered when the block can receive it
+(`arity == -1` or `>= 7`); `provenance_edges` exposes it as `detail:` with the
+full receipt record (`agent_meta_index`, `call_id`, `evidence_address`,
+`evidence`, `job`, `output_address`, `raw_entry`, `reference`, `tool_name`).
 
 The root has nil parent and relation. Every structural edge is yielded. When a shared dependency or cycle reaches an already visited node, `first_visit` is false and the node is not expanded again. Node identity includes both kind and path, because a chat-producing Step and its result chat can share a filesystem path.
 
@@ -94,7 +104,7 @@ Thin collectors use the same traversal:
 Direct readers do not recurse:
 
 - `Chat.direct_job_chat_files(job)` returns chat logs owned directly by a job;
-- `Chat.direct_chat_sidecar_files(path)` returns chat logs owned directly by a persisted chat's `.files` sidecar (all three families above), excluding the top-level root copies `<save_file>.files/<name>.chat`;
+- `Chat.direct_chat_sidecar_files(path)` returns chat logs owned directly by a persisted chat's `.files` sidecar (both globs above), excluding the top-level root copies `<save_file>.files/<name>.chat`;
 - `Chat.job_result_chat_file(job)` returns a chat result when present.
 
 Recursion belongs only to `traverse_provenance`.
@@ -490,6 +500,17 @@ ChatAnalyst is expected to consume the receipt primitives above — `Chat.agent_
 | `lib/scout/llm/agent/save.rb` | Save-file and society-tree layout the live passes read. |
 | `lib/scout/llm/tools/call.rb` | `<base>.jobs` sidecar writer/removal in `LLM.process_calls`. |
 | `scout_commands/llm/prov` | Tree, flow, DOT, and plot rendering. |
+
+## Environment trap: checkout vs installed gem
+
+`Chat.live_report` and the rest of the live machinery live in this
+repository's `provenance.rb`. If `require 'scout-ai'` resolves to the
+**installed** scout-ai gem (2.0.0) instead of the checkout, the checkout's
+`prov` command raises `NoMethodError` on `Chat.live_report`, because the
+gem's provenance code predates it. When probing from a checkout, run with
+`-I<checkout>/lib` (or `RUBYOPT=-I<checkout>/lib`) so the checkout wins the
+load path; conversely, expect the installed gem's `prov` to lack the live
+report until a newer gem is cut.
 
 ## Cross-references
 

@@ -69,6 +69,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   cortex_coder
 
+  cortex_coder.bugs
+
   test_live_meta
   test=test{
    task
@@ -197,7 +199,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    }
   }
  }
- share=share{
+ ,s,hare=share{
   server=server files="*"{
    chat.html
    chat.js

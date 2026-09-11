@@ -2,8 +2,9 @@
 
 This document catalogs known code issues, documentation gaps, architectural
 suggestions, and anti-patterns to avoid when contributing to Scout-AI. It is
-derived from the research artifacts in [../research/](../research/) and is
-intended as a living reference for maintainers and contributors.
+derived from the research artifacts in [../research/](../research/) and from
+the Cortex subsystem studies under `scout-ai/subsys/` (probed 2026-09-10/11),
+and is intended as a living reference for maintainers and contributors.
 
 Each entry includes a priority to help triage effort:
 
@@ -41,6 +42,154 @@ Each entry includes a priority to help triage effort:
 > provided, matching the behavior of other CLI commands.
 
 **Sources:** [../research/commands-analysis.md](../research/commands-analysis.md).
+
+---
+
+### 3. Model restore precedence: saved `options.json` wins over constructor args
+
+**Priority:** Medium
+
+> **Finding: F6** (`scout-ai/subsys/model-ml.md`).
+
+**Problem:**
+`ScoutModel#load_options` merges the persisted `options.json` **over** the
+options passed to the constructor, and `HuggingfaceModel#initialize` assigns
+`checkpoint` after `super` runs, so the saved value overwrites a fresh
+constructor argument. Reloading
+`HuggingfaceModel.new("CausalLM", "NEW/ckpt", dir)` over a state dir saved
+with `checkpoint: "saved/ckpt"` still reports `saved/ckpt`.
+
+The same inversion makes a *fresh* `checkpoint` argument silently ignored
+whenever a state directory exists: the intended override-on-restore flow
+("pass new values when resuming") cannot be expressed without deleting the
+state dir or hand-editing `options.json`.
+
+**Fix direction:** restore should treat saved options as defaults and
+explicit constructor arguments as overrides, with the resolved set written
+back only on `save`.
+
+---
+
+### 4. Dead and broken dispatch branches in embed + image
+
+**Priority:** Low
+
+> **Finding: F11** (`scout-ai/subsys/embed-image.md`, `backends.md` §1).
+
+**Problem:**
+- `LLM.embed`'s `case` accepts `:relay` and `:openwebui` branches that fail
+  with `NoMethodError` at runtime (the relay branch expects a real client;
+  the openwebui branch hashes a client object that is a plain Hash).
+- `LLM.image`'s dispatch has the same shape: `:relay` and `:bedrock`
+  branches raise `NoMethodError`, and `:glm` is missing entirely although
+  `LLM::GLM.image` works when called directly.
+- `LLM.embed` has no `:anthropic`, `:vllm`, `:bedrock`, `:glm` branch
+  (Anthropic raises `does not offer embeddings`; Bedrock embeddings must be
+  reached through `LLM::Bedrock.embed` directly, since no dispatch branch
+  reaches it).
+- `Backend#encode_image` maps only `jpg`/`jpeg`/`png`; every other extension
+  gets the literal MIME string `image/extension`, producing a malformed data
+  URI (`data:image/extension;base64,...`) that providers reject.
+
+**Fix direction:** generate the MIME from a real extension table, and either
+implement or delete the unreachable branches rather than carrying both.
+
+---
+
+### 5. Symbol-named KB databases break the tool layer on reload
+
+**Priority:** Low
+
+> **Finding: F15** (`scout-ai/subsys/tools.md` §2.4).
+
+**Problem:**
+`KnowledgeBase#register(:name, ...)` + `save` round-trips the registry YAML
+with symbol keys. On `KnowledgeBase.load`,
+`knowledge_base_tool_definition` calls `get_database(database)` with a
+**String**, and the plain `Hash#[]` lookup misses symbol keys, raising
+`RuntimeError: Repo <name> not found and not registered`. Registering the
+same database with a String name works.
+
+This is a scout-gear/scout-ai boundary trap: the scout-ai tool layer assumes
+String-keyed registries.
+
+**Fix direction:** normalize keys on one side (stringify in
+`get_database`, or document that `register` must receive String names).
+
+---
+
+### 6. Agent KB root and `Chat.load_workflow` diverge
+
+**Priority:** Low
+
+> **Finding: F16** (`scout-ai/subsys/agent-society.md`, `tools.md` §2.8).
+
+**Problem:**
+Two divergent lookup roots for agent resources:
+
+- `Chat.load_workflow` (the loader behind `tool:`/`introduce:` chat roles)
+  resolves agent names against `Scout.chats.Agent` only (falling back to
+  `Workflow.require_workflow`), while `LLM.load_agent` uses five roots
+  (filename path, `Scout.workflows[name]`, `Scout.Agent[name]`,
+  `Scout.var.Agent[name]`, `Scout.chats.Agent[name]`, `Scout.chats[name]`),
+  so the same name can load in one entry point and not the other.
+- `scout agent kb` hard-codes `Scout.var.Agent[agent]` — just one of the
+  five — leaving agents living in `Scout.Agent` or `Scout.chats.Agent`
+  unreachable from the CLI.
+
+A chat that mixes `tool:` and `kb:` declarations against the same project can
+therefore resolve them against different directories depending on the entry
+point (workflow job vs CLI chat vs agent society).
+
+**Fix direction:** one resolution helper for "project-relative resource used
+by a chat message", used by both paths.
+
+---
+
+### 7. `start_chat.chat` is silently ignored and agent workflows are never reloaded
+
+**Priority:** Medium
+
+> **Finding: F19** (`scout-ai/subsys/agent-society.md`).
+
+**Problem:**
+Two related behaviors surprise anyone building agent societies:
+
+1. Naming the seed file `start_chat.chat` (instead of `start_chat`) is
+   silently mishandled. When a literal `start_chat` file exists, the `.chat`
+   variant is skipped entirely; used alone,
+   `find_with_extension` returns the missing literal path, the read fails, and
+   the seed comes out **empty** — the agent starts with no system prompt and
+   no tools, with nothing reported. A silent empty seed is a misconfiguration
+   trap, not a feature.
+2. The agent workflow module cache (`@@agent_workflow`) is process-global
+   and never invalidated: the first `Workflow.require_workflow` of a session
+   wins, and later edits to `Agent/<Name>/workflow.rb` are invisible until
+   the process restarts.
+
+**Fix direction:** raise when a directory offers both `start_chat` and
+`start_chat.chat`, and raise (or fall back to the directory-assembly seed)
+when only the `.chat` variant exists; and key the workflow cache on the
+file's mtime/digest.
+
+---
+
+### 8. OpenAI `defaults` stripping is dead code
+
+**Priority:** Low
+
+> **Finding: F21** (`scout-ai/subsys/backends.md` §7.8).
+
+**Problem:**
+`openai.rb` deletes `:defaults` at the wrapper level, where `:parameters` is
+always `nil` (parameters live under `function:` after wrapping), so the
+`defaults` subschema survives in the OpenAI payload. `huggingface.rb` digs
+correctly (`definition.dig(:function, :parameters).delete(:defaults)`) and is
+the only adapter that actually strips it; ollama/anthropic never do.
+
+**Fix direction:** either strip it consistently for every Chat-Completions
+family adapter (and drop the dead line), or stop pretending the field is
+provider-private and keep it everywhere.
 
 ---
 
@@ -90,6 +239,29 @@ configure endpoint → first `ask` → first chat file → first agent → first
 workflow). Low priority since the current guide covers the essentials.
 
 **Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
+
+---
+
+### D4. Documentation vs. verified code behavior (2026-09-11 promotion)
+
+**Priority:** Medium
+
+**Problem:**
+The Cortex subsystem studies (`scout-ai/subsys/`, probed 2026-09-10/11) found
+eleven places where maintained docs described behavior that does not exist or
+has since changed: the nonexistent `scout-ai config set` (F3), `introduce:`
+generating tools (F4), backend retry/backoff and streaming (F8/F9), dynamic
+backend name resolution (F13), context-strategy bounds (F14), `#` chat
+comments (F12), the incomplete chat compilation pipeline listing and key-file
+table, the `inherit: 'tools'` scope (F17), Anthropic image blocks (F18), the
+MultiAgentWorkflows first snippet (F20), and the `agent.rb` require tree /
+`start_chat.chat` seed handling (F19).
+
+**Status: Resolved (uncommitted).** `doc/` has been corrected against the
+owning artifacts (`scout-ai/subsys/README.md` is the F1–F22 index); each fix
+is described in the corresponding page. The code half lives in issues 3–8
+above, tagged with their finding numbers; R9–R13 in the Refactor Log record
+the fixes that landed in the same sweep.
 
 ---
 
@@ -169,6 +341,12 @@ that endpoint configuration was a HIGH-priority gap in the original docs.
 Review both documents to ensure the endpoint YAML examples, key names, and
 configuration precedence are identical. Cross-link them so readers can find
 the canonical reference.
+
+**Status: Resolved (uncommitted).** [user/RunningInference.md](user/RunningInference.md)
+is now the single canonical endpoint reference (hand-written
+`~/.scout/etc/AI/<name>.yaml`, recognized keys, `-ck key=value`, provider
+table, `Endpoint not found` semantics); GettingStarted and Backends
+cross-reference it instead of restating the details.
 
 **Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
 
@@ -286,152 +464,106 @@ behaviour of the command is untouched.
 
 ---
 
+### R9–R13. The 2026-09-11 fix sweep (uncommitted)
+
+R9–R13 below record the 2026-09-11 fix sweep verified by the Cortex subsystem
+studies (`scout-ai/subsys/`). All changes sit uncommitted in the working tree
+together with their tests; findings F1, F2, F5, F7 and the `ask.rb`
+`persist:false` fix are resolved by them.
+
+The findings identified by the same studies but **not** covered by the sweep
+(F6, F11, F15, F16, F19, F21) correspond to code issues 3, 4, 5, 6, 7 and 8
+above; they remain open.
+
+### R9. `attach` tool can attach PDFs again
+
+Normalization used to overwrite an explicit `file_type: 'pdf'` to `'image'`,
+and the dispatcher's bare `case` matched its first branch unconditionally, so
+`when 'pdf'` was unreachable and every attach routed to
+`Agent#image(path)`. Fixed by matching on the subject form and normalizing
+only on `auto`; the `ATACH_TYPES` typo and the schema/code default divergence
+(auto vs image) went with it. `lib/scout/llm/agent/attach.rb` +
+`test/scout/llm/agent/test_attach.rb` (8 tests, 0 failures). Uncommitted.
+
+### R10. MCP serving works against the `mcp` gem
+
+`Workflow#mcp`'s tool block declared two positional parameters while the
+`mcp` gem (1.1.0) invokes `tool.call(**args)` with keywords, and `self`
+inside `MCP::Tool.define`'s anonymous class was not the Workflow module, so
+every served tool call failed with `Internal error`. The block now takes
+`|server_context: nil, **parameters|`, captures the workflow module in a
+local, returns a real `MCP::Tool::Response`, and registers tools under the
+String name the JSON-RPC lookup expects. `lib/scout/llm/mcp.rb` +
+`test/scout/llm/tools/test_mcp.rb` (3 tests, 0 failures). Uncommitted; the
+supported `mcp` gem version range is still undecided.
+
+### R11. `LLM.embed` reads endpoint YAML
+
+`embed.rb` used the extensionless `Scout.etc.AI[endpoint].exists?`, unlike
+`ask`/image which use `find_with_extension(:yaml)`, so `<endpoint>.yaml`
+could not configure embeddings and a missing endpoint failed silently
+instead of raising. `lib/scout/llm/embed.rb` +
+`test/scout/llm/test_embed.rb` (6 tests, 0 failures). Uncommitted.
+
+### R12. TorchModel trains with a real criterion by default
+
+`@criterion ||= TorchModel.optimizer(...)` assigned an **SGD optimizer** to
+the criterion slot (copy-paste), so default training computed the loss on an
+optimizer object unless the user set `model.criterion` manually — which the
+documented example did, masking the bug. Now builds a proper default
+criterion. `lib/scout/model/python/torch.rb`; covered by
+`test/scout/model/python/test_torch.rb` (torch-gated). Uncommitted.
+
+### R13. `ask` honors an explicit `persist: false`
+
+`ask.rb` read `persist` as `persist ||= config_lookup`, which is falsy for
+`false`: an explicit opt-out was silently discarded and the round persisted
+anyway into the shared `Scout.var.cache.ask` store. The config lookup now
+runs only when the caller said nothing (`persist.nil?`), so `persist: false`
+genuinely bypasses the cache. `lib/scout/llm/ask.rb`; covered by
+`test/scout/llm/test_ask.rb`. Uncommitted.
+
+---
+
+## Documentation promotion ledger (2026-09-11)
+
+The research file `research/coding-philosophy-analysis.md` is superseded by
+[developer/DesignPrinciples.md](developer/DesignPrinciples.md). What was
+promoted, and where it landed:
+
+- **Annotation mechanics** (`Annotation.purge`, singleton-class installation,
+  `annotation_types`) — *Chat-as-data (annotate, don't wrap)*.
+- **The four executor kinds of the tool registry** (`Proc`, workflow
+  name/module, `KnowledgeBase`, plus the bare-Hash degenerate case) and
+  "prefer Proc blocks for tools" — *Idiomatic patterns to follow*.
+- **Proc/block-based DSLs** (task blocks run only on cache miss,
+  `Persist.persist` as compute-once) — *Idiomatic patterns to follow*.
+- **`include_workflow` over plain `include`** for mixins carrying class-level
+  state such as `AgentWorkflow` — *Module composition over inheritance* and
+  the anti-pattern list.
+- **Configuration cascade** (`Scout::Config.get` precedence: options →
+  env → config file → default) — *IndiferentHash everywhere*.
+- **Environment keys are `<TAG>_KEY`, not `<PROVIDER>_API_KEY`** —
+  *IndiferentHash everywhere*.
+- **Adding a role by extending the Chat annotation module** rather than
+  post-processing parsed messages — *Idiomatic patterns to follow* /
+  anti-pattern list.
+- **Naming conventions** (file paths mirror module nesting; DSL verbs,
+  predicate `?` suffixes, `setup` class methods, `options`/`path`/`agent`
+  variables) — *File and method naming*.
+
+Everything else in the file was either already covered by DesignPrinciples.md
+or was example-flavored duplication of the rules above, so the file can be
+deleted without loss. Its remaining references were removed from
+[StartHere.md](StartHere.md) (reading-path row and the research/ tree
+listing).
+
+---
+
 ## Anti-patterns to Watch For
 
-These anti-patterns are drawn from the Scout-AI coding philosophy
-([../research/coding-philosophy-analysis.md](../research/coding-philosophy-analysis.md)).
-They are the most common ways that well-intentioned code fights the library
-instead of composing with it.
-
----
-
-### AP1. Don't create wrapper classes for Chat
-
-**❌ Non-idiomatic:**
-```ruby
-class MyConversation
-  def initialize
-    @messages = []
-  end
-  def add_user(text)
-    @messages << { role: 'user', content: text }
-  end
-end
-```
-
-**✅ Idiomatic:**
-```ruby
-chat = Chat.setup([])
-chat.user("Hello")
-```
-
-**Why:** `Chat` is an annotation on a plain `Array`. Wrapping it in a custom
-class breaks serialization, composition, caching, and every helper that
-expects an Array. Use `Chat.setup(any_array)` and the DSL methods.
-
----
-
-### AP2. Don't hardcode provider logic in `LLM.ask`
-
-**❌ Non-idiomatic:**
-```ruby
-def self.ask(question, options = {})
-  if options[:provider] == 'openai'
-    # 50 lines of OpenAI-specific code inline
-  end
-end
-```
-
-**✅ Idiomatic:**
-```ruby
-def self.ask(question, options = {})
-  options = IndiferentHash.setup(options)
-  backend = LLM.resolve_backend(options)
-  backend.ask(messages, options, &block)
-end
-```
-
-**Why:** Provider logic belongs in backend modules (composed via
-`prepend`/`include`). `LLM.ask` should dispatch, not implement.
-
----
-
-### AP3. Don't use plain `Hash` for options that come from user input
-
-**❌ Non-idiomatic:**
-```ruby
-def ask(question, options = {})
-  model = options[:model]  # fails if user passed 'model' as a string key
-end
-```
-
-**✅ Idiomatic:**
-```ruby
-def ask(question, options = {})
-  options = IndiferentHash.setup(options)
-  model = options[:model]  # works for both :model and 'model'
-end
-```
-
-**Why:** Options arrive from YAML files, CLI flags, and Ruby hashes with
-inconsistent key types. `IndiferentHash` normalizes access. Always call
-`IndiferentHash.setup` on any options hash at the entry point.
-
----
-
-### AP4. Don't subclass to add behavior
-
-**❌ Non-idiomatic:**
-```ruby
-class SpecialChat < Array
-  def user(content)
-    self << { role: 'user', content: content }
-  end
-end
-```
-
-**✅ Idiomatic:**
-```ruby
-module Chat
-  extend Annotation
-  def user(content)
-    message(:user, content)
-  end
-end
-# Then: Chat.setup(any_array)
-```
-
-**Why:** Subclassing creates a rigid hierarchy and breaks the "plain Array"
-contract. Annotation and module composition add behavior non-invasively.
-
----
-
-### AP5. Don't scatter file I/O without `Path` / `Open`
-
-**❌ Non-idiomatic:**
-```ruby
-File.read("/hardcoded/path/#{name}")
-```
-
-**✅ Idiomatic:**
-```ruby
-path = Scout.var.Agent[name].start_chat
-content = Open.read(path.find) if path.exists?
-```
-
-**Why:** Scout's `Path` API handles convention-based resolution, annotation,
-and existence checks. `Open` provides atomic writes and encoding safety.
-Hardcoded paths break portability and testability.
-
----
-
-### AP6. Don't define methods on `Agent` that duplicate `Chat`
-
-**❌ Non-idiomatic:**
-```ruby
-class Agent
-  def add_user_message(text)
-    current_chat << { role: 'user', content: text }
-  end
-end
-```
-
-**✅ Idiomatic:**
-```ruby
-agent.user(text)  # works automatically via method_missing → current_chat
-```
-
-**Why:** `Agent` already delegates unknown methods to `current_chat` via
-`method_missing`. Defining wrapper methods on `Agent` creates redundancy and
-maintenance overhead. If the method exists on `Chat`, it already works on
-`Agent`.
+The catalogue has moved: these are now maintained in
+[developer/DesignPrinciples.md](developer/DesignPrinciples.md)
+("Anti-patterns to avoid"), which is the single normative source. The AP1–AP6
+entries that used to live here were deleted in the 2026-09-11 documentation
+promotion once their content was fully covered there.

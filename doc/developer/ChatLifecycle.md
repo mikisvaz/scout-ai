@@ -51,7 +51,7 @@ recognizes these roles:
 | `function_call_output` | Tool execution result. May carry a `meta` key: an Array of already-deserialized receipt field Hashes (delegated inference metadata such as `pt`/`ct`/`tt`/`inference_id`, or `{"job":"<path>"}` producer references), embedded by `LLM.process_calls` when the tool returned an `LLM::Agent`. Only `meta` is read; the legacy serialized `agent_meta` key is no longer accepted, so legacy envelopes contribute no receipt evidence. Outputs may also carry auxiliary `step`/`start_timestamp`/`timestamp` fields; `step` is bookkeeping, not a provenance edge. See [Provenance.md](Provenance.md). | Yes (as provider-specific tool result) |
 | `meta` | Provenance metadata (tokens, job references) | **No** — stripped before inference |
 | `tool` | Tool definition (inline in chat) | No — extracted into tool registry |
-| `introduce` | Workflow/tool introduction | No — extracted, introduces tools to the model context |
+| `introduce` | Workflow introduction | No — extracted; replaced by a `user:` message with the workflow's documentation (generates no tools) |
 | `mcp` | MCP server declaration | No — extracted into tool registry |
 | `kb` | Knowledge base declaration | No — extracted into tool registry |
 | `association` | Association declaration | No — extracted |
@@ -95,26 +95,52 @@ transforms it through several stages:
 Input (String / file / Array)
   │
   ▼
-1. Parse          — Chat.parse: text → Array<Hash>
-  │                 (handles role: directives, block form, indented content)
+1. Parse     — Chat.parse: text → Array<Hash>
+  │            (handles role: directives, block form, indented content)
   ▼
-2. Extract options — options: directives extracted into options hash
-  │                 (model:, endpoint:, backend:, etc.)
+2. Indiferent — every message Hash is set up as an IndiferentHash
+  │             (symbol/string-indifferent access)
   ▼
-3. Extract tools   — tool:/introduce:/mcp:/kb: roles extracted
-  │                 into a tool registry hash
+3. Imports    — import:/continue:/last: references expanded
   ▼
-4. Extract clear   — clear: directives processed
-  │                 (removes tool outputs from history)
+4. Clear      — clear: directives processed
+  │            (removes tool outputs from history)
   ▼
-5. prepare_prompt  — context strategies applied (shorten_tools)
-  │                 EPHEMERAL: operates on a copy, never mutates stored chat
+5. Clean      — Chat.clean: default roles dropped from the prompt
+  │            ('skip', 'previous_response_id')
   ▼
-6. format_messages — Backend translates into provider-specific format
+6. Config     — Chat.config: `config:` messages applied as Scout::Config.set
+  ▼
+7. Tasks      — task:/inline_task:/exec_task: messages run eagerly
+  │
+  ▼
+8. Jobs       — pending jobs produced (Workflow.produce)
+  ▼
+9. Files      — file:/attach: roles resolved to content or paths
+  ▼
+10. Setup     — Chat.setup: the array is annotated with the Chat DSL,
+               producing the compiled chat
+
+Steps 2–10 are `Chat.chat`'s own order —
+indiferent → imports → clear → clean → config → tasks → jobs → files →
+setup — with parsing (step 1) done by `Chat.messages` before it. This
+listing is complete; there is no hidden stage.
+  │
+  ▼
+Backend path — endpoint/model/backend option: roles and
+               tool:/introduce:/mcp:/kb:/association: roles are
+               extracted here (Chat.options / Chat.tools), then
+               prepare_prompt applies the context strategies
+               (EPHEMERAL: operates on a copy, never mutates the stored chat)
+               and format_messages translates into the provider format
   │
   ▼
 API call
 ```
+
+Note that options and tools extraction happens on the **backend path**, after
+the chat itself has been compiled — that is why `option:`/`tool:` roles are
+compiled away from the prompt but still configure the request.
 
 ### Key properties
 
@@ -166,12 +192,24 @@ and inspection.
 | `lib/scout/llm/chat.rb` | Chat module definition, `setup`, `parse` |
 | `lib/scout/llm/chat/annotation.rb` | DSL methods (user, system, ask, follow, etc.) |
 | `lib/scout/llm/chat/parse.rb` | Text → Array<Hash> parser |
-| `lib/scout/llm/chat/process/options.rb` | Option extraction |
-| `lib/scout/llm/chat/process/tools.rb` | Tool/introduce/mcp/kb extraction |
-| `lib/scout/llm/chat/process/clear.rb` | Clear directive processing |
+| `lib/scout/llm/chat/process.rb` | Pipeline driver (indiferent → imports → clear → clean → config → tasks → jobs → files → setup) |
+| `lib/scout/llm/chat/process/options.rb` | `Chat.config` — option/endpoint resolution |
+| `lib/scout/llm/chat/process/tools.rb` | `Chat.tasks`/`Chat.jobs` plus tool/introduce/mcp/kb extraction |
+| `lib/scout/llm/chat/process/clear.rb` | `Chat.clear`/`Chat.clean` |
+| `lib/scout/llm/chat/process/files.rb` | `Chat.imports`/`Chat.files` |
 | `lib/scout/llm/chat/process/meta.rb` | Meta messages, provenance, message_index |
-| `lib/scout/llm/chat/prompt.rb` | Prompt strategies (prepare_prompt, shorten_tools) |
+| `lib/scout/llm/chat/prompt.rb` | `prepare_prompt` dispatch only; the strategies themselves live in the `chat/prompt/` strategy files below |
+| `lib/scout/llm/chat/prompt/shorten_tools.rb` | Truncation strategy (not in the default list) |
+| `lib/scout/llm/chat/prompt/shorten_tools_epoch.rb` | Cache-friendly epoch strategy |
+| `lib/scout/llm/chat/prompt/shorten_tools_epoch_increment.rb` | Growing-window epoch strategy (default) |
+| `lib/scout/llm/chat/prompt/inbox.rb` | Consume-once inbox strategy |
+
+The prompt strategies are documented in
+[PromptProcessing.md](PromptProcessing.md); this table only maps the files.
 | `lib/scout/llm/chat/persist.rb` | .chat file load/save |
+| `lib/scout/llm/chat/provenance.rb` | Provenance/receipt traversal primitives |
+| `lib/scout/llm/chat/tool_calls.rb` | Tool-call message normalization |
+| `lib/scout/llm/chat/agent_meta.rb` | Agent receipt (`meta`) message shaping |
 
 ---
 

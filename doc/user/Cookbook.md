@@ -198,7 +198,7 @@ orchestrator.chat
 ```ruby
 module AnalysisPipeline 
   extend Workflow
-  include AgentWorkflow
+  include_workflow AgentWorkflow
 
   chat_task :plan do |objective|
     agent = self.agent('Planner', chat: chat)
@@ -268,6 +268,8 @@ puts agent.chat
 
 ## Error handling with retry
 
+Backends themselves never retry — retrying is an agent-level concern:
+
 ```ruby
 agent = LLM.agent(endpoint: :openai)
 agent.process_exception = Proc.new do |e|
@@ -309,7 +311,7 @@ system:
 
 You are a bioinformatics assistant.
 
-kb: gene_db [genes proteins diseases]
+kb: gene_db genes proteins diseases
 
 user:
 
@@ -325,7 +327,7 @@ system:
 
 You have access to an external search service.
 
-mcp: https://api.example.com/mcp/ [search]
+mcp: https://api.example.com/mcp/ search
 
 user:
 

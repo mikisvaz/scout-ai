@@ -55,8 +55,10 @@ For deeper investigation of any subsystem, see the corresponding
 ```
 scout-ai.rb
   └─ scout/llm/ask.rb       (requires scout, chat)
-  └─ scout/llm/chat.rb      (requires chat/annotation, parse, process, prompt, persist, tools, utils)
-  └─ scout/llm/agent.rb     (requires ask, agent/chat, iterate, delegate, workflow)
+  └─ scout/llm/chat.rb      (requires utils, tools, chat/{annotation, parse, process,
+                             persist, prompt, provenance, tool_calls, agent_meta})
+  └─ scout/llm/agent.rb     (requires ask, agent/{chat, iterate, conversation,
+                             delegate, attach, save, workflow})
   └─ scout/llm/embed.rb
   └─ scout/llm/image.rb
   └─ scout/llm/tools/       (workflow, knowledge_base, mcp, call)
@@ -83,8 +85,10 @@ A single inference request flows through the layers as follows:
    into a canonical Array of Hashes via `Chat.parse`. Options embedded in the
    chat (via `option:`, `model:`, `endpoint:` directives) are extracted into
    the options hash.
-3. **Tool extraction**: Tool/introduce/association roles are extracted from
-   messages. Workflow tasks and KB databases are converted to tool definitions.
+3. **Tool extraction**: Tool/mcp/kb/association roles are extracted from
+   messages. Workflow tasks and KB databases are converted to tool definitions;
+   `introduce:` roles are rewritten into `user:` documentation messages and
+   create no tools.
 4. **Prompt preparation**: The message array passes through
    `Chat.prepare_prompt` which applies context-management strategies
    (e.g., `shorten_tools`). This is **ephemeral** — the stored chat is never

@@ -48,7 +48,7 @@ class TestLLMAgentDelegate < Test::Unit::TestCase
       root.delegate worker_agent, 'Worker', 'Hand work to the worker'
 
       result = invoke_hand_off(root, :hand_off_to_Worker, message: 'first task')
-      result.chat persist: false, endpoint: 'mock'
+      result.chat persist: false, endpoint: 'mock', backend: :mock
 
       root.save
 
@@ -108,7 +108,7 @@ class TestLLMAgentDelegate < Test::Unit::TestCase
       # The tool name keeps the raw hyphen; only the conversation slot is
       # sanitized (hyphens are legal in both, so slot == name here)
       result = invoke_hand_off(root, :'hand_off_to_data-miner', message: 'mine')
-      result.chat persist: false, endpoint: 'mock'
+      result.chat persist: false, endpoint: 'mock', backend: :mock
       root.save
 
       child_file = File.join(dir, 'root.society', 'data-miner', 'data-miner', 'agent.chat')

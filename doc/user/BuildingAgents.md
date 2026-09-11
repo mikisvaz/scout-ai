@@ -142,7 +142,63 @@ Agent/
     workflow.rb       # optional: Scout workflow providing tools
     knowledge_base/   # optional: KB for retrieval
     python/           # optional: Python workflow tasks
+    agent.rb          # optional: Ruby file defining the agent
 ```
+
+**Discovery order.** The **filename branch** runs first: `Path.is_filename?`
+is a plain `File.exist?` test, so any argument that names an existing path —
+including `Agent/Researcher` — is loaded as that path (a directory with an
+`agent.rb` loads it; any other file is loaded itself; a directory without
+`agent.rb` falls through to the named branch with the full path as the name).
+Only a bare name goes through the directory candidates:
+
+1. a workflow checkout named `Researcher` (`Scout.workflows['Researcher']`);
+2. `Scout.Agent['Researcher']`;
+3. `Scout.var.Agent['Researcher']`;
+4. `Scout.chats.Agent['Researcher']`;
+5. `Scout.chats['Researcher']`.
+
+The workflow candidate is checked **first**: when `Scout.workflows[name]`
+exists it wins and the agent path is redirected into that workflow directory
+(so `start_chat` and `knowledge_base` are then looked up inside it) — a repo
+named after your agent shadows the `Agent/` directory. Otherwise the first of
+2–5 that exists is used; if none does, loading raises
+`ScoutException: No agent found with name Researcher`.
+
+Two other loaders look up agent names through **fewer** roots, so an agent
+that loads fine from Ruby may still be invisible to them: `tool:` /
+`introduce:` roles in a chat go through `Chat.load_workflow`, which only
+tries `Scout.chats.Agent` (then `Workflow.require_workflow`), and the
+`scout agent kb` CLI hard-codes `Scout.var.Agent`. The `kb:` chat role, by
+contrast, resolves a path first and only falls back to `LLM.load_agent`
+(full root list) when that path is not a loadable knowledge base.
+
+Inside the chosen directory the workflow is picked as
+`Workflow.require_workflow_file(workflow.rb)` when present, else a
+`PythonWorkflow` from `python/*.py`, else none; the KB from `knowledge_base/`
+(of the agent directory, or of the workflow checkout); and the seed from
+`start_chat` (or, when a workflow with a description exists and there is no
+`start_chat`, a single `introduce:` role). Name the seed file `start_chat`
+literally: `start_chat` wins over `start_chat.chat`, and a directory that
+offers only `start_chat.chat` gets an **empty** seed — a silent
+misconfiguration, see the common mistakes below.
+
+### The `agent.rb` file
+
+An agent directory may also carry an `agent.rb`. When the argument is a path,
+`LLM.load_agent('Agent/Researcher')` loads `Agent/Researcher/agent.rb` when
+it exists (or the file itself when the argument is not a directory) and the
+file's **last expression must be an `Agent`** — the value of the file *is* the
+agent. The `agent.rb` takes responsibility for the whole agent: it must
+configure workflow, knowledge base and `start_chat` itself, because none of
+the directory assembly runs for it. A directory holding both `agent.rb` and
+`workflow.rb` uses `agent.rb` for the agent object and ignores the workflow
+assembly.
+
+Two caching traps come with `workflow.rb`: the workflow module cache
+(`@@agent_workflow`) is name-keyed and process-global, so two agent
+directories defining the same module name share the first module loaded, and
+an edit to `workflow.rb` stays invisible until the process restarts.
 
 ### The start_chat file
 
@@ -158,8 +214,14 @@ Always cite your sources.
 endpoint: anthropic
 model: claude-sonnet-4-20250514
 
+tool: SearchWorkflow
 introduce: SearchWorkflow
 ```
+
+Name the file exactly `start_chat` (no extension). `start_chat` wins over
+`start_chat.chat`, and a directory that offers only `start_chat.chat` gets an
+**empty** seed — the agent silently starts with no system prompt and no tools.
+See [Improvements.md](../Improvements.md) issue 7.
 
 ### Loading and using a named agent
 
@@ -177,16 +239,6 @@ From the CLI:
 ```bash
 scout-ai agent ask Researcher "Find papers about protein folding."
 ```
-
-### Agent discovery locations
-
-Scout-AI looks for named agents in several places (first match wins):
-
-1. `Scout.workflows[name]`
-2. `Scout.Agent[name]`
-3. `Scout.var.Agent[name]`
-4. `Scout.chats.Agent[name]`
-5. `Scout.chats[name]`
 
 ---
 
@@ -215,20 +267,24 @@ end
 
 ### Declaring tools in the start chat
 
-Use `tool:` or `introduce:` roles in the start_chat file:
+Use `tool:` to expose tasks and `introduce:` to add their documentation:
 
 ```text
 system:
 
 You are a code analyst.
 
+tool: CodeAnalyzer
 introduce: CodeAnalyzer
 ```
+
+`introduce:` alone generates no tools; it only injects the workflow's title
+and description as a user message.
 
 ### Knowledge base and MCP tools
 
 ```text
-kb: my_database [genes proteins]
+kb: my_kb genes proteins
 mcp: https://api.example.com/mcp/
 ```
 
@@ -260,6 +316,9 @@ Common options:
 | `model:` | Model identifier |
 | `format:` | Output format (`:json`, `:text`, or a JSON schema hash) |
 | `persist:` | Whether to cache inference results (default `true`) |
+
+Endpoint naming and caching semantics are documented once in
+[RunningInference.md](RunningInference.md).
 
 ---
 
@@ -303,7 +362,8 @@ end
 
 ## Error handling
 
-Set a `process_exception` callback to intercept errors during inference:
+Backends do not retry. Set a `process_exception` callback on the agent to
+intercept errors during inference and decide whether to retry:
 
 ```ruby
 agent.process_exception = Proc.new do |exception|
@@ -324,6 +384,14 @@ end
   default branch. Calling `start` explicitly makes the lifecycle clear.
 - **Putting user messages on `start_chat`**: `start_chat` is the *seed* — it
   should contain system prompts and configuration, not the actual question.
+- **Naming the seed `start_chat.chat`**: the loader looks for the literal
+  file `start_chat`. When `start_chat` exists, the `.chat` variant is never
+  read; when it is the only one present, the seed comes out **empty** rather
+  than raising. Always name the file `start_chat`.
+- **Expecting an edited `workflow.rb` to reload**: the loaded workflow module
+  is cached process-globally and never invalidated, so an edit is invisible
+  until the process restarts, and two agent directories defining the same
+  module name share the first one loaded.
 - **Expecting `ask` to append to the conversation**: Use `chat` for the
   stateful pattern (ask + append + return text). `ask` is the lower-level
   primitive.

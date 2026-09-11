@@ -30,23 +30,27 @@ Scout-AI applies **prompt strategies** — transformations to the conversation
 just before sending it to the model. These are **ephemeral**: they modify only
 what the model sees, never the saved chat file.
 
-The default strategy is `shorten_tools_epoch_increment`, a tool-call pruning
-strategy with stable compaction boundaries (so provider prompt caches stay
-useful). When tool calls accumulate, older ones are shortened or removed:
+The default strategy list is `['shorten_tools_epoch_increment', 'inbox']`:
+a tool-call pruning strategy with stable compaction boundaries (so provider
+prompt caches stay useful), plus the one-off inbox described below. When tool
+calls accumulate, older ones are compacted while the recent ones stay whole:
 
 | Threshold | Default | What happens |
 |-----------|---------|-------------|
-| Max tool calls retained | 40 | Older tool call/result pairs beyond this count are removed |
-| Recent tool outputs at full fidelity | 10 | The 10 most recent tool outputs are kept in full |
-| Character budget for tool outputs | 100,000 | Total characters for all retained tool outputs |
+| Tool-call threshold | 50 | At or below this total, nothing is compacted |
+| Recent tool calls kept full | 20 | The newest calls stay at full fidelity |
+| Compacted tool calls | 80 | The calls before the full-recent window get truncated |
 
 This means:
 - The most recent tool calls are always visible in full.
-- Older tool calls are progressively truncated.
-- Very old tool calls are removed entirely.
+- Older tool calls are progressively truncated (a 400-character short form).
+- The boundary only advances in **epochs**, so the same prefix is sent again
+  and provider prompt caches stay valid.
 
 The model never sees a truncated prompt — it simply gets a shorter conversation
-that fits within its context window.
+that fits within its context window. The exact configuration keys and the
+(non-default) `shorten_tools` limits are tabulated in
+[../developer/PromptProcessing.md](../developer/PromptProcessing.md).
 
 ---
 
@@ -128,9 +132,9 @@ messages.
 - **Delivery is at-most-once.** The file is moved before the message is built,
   so an interrupted inference may drop a notice but never delivers the same
   notice twice.
-- **A cached answer skips the inbox.** Scout-AI caches inference results; when
-  a cached answer is replayed, no inference runs, so inbox files are left
-  untouched for the next real inference.
+- **A cached answer skips the inbox.** When a cached answer is replayed, no
+  inference runs, so inbox files are left untouched for the next real
+  inference (see [RunningInference.md](RunningInference.md) on the ask cache).
 - **No inbox, no effect.** If the inbox directory does not exist, the strategy
   is a no-op and creates nothing.
 
@@ -180,7 +184,7 @@ If you're not sure whether data will be needed, declare it as a tool instead of
 importing it. The model will fetch it only if needed:
 
 ```text
-introduce: DataLookup
+tool: DataLookup
 ```
 
 Rather than:
@@ -245,6 +249,9 @@ the model's prompt is an **optimized view** for the current inference call.
   on-demand data.
 - **Not using `clear:` between phases**: If your workflow has distinct phases,
   clearing between them keeps each phase focused.
+- **Expecting `shorten_tools` limits**: those belong to the non-default
+  strategy; the default `shorten_tools_epoch_increment` numbers are
+  50 / 20 / 80 (see the table above).
 
 ---
 

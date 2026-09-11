@@ -11,14 +11,16 @@ module LLM
       client = MCPClient.create_client(mcp_server_configs: [options.merge(type: 'stdio')])
     else
       type = IndiferentHash.process_options options, :type,
-        type: (Open.remote?(url) ? :http : :stdio)
+        type: (Open.remote?(url) ? :https : :stdio)
 
       if url && Open.remote?(url)
         token ||= LLM.get_url_config(:key, url, :mcp)
         options[:headers] = { 'Authorization' => "Bearer #{token}" }
       end
 
-      client = MCPClient.create_client(mcp_server_configs: [options.merge(type: 'http', url: url)])
+      mcp_server_options = options.merge(type: 'http', transport: :streamable_http)
+      #client = MCPClient.create_client(mcp_server_configs: [mcp_server_options])
+      client = MCPClient.connect(url, **mcp_server_options)
     end
 
     tools = client.list_tools

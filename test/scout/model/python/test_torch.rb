@@ -71,3 +71,55 @@ class TestTorch < Test::Unit::TestCase
   end
 end
 
+
+class TestTorchDefaults < Test::Unit::TestCase
+  # Regression test for the @criterion default-wiring bug: the train loop
+  # used to assign an SGD optimizer to @criterion (TorchModel.optimizer
+  # instead of TorchModel.criterion), so default training failed with
+  # "TypeError: Non-callable Python object was given" (doc/Model.md
+  # documents MSELoss as the default criterion).
+  def test_default_criterion_is_mseloss_and_train_works
+    omit "No python environment" unless Availability.python?
+    omit "Torch not installed" unless Availability.python_modules?(:torch)
+
+    model = nil
+
+    TmpFile.with_dir do |dir|
+
+      TorchModel.init_python
+
+      model = TorchModel.new dir
+      model.state = ScoutPython.torch.nn.Linear.new(1, 1)
+      # NOTE: neither criterion nor optimizer is set on purpose; this
+      # exercises the default wiring path.
+
+      model.extract_features do |f|
+        [f]
+      end
+
+      model.post_process do |v,list|
+        list ? list.collect{|vv| vv.first } : v.first
+      end
+
+      model.add 5.0, [10.0]
+      model.add 10.0, [20.0]
+
+      model.options[:training_args][:epochs] = 1000
+
+      model.train
+
+      # The default criterion is the documented MSELoss, not an optimizer
+      assert PyCall.getattr(model.criterion, :__class__).to_s.include?('MSELoss')
+
+      w = TorchModel.get_weights(model.state).to_ruby.first.first
+
+      assert w > 1.8
+      assert w < 2.2
+
+      y = model.eval(100.0)
+
+      assert y > 150.0
+      assert y < 250.0
+    end
+  end
+end

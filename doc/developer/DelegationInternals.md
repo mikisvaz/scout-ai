@@ -282,7 +282,7 @@ contact:
 | Mode | What is inherited | Use case |
 |---|---|---|
 | `none` | Nothing. Specialist starts with its own `start_chat` only. | Fully isolated sub-agent. |
-| `tools` *(default)* | Tooling roles (`introduce`, `tool`, `mcp`, `kb`) from the caller's current chat. | Shared capabilities, private history. |
+| `tools` *(default)* | Tooling roles (`introduce`, `tool`, `mcp`, `kb`) from the caller's **whole current chat**. | Shared capabilities, private history. |
 | `conversation` | The caller's entire current chat minus its own `start_chat` prefix. | Full context sharing for tight collaboration. |
 
 ### Implementation: `social_inherited_context`
@@ -294,7 +294,7 @@ def social_inherited_context(inherit)
     Chat.setup([])
   when 'tools'
     tooling = self.current_chat.tooling
-    social_chat_copy(tooling)
+    social_chat_copy(tooling)   # whole current chat's tooling — see Known drift
   when 'conversation'
     social_caller_context
   end
@@ -331,7 +331,7 @@ any specialist:
 | `agent` | string | Yes | Name of the specialist agent. |
 | `prompt` | string | Yes | Plain-text prompt. |
 | `conversation` | string | No | Named conversation ID (omit for one-shot). |
-| `inherit` | enum `[none, tools, conversation]` | No (default `tools`) | Context policy for new conversations only. |
+| `inherit` | enum `[none, tools, conversation]` | No (default `tools`) | Context policy for new conversations only. `tools` reads the whole current chat's tooling, not the delegating task's. |
 
 **Security boundary:** The tool block calls `ask_agent`, which uses
 `agent.user(prompt)` rather than `agent.prompt(prompt)`. This is deliberate:
@@ -393,6 +393,18 @@ call time — it is hard-coded at registration time.
 | Tool name | `:ask` (one tool for all agents) | `hand_off_to_#{name}` (one per agent) |
 | Custom block | No (fixed block) | Yes |
 | Conversation mgmt | Named conversations via `conversation` param | Single conversation, resettable via `new_conversation` |
+
+---
+
+## Known drift
+
+- **`inherit: 'tools'` is chat-scoped, not task-scoped.** The implementation
+  reads `self.current_chat.tooling`, i.e. the tooling of the caller's *whole*
+  current chat — which is what [user/Delegation.md](../user/Delegation.md)
+  now documents. A commented-out alternative (`social_caller_context.tooling`)
+  in the source shows caller-delta (task) scoping was the original intent.
+  Pin the intended semantics with a regression test before changing either
+  side.
 
 ---
 

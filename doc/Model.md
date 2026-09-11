@@ -54,7 +54,7 @@ Execution helpers (util/run.rb):
 - extract_features(sample=nil) { ... }, extract_features_list(list=nil) { ... } — define or run feature extraction.
 
 Persistence (util/save.rb):
-- save — writes options.json; saves each defined Proc to a .rb file beside the state (using method_source); calls save_state if @state exists.
+- save — writes options.json; saves each defined Proc to a .rb file beside the state (using method_source); calls save_state if @state exists. (`save_method` has a String branch, but it tests an undefined local instead of `value` and would raise NameError if ever reached; Procs are the only supported form today.)
 - restore — loads behavior (.rb), options, and sets up init/load_state/save_state blocks.
 - save_state { |state_file, state| ... } — define or execute logic to persist the current @state.
 - load_state { |state_file| ... } — define or execute logic to restore @state.
@@ -134,7 +134,9 @@ TmpFile.with_path do |dir|
   model2.eval(1)                # => 2
 
   model3 = ScoutModel.new dir, delta: 2
-  model3.eval(1)                # => 3
+  model3.eval(1)                # => 3 — but only because `delta` was never
+                                #    saved into options.json above; see the
+                                #    restore-precedence note in §HuggingfaceModel
 end
 ```
 
@@ -169,6 +171,10 @@ Highlights:
   - Set criterion/optimizer or rely on defaults:
     - TorchModel.optimizer(model, training_args) — default SGD(lr: 0.01).
     - TorchModel.criterion(model, training_args) — default MSELoss.
+    - The default train path builds both for you (`@criterion ||=
+      TorchModel.criterion(...)`, `@optimizer ||=
+      TorchModel.optimizer(...)`); setting either by hand is only needed to
+      override the defaults.
   - options[:training_args] may set epochs, batch_size, learning_rate, etc.
 
 Example (from tests/test_torch.rb)
@@ -176,7 +182,7 @@ Example (from tests/test_torch.rb)
 TorchModel.init_python
 model = TorchModel.new dir
 model.state = ScoutPython.torch.nn.Linear.new(1, 1)
-model.criterion = ScoutPython.torch.nn.MSELoss.new()
+# criterion is optional — the default train path uses MSELoss
 
 model.extract_features { |f| [f] }
 model.post_process     { |v, list| list ? v.map(&:first) : v.first }
@@ -230,7 +236,7 @@ You typically use one of its specializations:
 Purpose: text classification (logits to label).
 
 Behavior:
-- eval: calls Python eval_model(model, tokenizer, texts, locate_tokens?) to produce logits (default return_logits = true).
+- eval: calls Python `eval_model(model, tokenizer, texts, return_logits=True)` to produce logits. Known mismatch: the Ruby layer passes `options[:locate_tokens]` in the fourth positional slot, which lands on the `return_logits` parameter — unset (nil) falls back to Python's `True` default, `locate_tokens: false` is the only way to change it, and a `return_logits:` option is both ignored here and excluded from the model-loader kwargs.
 - post_process: argmax across logits, mapping to class labels if provided.
 
 Training:
@@ -324,7 +330,7 @@ ExTRI2 workflow example (SequenceClassification)
 tri_model = Rbbt.models[tri_model].find unless File.exist?(tri_model)
 model = HuggingfaceModel.new 'SequenceClassification', tri_model, nil,
   tokenizer_args: { model_max_length: 512, truncation: true },
-  return_logits: true
+  return_logits: true    # NOTE: no-op today, see 'Known issues' below
 
 # Convert the TSV row into the sequence model expects
 model.extract_features do |_, feature_list|
@@ -386,6 +392,35 @@ Behavior and state are independent:
 Common methods:
 - save — writes options, behavior files, and calls save_state if @state exists.
 - restore — loads behavior files and options; state is lazy-initialized by calling init/load_state when used next.
+
+**Restore precedence (actual behavior, and a known bug).** `load_options`
+reads `options.json` when it exists and merges the *constructor* options into
+it — the saved values win. In practice this means:
+
+- Passing a different option to the constructor of a model whose directory
+  already has an `options.json` does **not** change the effective value.
+- A fresh `checkpoint` argument is likewise ignored on `HuggingfaceModel`
+  when the directory exists: `#initialize` writes it into the options *after*
+  `super` has restored, and the `init` block then prefers `state_file` (an
+  existing saved-state directory) over `options[:checkpoint]`.
+- When the directory has no `options.json` (a genuinely fresh model), the
+  constructor options — and a fresh `checkpoint` — are the effective ones.
+
+Treat constructor options as first-run settings only. To change a persisted
+option, edit `options.json` (or start from a clean directory). This inversion
+is a known open bug, not a contract.
+
+### Known issues (tracked in [Improvements.md](Improvements.md))
+
+- `eval_model`'s fourth Python parameter is `return_logits`, but the Ruby
+  layer passes `options[:locate_tokens]` in that slot: unset falls back to
+  Python's `True` default, `locate_tokens: false` is the only effective
+  override, and a `return_logits:` option is never forwarded (it is in the
+  loader's `except` list) — which is why the `return_logits: true` lines in the
+  examples above are annotated as no-ops.
+- `save_method`'s `String` branch tests an undefined local instead of `value`
+  and would raise `NameError` if ever reached; passing a Proc is the only
+  supported form today.
 
 ---
 
@@ -485,7 +520,7 @@ The ExTRI2 workflow builds sequence classification models to validate TRI senten
 ```ruby
 model = HuggingfaceModel.new 'SequenceClassification', tri_model, nil,
   tokenizer_args: { model_max_length: 512, truncation: true },
-  return_logits: true
+  return_logits: true    # NOTE: no-op today, see 'Known issues' below
 
 model.extract_features do |_, rows|
   rows.map do |text, tf, tg|

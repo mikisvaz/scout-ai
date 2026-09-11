@@ -175,7 +175,7 @@ class TestLLMAgentSave < Test::Unit::TestCase
       agent.save_file = chat_file
 
       agent.user 'auto question'
-      res = agent.chat persist: false, endpoint: 'mock'
+      res = agent.chat persist: false, backend: :mock
 
       assert_equal 'mock answer', res
       content = Open.read(chat_file)
@@ -208,7 +208,7 @@ class TestLLMAgentSave < Test::Unit::TestCase
       grandchild.user 'grandchild question'
       child.chats = { 'Critic/c_1' => grandchild }
 
-      child.chat persist: false, endpoint: 'mock'
+      child.chat persist: false, backend: :mock
 
       assert_include Open.read(child_file), 'mock answer'
 
@@ -231,7 +231,7 @@ class TestLLMAgentSave < Test::Unit::TestCase
       agent.save_file = chat_file
       agent.user 'bare question'
 
-      assert_include agent.ask(agent.current_chat, persist: false, endpoint: :mock), 'mock answer'
+      assert_include agent.ask(agent.current_chat, persist: false, backend: :mock), 'mock answer'
 
       # Bare ask: the chat was not grown by Agent#chat, so no file anywhere
       assert !Open.exist?(chat_file)
@@ -252,6 +252,13 @@ class TestLLMAgentSave < Test::Unit::TestCase
 
       agent = simple_agent('root')
       worker = simple_agent('worker')
+      # ScoutCoder: the specialist's round is launched by LLM.process_calls
+      # as 'agent.chat return_messages: true' with NO call options, so only
+      # its own other_options can keep it on the mock backend on a DIRECT
+      # run where an account endpoint (env LLM/ASK_ENDPOINT or
+      # ~/.scout/etc/AI/<endpoint>.yaml) would otherwise override the
+      # test_helper config pin and send the child round to a real client.
+      worker.other_options = IndiferentHash.setup(backend: :mock, persist: false)
       agent.society = { 'Worker' => worker }
       agent.socialize
 
@@ -259,7 +266,7 @@ class TestLLMAgentSave < Test::Unit::TestCase
       agent.save_file = chat_file
       agent.user 'tool question'
 
-      assert_equal 'final answer', agent.chat(persist: false, endpoint: 'mock')
+      assert_equal 'final answer', agent.chat(persist: false, backend: :mock)
 
       # The parent chat file holds the tool round and its answer
       content = Open.read(chat_file)
@@ -287,13 +294,20 @@ class TestLLMAgentSave < Test::Unit::TestCase
 
       agent = simple_agent('root')
       worker = simple_agent('worker')
+      # ScoutCoder: the specialist's round is launched by LLM.process_calls
+      # as 'agent.chat return_messages: true' with NO call options, so only
+      # its own other_options can keep it on the mock backend on a DIRECT
+      # run where an account endpoint (env LLM/ASK_ENDPOINT or
+      # ~/.scout/etc/AI/<endpoint>.yaml) would otherwise override the
+      # test_helper config pin and send the child round to a real client.
+      worker.other_options = IndiferentHash.setup(backend: :mock, persist: false)
       agent.society = { 'Worker' => worker }
       agent.socialize
 
       chat_file = File.join(dir, 'root.chat')
       agent.save_file = chat_file
       agent.user 'root question'
-      assert_equal 'final answer', agent.chat(persist: false, endpoint: 'mock')
+      assert_equal 'final answer', agent.chat(persist: false, backend: :mock)
       agent.save
 
       legacy_dir = File.join(chat_file + '.files', 'log')
@@ -318,7 +332,7 @@ class TestLLMAgentSave < Test::Unit::TestCase
 
       agent = simple_agent
       agent.user 'volatile question'
-      agent.chat persist: false, endpoint: 'mock'
+      agent.chat persist: false, backend: :mock
 
       assert !Open.exist?(File.join(dir, 'never.chat'))
       assert_equal [], Dir.glob(File.join(dir, '**', '*.chat'))
@@ -450,7 +464,7 @@ class TestLLMAgentSocietySaveFile < Test::Unit::TestCase
       # must not leave a stray `cli.society.files` directory behind.
       LLM::Mock.script('mock answer')
       child.user 'child question'
-      child.chat persist: false, endpoint: 'mock'
+      child.chat persist: false, backend: :mock
 
       assert_include Open.read(expected), 'mock answer'
       assert_empty Dir.glob(File.join(dir, '**', '*.society.files*'))

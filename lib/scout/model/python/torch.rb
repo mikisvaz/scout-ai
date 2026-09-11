@@ -29,7 +29,7 @@ class TorchModel < PythonModel
       dtype ||= TorchModel.dtype(options)
       state.to(device)
       @optimizer ||= TorchModel.optimizer(state, options[:training_args] || {})
-      @criterion ||= TorchModel.optimizer(state, options[:training_args] || {})
+      @criterion ||= TorchModel.criterion(state, options[:training_args] || {})
 
       epochs = options[:training_args][:epochs] || 3
       batch_size = options[:batch_size]

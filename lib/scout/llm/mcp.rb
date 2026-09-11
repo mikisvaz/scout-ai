@@ -14,8 +14,10 @@ module Workflow
       annotations[:destructive_hint] = false
       annotations[:idempotent_hint] = true
       annotations[:open_world_hint] = false
-      MCP::Tool.define(name:task, description: description, input_schema: input_schema, annotations:annotations) do |parameters,context|
-        self.job(name, parameters).run
+      task_name = task.to_s
+      workflow = self
+      MCP::Tool.define(name: task_name, description: description, input_schema: input_schema, annotations: annotations) do |server_context: nil, **parameters|
+        MCP::Tool::Response.new([{type: 'text', text: workflow.job(task_name, parameters).run.to_s}])
       end
     end
 

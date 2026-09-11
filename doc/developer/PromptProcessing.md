@@ -82,7 +82,7 @@ The method supports four input forms for `prompt_strategies`:
 | Input type | Behavior |
 |---|---|
 | `Proc` | Called directly with the prompt array — full custom hook. |
-| `nil` | Falls back to `Scout::Config` (`prompt_strategies`, env `PROMPT_STRATEGY`), then `DEFAULT_CONTEXT_STRATEGY` = `%w(shorten_tools_epoch_increment inbox)`. |
+| `nil` | Falls back to `Scout::Config` (`prompt_strategies`, env `PROMPT_STRATEGY`), then `DEFAULT_CONTEXT_STRATEGY` = `['shorten_tools_epoch_increment','inbox']`. |
 | `String` | Split by comma into strategy names (e.g., `"inbox,shorten_tools_epoch_increment"`). |
 | `Array<String>` | Apply each named strategy in sequence. |
 
@@ -162,9 +162,9 @@ The conversation is divided into four regions (newest at the bottom):
 | Config key | ENV var | Default | Description |
 |---|---|---|---|
 | `epoch_tool_call_threshold` | `EPOCH_TOOL_CALL_THRESHOLD` | 50 | Total tool calls at or below which no compaction happens |
-| `epoch_full_tool_calls` | `EPOCH_FULL_TOOL_CALLS` | 10 | Most-recent tool calls kept at full fidelity |
-| `epoch_compacted_tool_calls` | `EPOCH_COMPACTED_TOOL_CALLS` | 40 | Tool calls (before full-recent) to truncate |
-| `epoch_size` | `EPOCH_SIZE` | 10 | New tool calls allowed before boundary advances |
+| `epoch_full_tool_calls` | `EPOCH_FULL_TOOL_CALLS` | 20 | Most-recent tool calls kept at full fidelity |
+| `epoch_compacted_tool_calls` | `EPOCH_COMPACTED_TOOL_CALLS` | 80 | Tool calls (before full-recent) to truncate |
+| `epoch_size` | `EPOCH_SIZE` | 20 | New tool calls allowed before boundary advances |
 
 All thresholds are read via `Scout::Config.get` and memoized in class
 variables, following the same pattern as `shorten_tools`.
@@ -173,15 +173,15 @@ variables, following the same pattern as `shorten_tools`.
 
 ## The `shorten_tools_epoch_increment` strategy (default)
 
-This is the **current default** (`DEFAULT_CONTEXT_STRATEGY =
-%w(shorten_tools_epoch_increment)`, `lib/scout/llm/chat/prompt.rb`). It keeps
-the epoch-frozen compaction boundary of `shorten_tools_epoch` and grows two
-windows over the life of the conversation: the epoch size itself (periodically,
-and additionally whenever an epoch contains repeated calls) and, for each extra
-call of effective epoch size, the compacted region (growth ratio 2.0, capped at
-160 compacted calls). The amount of retained truncated history therefore
-increases as the conversation lengthens, instead of always resetting to a fixed
-window.
+This is the **current default** (first element of `DEFAULT_CONTEXT_STRATEGY =
+['shorten_tools_epoch_increment','inbox']`, `lib/scout/llm/chat/prompt.rb`).
+It keeps the epoch-frozen compaction boundary of `shorten_tools_epoch` and
+grows two windows over the life of the conversation: the epoch size itself
+(periodically, and additionally whenever an epoch contains repeated calls) and,
+for each extra call of effective epoch size, the compacted region (growth ratio
+2.0, capped at 160 compacted calls). The amount of retained truncated history
+therefore increases as the conversation lengthens, instead of always resetting
+to a fixed window.
 
 Key extra constants (all read through `Scout::Config` accessors on
 `Chat.prompt`/`context`, same memoization pattern):
@@ -321,10 +321,11 @@ user-facing story.
 
 ---
 
-## Configuration thresholds (`shorten_tools`)
+## Configuration thresholds (`shorten_tools`, non-default)
 
-All thresholds are read via `Scout::Config.get` and **memoized in class
-variables** on first access:
+`shorten_tools` is **not** in the default strategy list; the numbers below
+apply only when you select it explicitly. All thresholds are read via
+`Scout::Config.get` and **memoized in class variables** on first access:
 
 | Config key | ENV var | Default | Description |
 |---|---|---|---|
@@ -333,6 +334,11 @@ variables** on first access:
 | `max_tool_calls` | `MAX_TOOL_CALLS` | 40 | Hard limit; tool calls beyond this are dropped |
 | `max_tool_outputs` | `MAX_TOOL_OUTPUTS` | 40 (defaults to `max_tool_calls`) | Hard limit; outputs beyond this are dropped |
 | `max_tool_chars` | `MAX_TOOL_CHARS` | 100,000 | Cumulative character budget for retained tool content |
+
+These are `shorten_tools`' own limits. They are not the default-strategy
+bounds (see the `shorten_tools_epoch_increment` table above: threshold 50,
+20 full, 80 compacted) and they are not a request round limit — the ask loop
+has no round counter.
 
 ### Memoization trade-off
 

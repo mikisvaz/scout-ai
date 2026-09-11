@@ -2,10 +2,22 @@ require 'scout'
 
 module LLM
   def self.embed(text, options = {})
-    endpoint = IndiferentHash.process_options options, :endpoint
-    endpoint ||= Scout::Config.get :endpoint, :embed, :llm, env: 'EMBED_ENDPOINT,LLM_ENDPOINT', default: :embed
-    if endpoint && Scout.etc.AI[endpoint].exists?
+    # ScoutCoder: bug M4. The lookup used the extensionless
+    # `Scout.etc.AI[endpoint].exists?`, so a standard
+    # `etc/AI/<endpoint>.yaml` was NEVER merged — unlike ask.rb / image.rb,
+    # which use `find_with_extension(:yaml)`. A missing endpoint also fell
+    # through to the config defaults silently. ask/image raise in that case;
+    # here the raise is scoped to endpoints that were actually requested
+    # (options / env / config), because the `:embed` name below is a
+    # synthesized fallback, not a user choice — raising on it would break
+    # every backend-configured embed call.
+    explicit_endpoint = IndiferentHash.process_options options, :endpoint
+    explicit_endpoint ||= Scout::Config.get :endpoint, :embed, :llm, env: 'EMBED_ENDPOINT,LLM_ENDPOINT'
+    endpoint = explicit_endpoint || :embed
+    if endpoint && Scout.etc.AI[endpoint].find_with_extension(:yaml).exists?
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml
+    elsif explicit_endpoint && explicit_endpoint != ""
+      raise "Endpoint not found #{explicit_endpoint}"
     end
 
     backend = IndiferentHash.process_options options, :backend

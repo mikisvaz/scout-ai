@@ -56,11 +56,13 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
     self.name = 'TestWorkflowChatTaskSaveWF'
 
     chat_task :plain do
-      LLM::Agent.new(start_chat: Chat.setup([{role: :system, content: 'You are a helper.'}, {role: :user, content: 'Say hi'}]))
+      LLM::Agent.new(start_chat: Chat.setup([{role: :system, content: 'You are a helper.'}, {role: :user, content: 'Say hi'}]),
+                     backend: :mock, persist: false)
     end
 
     chat_task :with_chat do
-      agent = LLM::Agent.new(start_chat: Chat.setup([{role: :system, content: 'You are a helper.'}]))
+      agent = LLM::Agent.new(start_chat: Chat.setup([{role: :system, content: 'You are a helper.'}]),
+                             backend: :mock, persist: false)
       agent.user 'question one'
       agent.current_chat.push({role: :assistant, content: 'answer one'})
       agent
@@ -72,7 +74,13 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
     # runs and log_agent (the end-of-task sweep) NEVER executes: the child
     # conversation can only be durable through its creation-time anchor.
     chat_task :socialize_in_first_round do
-      worker = LLM::Agent.new(start_chat: Chat.setup([{role: :system, content: 'child helper'}]))
+      # The specialist template carries the same options-level pins: the
+      # child round is launched by LLM.process_calls as
+      # 'agent.chat return_messages: true' with NO call options, so only the
+      # agent's own other_options can keep it on the mock backend (and out
+      # of the shared ask cache) on a direct run.
+      worker = LLM::Agent.new(start_chat: Chat.setup([{role: :system, content: 'child helper'}]),
+                              backend: :mock, persist: false)
       agent = self.agent nil
       agent.society = { 'Worker' => worker }
       agent.socialize
@@ -80,7 +88,29 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
       LLM::Mock.script({tool_calls: [{name: 'ask', arguments: {agent: 'Worker', prompt: 'child prompt'}}]},
                        'child answer',
                        'parent done')
-      agent.chat(return_messages: true)
+      # ScoutCoder: hermetic fix (two layers, both required for a DIRECT
+      # `ruby test/.../test_workflow.rb` run).
+      #
+      # 1. persist: false. LLM.ask persists every round under
+      #    Scout.var.cache.ask (~/.scout/var/cache/ask), a SHARED cross-run
+      #    store. On a warm cache the whole tool round below is served from
+      #    a cached entry WITHOUT executing the ask tool, so the child
+      #    conversation is never opened, anchored, or saved: the society
+      #    subtree this test asserts on only materializes on a cache miss.
+      #
+      # 2. backend: :mock at the OPTIONS level (not via test_helper's
+      #    Scout::Config pin). An account endpoint — `LLM`/`ASK_ENDPOINT`
+      #    env or `~/.scout/etc/AI/<endpoint>.yaml`, resolved in
+      #    LLM.ask AFTER the config lookup — merges its yaml into the ask
+      #    options with add_defaults, and a yaml `backend: openai` (plus
+      #    url/key/model) therefore overrides the config-pinned mock. The
+      #    real backend then ignores the scripted tool call, so the child
+      #    never socializes and the assertion at the bottom fails; worse,
+      #    the round goes LIVE against the account endpoint. An explicit
+      #    options value survives add_defaults, so this pin makes the task
+      #    hermetic: it always runs the scripted mock round (which always
+      #    emits the `ask` tool call) and never constructs a real client.
+      agent.chat(return_messages: true, persist: false, backend: :mock)
       raise ScoutException, 'deliberate stop before log_agent'
     end
 
@@ -133,7 +163,7 @@ class TestWorkflowChatTaskSave < Test::Unit::TestCase
       agent.society = { 'Worker' => worker }
       agent.save_file = File.join(dir, 'agent.chat')
       agent.user 'question'
-      child = agent.ask_agent('Worker', 'child prompt', options: {endpoint: 'mock'})
+      child = agent.ask_agent('Worker', 'child prompt', options: {endpoint: 'mock', persist: false})
       agent.current_chat.push({role: :assistant, content: 'final answer'})
 
       written = agent.save

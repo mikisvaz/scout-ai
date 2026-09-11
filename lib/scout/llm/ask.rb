@@ -25,7 +25,13 @@ module LLM
 
     endpoint, persist = IndiferentHash.process_options options, :endpoint, :persist, persist: true
 
-    persist ||= Scout::Config.get :persist, :ask, :llm, env: 'ASK_PERSIST,LLM_PERSIST,PERSIST'
+    # ScoutCoder: an EXPLICIT persist:false must survive the config merge.
+    # `persist ||= config_lookup` is falsy for false, so an explicit opt-out
+    # was silently discarded and the round persisted anyway — into the SHARED
+    # Scout.var.cache.ask store. Only fill in from config when the caller said
+    # nothing (nil). This is what makes test-level `persist: false` hermetic
+    # and keeps unit tests out of the account-wide cache.
+    persist = Scout::Config.get :persist, :ask, :llm, env: 'ASK_PERSIST,LLM_PERSIST,PERSIST' if persist.nil?
     endpoint ||= Scout::Config.get :endpoint, :ask, :llm, env: 'ASK_ENDPOINT,LLM_ENDPOINT,ENDPOINT,LLM,ASK'
     if endpoint && Scout.etc.AI[endpoint].find_with_extension(:yaml).exists?
       options = IndiferentHash.add_defaults options, Scout.etc.AI[endpoint].yaml

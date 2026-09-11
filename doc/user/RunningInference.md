@@ -21,35 +21,31 @@ same regardless of whether you're using OpenAI, Anthropic, or a local model.
 
 ## Configuring endpoints
 
-Endpoints are stored in Scout config. The simplest way is the CLI:
+There is no CLI command that writes endpoint configuration. Endpoints are
+YAML files under `Scout.etc.AI` (by default `~/.scout/etc/AI/`), one file per
+endpoint, named `<endpoint>.yaml`. Hand-write them:
 
-```bash
-# OpenAI (uses OPENAI_API_KEY env var)
-scout-ai config set openai model=gpt-4o
+```yaml
+# ~/.scout/etc/AI/anthropic.yaml
+backend: anthropic
+model: claude-sonnet-4-20250514
 
-# Anthropic
-scout-ai config set anthropic provider=anthropic model=claude-sonnet-4-20250514
-
-# Local model via Ollama
-scout-ai config set local ollama model=qwen2.5:14b url=http://localhost:11434/v1
+# ~/.scout/etc/AI/local.yaml
+backend: ollama
+model: qwen2.5:14b
+url: http://localhost:11434/v1
 ```
 
-You can also edit the config file directly. Endpoint configs live under their
-own section:
+The keys merge in as option defaults: `backend`, `url`, `key`, `model` are
+recognized, and an explicit option still wins over the file. For one-off
+configuration you can also pass `-ck key=value` to the CLI instead of
+writing a file. `-ck` is Scout's global option (`--config_keys`): values are
+comma-separated, and each one is either a `key=value` pair, a config file
+path, or a named profile under `etc/config_profile/`.
 
-```ini
-[openai]
-model = gpt-4o
-
-[anthropic]
-provider = anthropic
-model = claude-sonnet-4-20250514
-
-[local]
-provider = ollama
-model = qwen2.5:14b
-url = http://localhost:11434/v1
-```
+Endpoint names are case-sensitive and must resolve to a real
+`AI/<name>.yaml`; asking for a non-empty endpoint that has no file raises
+`Endpoint not found <name>`.
 
 ---
 
@@ -97,35 +93,44 @@ Scout-AI supports several providers out of the box:
 
 | Provider | Key | Notes |
 |----------|-----|-------|
-| OpenAI | `openai` | GPT models, uses `OPENAI_API_KEY` |
-| Anthropic | `anthropic` | Claude models, uses `ANTHROPIC_API_KEY` |
+| OpenAI (default) | `responses` | OpenAI **Responses** API; `gpt-5-nano` by default |
+| OpenAI (chat) | `openai` | GPT models via Chat Completions |
+| Anthropic | `anthropic` | Claude models |
 | Ollama | `ollama` | Local models via Ollama API |
-| OpenAI-compatible | (custom) | Any server exposing the OpenAI API format (vLLM, etc.) |
+| vLLM | `vllm` | Responses-shaped, with vLLM tool-name unmangling |
+| OpenWebUI | `openwebui` | OpenAI-compatible HTTP with bearer key |
+| HuggingFace | `huggingface` | Inference endpoints |
+| GLM | `glm` | Nested `image_url` image formatting |
+| Bedrock | `bedrock` | Standalone loop (`LLM::Bedrock.ask`) |
+| Relay | `relay` | scp round-trip to a remote `scout-ai` |
+
+The full dispatch table is documented in
+[../developer/Backends.md](../developer/Backends.md).
 
 ### Setting API keys
 
+Scout-AI looks up `<TAG>_KEY` — `OPENAI_KEY`, `ANTHROPIC_KEY`, and so on for
+the backend's `TAG` (`ANTHROPIC_API_KEY` is *not* one of them):
+
 ```bash
-export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."
+export ANTHROPIC_KEY="sk-ant-..."
 ```
 
-For local models (Ollama, vLLM), no API key is typically needed.
+A `key:` entry in the endpoint YAML, or `-ck key=...`, works as well. Local
+models (Ollama, vLLM) usually need no key.
 
 ---
 
 ## Caching
 
-By default, Scout-AI caches inference results. This means:
-
-- Asking the same question twice returns the cached answer instantly.
-- Workflow jobs that produce the same chat are not re-run.
-- You can reproduce results deterministically.
-
-To disable caching for a specific call:
-
-```ruby
-agent.option :persist, false
-```
+By default, `LLM.ask` wraps every round in a `Persist` cache keyed on the
+endpoint, the whole options hash, and the message list. Asking the same
+question with the same options twice replays the cached answer; the flip side
+is that any option change (`model`, `tools`, …) changes the key and forces a
+re-query. To bypass the cache for a specific call, set `persist: false`
+(`agent.option :persist, false`), which is the only way to force a re-run of
+an identical question — the cache key includes the options hash, but not that
+flag.
 
 ---
 
@@ -144,6 +149,11 @@ The model is configured per-endpoint but can be overridden per-call:
 scout-ai llm ask -e openai -m gpt-4o-mini "Quick question"
 ```
 
+> **Model is not isolated per provider.** The `model` config key is read
+> through a single shared token, so a `model` set at the config level leaks
+> into the default model of every backend. Pin `model:` inside each endpoint
+> YAML to isolate providers from each other.
+
 ---
 
 ## The inference flow
@@ -160,7 +170,7 @@ When you call `agent.chat` or `scout-ai llm ask`, Scout-AI:
 This is all automatic. You configure the endpoint and model; Scout-AI handles
 the rest.
 
-Persistence, however, differs slighly between the two CLIs:
+Persistence, however, differs slightly between the two CLIs:
 
 - `scout-ai agent ask ... -c <chat>` sets the agent's `save_file` to
   `<chat>.files/<name>.chat` (`agent.chat` by default; a named agent writes
@@ -169,10 +179,10 @@ Persistence, however, differs slighly between the two CLIs:
   itself — a dual write. The `agent.chat` should contain also the agent
   instructions. Delegated society conversations, when they exist, are written
   under `<chat>.files/<name>.society/<agent>/<conversation>/agent.chat`.
-- `scout-ai llm ask ... -c <chat>` accepts an `agent_save_file:` option
-  internally, but `LLM.ask` currently extracts that option and drops it
-  without applying it, unless an agent is defined inside the chat, in which
-  case that agent will get configured with the `save_file`.
+- `scout-ai llm ask ... -c <chat>` computes an `agent_save_file` for the chat
+  and passes it to `LLM.ask`, but it is only applied when the chat also
+  declares an `agent` (the `agent:` role); otherwise the option is extracted
+  and dropped, so nothing is saved.
 
 ---
 
@@ -182,8 +192,8 @@ Persistence, however, differs slighly between the two CLIs:
   environment variable matches your provider.
 - **Using the wrong endpoint name**: Endpoint names are case-sensitive and must
   match your config.
-- **Expecting streaming by default**: Streaming is available but not enabled
-  by default. Check the CLI flags or Ruby options.
+- **Expecting streaming**: there is no streaming path at all — requests are
+  blocking and return once complete.
 - **Not realizing caching is on**: If you're not seeing new responses to the
   same question, it may be cached. Use `persist: false` to bypass.
 

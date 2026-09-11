@@ -96,25 +96,34 @@ Each iteration:
 
 ### Implicit iteration limiting
 
-There is no hard loop counter. Instead, the `shorten_tools` prompt strategy
-bounds the conversation depth: tool calls beyond `MAX_TOOL_CALLS` (40) are
-dropped from the prompt, and tool outputs beyond `MAX_TOOL_OUTPUTS` are
-truncated or dropped. This naturally constrains how many tool-call rounds a
-conversation can sustain.
+There is no hard loop counter. The loop ends when `query()` returns no tool
+calls; what bounds it is context size, not a round limit. The default
+`shorten_tools_epoch_increment` strategy (see
+[PromptProcessing.md](PromptProcessing.md)) no-ops at or below **50** total
+tool calls, keeps the most recent **20** at full fidelity, may keep up to
+**80** compacted, and truncates the rest to `DEFAULT_SHORT_STRING_LENGTH * 2`
+(400 characters). These are strategy bounds on the *prompt*,
+not a request round limit — there is no `MAX_TOOL_CALLS` in the loop.
 
 ---
 
 ## Error handling and retries
 
-Backends wrap the API call in `begin/rescue`:
+Backends do not retry. A `query` raise propagates out of `ask` unchanged
+(no backoff, no retry). The shared loop does tag it with
+`Backend::BackendException` and give it a `.chat` accessor pointing at a
+saved debug copy of the failing messages/options/meta before re-raising:
 
-- **`BackendException`** — A custom exception class tagged with a `.chat`
-  accessor so callers can inspect the chat that caused the failure.
-- **Retry policy** — On transient errors (rate limits, timeouts), the backend
-  retries with exponential backoff.
-- **Agent-level exception handling** — `Agent#ask` wraps the backend call and
-  delegates to `@process_exception` (a user-supplied Proc) if set, which may
-  trigger a `retry`.
+- The only retry construct inside a backend is OpenWebUI's `query`, which
+  wraps its HTTP POST in `Misc.insist` (about four attempts with sub-second
+  sleeps).
+- **Agent-level exception handling** — `Agent#chat` rescues a backend raise
+  and calls the user-supplied `process_exception` Proc (an accessor on the
+  agent); returning truthy triggers a `retry`, anything else re-raises.
+
+There is no streaming either (`stream_results` does not exist): every request
+is blocking and returns once complete. The only `stream` token in the
+subsystem is ollama's `stream: false`.
 
 ---
 
@@ -122,13 +131,26 @@ Backends wrap the API call in `begin/rescue`:
 
 `LLM.ask` selects a backend via:
 
-1. **Explicit `:backend` option** — `options[:backend]` selects the module.
-2. **Endpoint configuration** — Endpoints defined in
-   `Scout.etc.AI[<endpoint>].yaml` may specify a backend.
-3. **Hard-coded dispatch** — A `case` statement maps `:openai`, `:anthropic`,
-   `:responses`, `:ollama`, `:vllm` to their modules.
-4. **Dynamic loading** — Unknown backend names are resolved as a module name
-   (e.g., `:my_backend` → `LLM::MyBackend`), enabling third-party backends.
+1. **Endpoint configuration** — `options[:endpoint]`; when set, its options
+   are defaulted from `Scout.etc.AI[<endpoint>].yaml` (which may specify a
+   `backend`). A non-empty endpoint with no YAML raises
+   `Endpoint not found <name>`. Writing those files is the user-facing
+   mechanism; see [../user/RunningInference.md](../user/RunningInference.md)
+   for the hand-written YAML and `-ck key=value` forms.
+2. **Explicit `:backend` option** — `options[:backend]` selects the module.
+3. **Config default** — `Scout::Config.get(:backend, :ask, :llm, env:
+   'ASK_BACKEND,LLM_BACKEND')`, defaulting to `:responses`.
+4. **Hard-coded dispatch** — A `case` statement maps `:openai`, `:anthropic`,
+   `:responses`, `:ollama`, `:vllm`, `:openwebui`, `:huggingface`, `:relay`,
+   `:bedrock`, `:glm` to their modules, requiring each file lazily.
+5. **Plugin registry** — Anything else is looked up in `LLM::BACKENDS`
+   (populated by `LLM.register_backend(name, module)`), else it raises
+   `RuntimeError: Unknown backend: <name>`.
+
+**Model configuration is shared, not per-provider.** `client_options` pulls
+`Scout::Config.get(:model, ...)` through a single `key:model` token, so a
+`model` set for one backend leaks to all of them unless the endpoint YAML
+pins it per backend.
 
 ---
 
@@ -136,44 +158,120 @@ Backends wrap the API call in `begin/rescue`:
 
 ### OpenAI (`LLM::OpenAI`)
 
-- **API client**: `OpenAI::Client` (ruby-openai gem).
-- **Streaming**: Supports `stream_results` for token-level streaming.
-- **Tool format**: `type: 'function'` with nested `function:` key.
-- **Images**: Encoded as base64 `image_url` content blocks.
-- **Session continuation**: Supports `previous_response_id` for
-  conversation-threading (Responses API).
-- **Reasoning**: Extracts reasoning summaries from `o1`/`o3`-class models.
+- **API client**: `OpenAI::Client` (ruby-openai gem, `request_timeout`
+  default 1200s).
+- **Tool format**: `type: 'function'` with nested `function:` key; the
+  `format_tool_call`/`format_tool_output` pair emits assistant
+  `tool_calls` and `role: 'tool'` + `tool_call_id` messages.
+- **Usage meta**: `pt/ct/tt` plus `inference_id`, `provider_response_id`,
+  cumulative `_s` and per-conversation `_c` counters; `cct/cwt/rt` come from
+  the `*_details` sub-hashes when present.
+- **Images**: No override — inherits the default `input_image` shape
+  (`{type: :input_image, image_url: <data-uri-or-url>}`), which is what the
+  OpenAI/Responses/ollama family uses. `encode_image` maps only
+  jpg/jpeg/png to a correct MIME type; webp/gif/tiff fall through to the
+  literal `image/extension` MIME and produce a malformed data URI.
+- **Defaults subschema**: its `parameters[:defaults]` delete looks at the
+  wrapper level, where `:parameters` is always nil, so the scout-specific
+  `defaults` subschema still reaches the provider (dead code — see
+  [Improvements.md](../Improvements.md) issue 8).
 
 ### Anthropic (`LLM::Anthropic`)
 
-- **API client**: HTTP client to Anthropic API.
-- **Tool format**: Flat `name`, `description`, `input_schema` (no `function:`
-  nesting).
-- **Images**: Base64 `image` content blocks with media type.
+- **API client**: `Anthropic::Client`; `extra_options` forces a `max_tokens`
+  default of 1000.
+- **Tool format**: Flat `name`, `description`, `input_schema` (renamed from
+  `parameters`; no `function:` nesting); `type: 'function'` is rewritten to
+  `type: 'custom'`. Tool outputs go back as a user-role
+  `tool_result` content block, not an assistant `tool_calls` message.
+- **Usage meta**: `input_tokens`/`output_tokens` → `pt`/`ct`,
+  `cache_read_input_tokens` → `cct`, `cache_creation_input_tokens` → `cwt`;
+  `tt` is computed (input+output).
+- **Images**: `LLM::Anthropic` defines no image handling of its own, so it
+  inherits the default `input_image` shape — there is **no** Anthropic
+  base64 `image` block. `embed_query` raises
+  `'Anthropic does not offer embeddings'`.
 - **System messages**: Extracted from the message list and sent as a separate
   parameter.
 - **Reasoning**: Extracts `thinking` content blocks.
 
 ### Ollama (`LLM::OLlama`)
 
-- **API client**: HTTP client to local Ollama server.
+- **API client**: `Ollama.new(credentials: {address:, bearer_token:})` from
+  the `ollama-ai` gem; when `url` is unset the *gem* defaults the address to
+  `http://localhost:11434`.
 - **Tool format**: Uses OpenAI-compatible format.
-- **Endpoint**: Defaults to `http://localhost:11434`.
-- **Embedding**: Supports embedding queries natively.
+- **Requests**: `query` sets `stream: false` explicitly — the only explicit
+  stream token in the subsystem; responses arrive as an Array of chunks that
+  `process_response` flattens.
+- **Usage meta**: `update_meta` returns `{}` (no usage available).
+- **Embedding**: `embed_query` posts to `api/embed`.
 
-### Responses API (`LLM::Responses`)
+### Responses API (`LLM::Responses`) — the default backend
 
-- **Wraps OpenAI's Responses API** — a session-oriented endpoint.
-- **Session state**: Uses `previous_response_id` to maintain context
-  server-side, reducing token consumption.
-- **Compatible with**: OpenAI's `o1`/`o3` reasoning models.
+- **The config default**: when neither `endpoint`, nor an explicit
+  `:backend`, nor a config `backend` selects anything, this is what runs
+  (`DEFAULT_MODEL = 'gpt-5-nano'`).
+- **Session state**: threads `previous_response_id` between rounds so context
+  stays server-side; a `previous_response: 'false'` option disables the
+  threading.
+- **Tool calls** arrive as `output[]` entries of type `function_call` /
+  `mcp_call`.
+
+### vLLM (`LLM::VLLM`)
+
+- Includes `ResponsesMethods`; the **only** override is `parse_tool_call`,
+  which strips a `channel…<word>` fragment that vLLM injects into tool names.
+  Everything else (client, messages, usage) is the Responses API.
 
 ### Bedrock (`LLM::Bedrock`)
 
 - **Multi-provider**: Routes to different providers (Anthropic, Meta, etc.) via
-  the AWS Bedrock API.
-- **Model naming**: Uses provider-prefixed model IDs
-  (e.g., `anthropic.claude-3-sonnet`).
+  the AWS Bedrock API, using provider-prefixed model IDs
+  (`anthropic.claude-3-sonnet`, …) configured through `BEDROCK_MODEL_ID`;
+  credentials come from `AWS_REGION` / `AWS_ACCESS_KEY_ID` /
+  `AWS_SECRET_ACCESS_KEY`. A `type:` option (default `:messages`) switches
+  between a Messages-style body and a flat prompt body.
+- **Standalone**: does not compose `Backend::ClassMethods` — it defines its
+  own `ask` with no meta, no prompt strategies and no `save_file`, returning
+  joined text. `LLM::Bedrock.embed` exists but no `LLM.embed` dispatch branch
+  reaches it; embeddings must be requested from it directly.
+
+### GLM (`LLM::GLM`)
+
+- A Chat-Completions backend (`DEFAULT_MODEL = 'glm-turbo'`) that prepends
+  `GLMAIMethods` over `OpenAIMethods` and overrides only `format_other`: it
+  adds `image` (base64 `image_url`), `pdf` (`input_file` with
+  `file_data`/`file_url`) and `websearch` roles, and drops
+  `previous_response_id` messages. It is the one backend that sends images as
+  a true nested `image_url` block rather than the default `input_image`
+  shape. Dispatched from `LLM.ask` but **not** from `LLM.embed`.
+
+### HuggingFace (`LLM::Huggingface`)
+
+- Prepends `HuggingfaceMethods` over `OpenAIMethods` (chat-completions shape).
+  **Not an HTTP API**: `prepare_client` builds a `CausalModel` through Scout's
+  Python support, with the model/checkpoint/generation options taken from
+  `HUGGINGFACE_MODEL`/`HF_MODEL` (`DEFAULT_MODEL` is nil). `query` converts
+  PyCall results back with `ScoutPython.dict2hash`.
+- It is the only adapter that actually strips
+  `parameters[:defaults]` out of a tool definition before sending (OpenAI's
+  equivalent line looks at the wrapper level, where `:parameters` is nil —
+  see [Improvements.md](../Improvements.md) issue 8).
+
+### Relay (`LLM::Relay`)
+
+- Fire-and-poll over `scp`: `options[:relay]` in the shared `ask` uploads the
+  messages to `<server>:.scout/var/query/` and gathers the reply; standalone
+  `LLM::Relay.ask` scps options+question to `var/ask/` and polls for
+  `reply/<id>.json` with `sleep 1; retry`. Not streaming.
+
+### OpenWebUI (`LLM::OpenWebUI`)
+
+- Includes `OpenAIMethods`; `client()` returns a plain Hash spec rather than
+  an SDK client, and `query()` posts `parameters.to_json` with a bearer
+  header. Its HTTP POST is the one place a backend retries
+  (`Misc.insist`, ~4 sub-second attempts).
 
 ---
 
@@ -187,8 +285,12 @@ Backends wrap the API call in `begin/rescue`:
 | `lib/scout/llm/backends/anthropic.rb` | Anthropic provider |
 | `lib/scout/llm/backends/ollama.rb` | Ollama provider |
 | `lib/scout/llm/backends/responses.rb` | OpenAI Responses API |
-| `lib/scout/llm/backends/vllm.rb` | vLLM provider |
-| `lib/scout/llm/backends/bedrock.rb` | AWS Bedrock provider |
+| `lib/scout/llm/backends/vllm.rb` | vLLM provider (Responses + tool-name unmangling) |
+| `lib/scout/llm/backends/openwebui.rb` | OpenWebUI provider (Hash client, `Misc.insist` retry) |
+| `lib/scout/llm/backends/huggingface.rb` | HuggingFace provider |
+| `lib/scout/llm/backends/relay.rb` | Relay (scp round-trip) provider |
+| `lib/scout/llm/backends/bedrock.rb` | AWS Bedrock provider (standalone `ask`) |
+| `lib/scout/llm/backends/glm.rb` | GLM provider (image/pdf/websearch formatting) |
 
 ---
 

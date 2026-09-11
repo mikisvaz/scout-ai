@@ -34,7 +34,7 @@ receives:
 | Mode | What the specialist gets | Use case |
 |------|------------------------|----------|
 | **`none`** | Only its own system prompt | Fully isolated sub-agent |
-| **`tools`** *(default)* | Its own prompt + the caller's tools (but not conversation history) | Same capabilities, private history |
+| **`tools`** *(default)* | Its own prompt + the tooling of the caller's whole current chat — including tooling added mid-conversation — but not its history | Same capabilities, private history |
 | **`conversation`** | Its own prompt + the caller's entire current conversation | Deep collaboration with shared context |
 
 The specialist always gets **its own** system prompt first. Inherited context
@@ -262,3 +262,6 @@ The model can now delegate sub-tasks to any specialist by name.
 - [MultiAgentWorkflows.md](MultiAgentWorkflows.md) — orchestration patterns.
 - [BuildingAgents.md](BuildingAgents.md) — creating agents.
 - [ManagingContext.md](ManagingContext.md) — how delegation affects context.
+- [../developer/DelegationInternals.md](../developer/DelegationInternals.md) —
+  the implementation, including the known drift in what `inherit: 'tools'`
+  copies.
