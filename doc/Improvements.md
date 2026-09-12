@@ -540,6 +540,11 @@ genuinely bypasses the cache. `lib/scout/llm/ask.rb`; covered by
 
 ## Documentation promotion ledger (2026-09-11)
 
+This ledger records promotions into doc/, not every deletion: per-file
+retirement provenance for the ~17 research files retired in 2026-09-12
+(batches B1–B7) lives in the individual commit messages, not here (noted
+2026-09-12).
+
 The research file `research/coding-philosophy-analysis.md` is superseded by
 [developer/DesignPrinciples.md](developer/DesignPrinciples.md). What was
 promoted, and where it landed:
