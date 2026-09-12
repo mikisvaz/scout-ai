@@ -133,7 +133,6 @@ Gem::Specification.new do |s|
     "python/tests/test_huggingface_eval.py",
     "python/tests/test_runner.py",
     "research/ChatAnalyst-required-changes.md",
-    "research/agent-delegation-analysis.md",
     "research/agent-meta-provenance-integration-plan.md",
     "research/agent-workflow-analysis.md",
     "research/chatanalyst-provenance/00-baseline.md",

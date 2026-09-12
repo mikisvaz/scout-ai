@@ -7,8 +7,9 @@ framework contributors.
 
 > For the user-facing guide to delegation, see
 > [../user/Delegation.md](../user/Delegation.md).
-> For deep code investigation, see
-> [../../research/agent-delegation-analysis.md](../../research/agent-delegation-analysis.md).
+> For the probe-verified subsystem study, see
+> [../../research/subsys/agent-delegation.md](../../research/subsys/agent-delegation.md)
+> and [../../research/subsys/agent-society.md](../../research/subsys/agent-society.md).
 
 ---
 
@@ -441,5 +442,5 @@ New code should use `conversation` and `inherit` as separate parameters.
 - [../user/Delegation.md](../user/Delegation.md) — User guide to delegation.
 - [Provenance.md](Provenance.md) — Receipt-based provenance for delegated inference.
 - [../user/MultiAgentWorkflows.md](../user/MultiAgentWorkflows.md) — Orchestration patterns.
-- [../../research/agent-delegation-analysis.md](../../research/agent-delegation-analysis.md) — Deep investigation.
-- [../../research/multi-agent-patterns-analysis.md](../../research/multi-agent-patterns-analysis.md) — SC26 patterns.
+- [../../research/subsys/agent-delegation.md](../../research/subsys/agent-delegation.md) — Probe-verified delegation/subagent study.
+- [../../research/subsys/agent-society.md](../../research/subsys/agent-society.md) — Probe-verified agent-directory/society study.

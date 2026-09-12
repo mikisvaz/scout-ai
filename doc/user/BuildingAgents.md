@@ -370,6 +370,11 @@ agent.iterate("List 3 action items") do |action|
 end
 ```
 
+Both helpers pin `endpoint :responses` first (they rely on that backend's
+strict JSON-schema handling); `iterate_dictionary` is the same pattern over
+a flat string→string hash, traversed with `TSV.traverse` (so the usual
+traversal keyword options apply) with one block call per pair.
+
 ---
 
 ## Error handling

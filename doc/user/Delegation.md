@@ -83,8 +83,11 @@ Call 2: ask(agent="Worker", prompt="Now do Y", conversation="task_1")
 # Worker remembers the full conversation from task_1
 ```
 
-Without a `conversation` name, each call is one-shot (the specialist answers
-and the conversation is not reused).
+Without a `conversation` name, the call is routed to the specialist's
+`default` conversation slot: successive anonymous calls to the same agent
+therefore land in one shared, accumulating conversation, not in fresh
+per-call chats. Use distinct `conversation` names whenever you want
+isolation between calls.
 
 Each delegated call leaves provenance evidence in the parent chat: the
 specialist's token usage is recorded next to the tool answer, so token costs
