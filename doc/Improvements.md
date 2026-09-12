@@ -41,7 +41,7 @@ Each entry includes a priority to help triage effort:
 > `prov` command now raises `MissingParameterException` if no filename is
 > provided, matching the behavior of other CLI commands.
 
-**Sources:** [../research/commands-analysis.md](../research/commands-analysis.md).
+**Sources:** retired `research/commands-analysis.md` (2026-09-12); the command inventory now lives in the [user/Cookbook.md](user/Cookbook.md) CLI quick reference.
 
 ---
 

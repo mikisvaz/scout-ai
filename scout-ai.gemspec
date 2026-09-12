@@ -144,7 +144,6 @@ Gem::Specification.new do |s|
     "research/chatanalyst-provenance/final-report.md",
     "research/chatanalyst-provenance/resumption.md",
     "research/coding-philosophy-analysis.md",
-    "research/commands-analysis.md",
     "research/prov-verbosity-fix-notes.md",
     "research/provenance-continuation-accounting.md",
     "research/provenance-navigation-design.md",

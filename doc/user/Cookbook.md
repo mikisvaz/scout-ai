@@ -333,3 +333,25 @@ user:
 
 Search for recent papers on climate change.
 ```
+
+---
+
+## CLI quick reference
+
+Every installed command, with the behaviour notes that matter:
+
+| Command | What it does | Notes |
+|---|---|---|
+| `scout-ai llm ask [question]` | One-shot inference | `-t/--template*` (template file or `Scout.questions` name; `???` marks where the question goes), `-c/--chat*` (follow/append a conversation file), `-i/--imports*`, `-in/--inline*` (rewrite `# ask:` comments in a file in place), `-f/--file*` (prepend file content, `<file>`-tagged), `-w/--workflow*` (expose a workflow as a tool), `-m/--model`, `-e/--endpoint`, `-b/--backend`, `-d/--dry_run` (print the prompt, skip the model). STDIN becomes context referenced with `...` in the question. |
+| `scout-ai llm json` | Chat ↔ JSON conversion | `--chat`, `--json`, `--output`, `-l/--last` |
+| `scout-ai llm md` | Chat → Markdown | `--output`, `-l/--last` |
+| `scout-ai llm word` | Chat → `.docx` via pandoc | `--reference` (style template), `-l/--last` |
+| `scout-ai llm template` | List question templates | reads `Scout.questions` |
+| `scout-ai llm process` | Queue daemon over `Scout.var.ask` | loop: run each file, write reply, delete, sleep 1; `-p/--process <id>` |
+| `scout-ai llm process_queries` | Queue daemon over `Scout.var.query` | same loop using `process: id` raw-response mode |
+| `scout-ai llm prov` | Provenance tree/flow/DOT/timeline | see [developer/Provenance.md](../developer/Provenance.md) |
+| `scout-ai llm server` | Sinatra backend for the offline notebook UI | needs sinatra |
+| `scout-ai agent ask <agent>` | Ask a named agent (`LLM::Agent`) | `-t/--template*`, `-c/--chat*`, `-i/--imports*`, `-f/--file*`, `-w/--workflow*`, `-wt/--workflow_tasks*`, `-m/--model`, `-e/--endpoint`, `-l/--log*`; STDIN context like `llm ask` |
+| `scout-ai agent find <agent>` | Resolve and print an agent path | `LLM.load_agent` |
+| `scout-ai agent kb <agent>` | Agent-scoped `scout kb` browser | `--knowledge_base <agent_dir>.knowledge_base` |
+| `scout-ai workflow mcp <workflow> [tasks]` | Run a workflow as an MCP stdio service | named tasks select exports; default: exported tasks, else all |

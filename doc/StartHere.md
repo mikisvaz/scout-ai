@@ -58,7 +58,7 @@ call graphs, implementation discoveries, and design rationale.
 | **Understand the internals** | developer/Architecture → developer/ChatLifecycle → developer/Backends |
 | **Track and inspect provenance** | developer/Provenance |
 | **Write idiomatic code** | developer/DesignPrinciples |
-| **Use the CLI** | user/Cookbook (quick reference) → research/commands-analysis (full detail) |
+| **Use the CLI** | user/Cookbook (CLI quick reference) |
 
 ---
 
@@ -90,7 +90,6 @@ doc/
 │   ├── DelegationInternals.md
 │   └── Provenance.md
 └── ../research/          ← architectural investigation reports
-    ├── commands-analysis.md
     └── synthesis-report.md
 ```
 
