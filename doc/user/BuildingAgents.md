@@ -68,6 +68,13 @@ Use role methods (forwarded to the underlying chat):
 agent.user "What is the capital of France?"
 ```
 
+The forwarded builder set is the chat DSL, so the same helpers work on an
+agent: `system`, `user`, `assistant`, `file`, `pdf`, `image`,
+`directory`, `import` (inline a whole chat), `continue`/`import_last`
+(inline only its last message), `introduce`, `tool`, `task`/`job` (and
+`inline_`/`exec_` variants), `format`, `option`, `endpoint`, `model`,
+`association`, and `tag`.
+
 ### Getting a response
 
 Call `chat` to send the conversation to the model and get a response:
@@ -88,6 +95,11 @@ puts agent.chat   # => "Approximately 2.2 million in the city proper."
 conversation is serialized recursively at the end of every `chat` call (see
 below). A bare `agent.ask(...)` does **not** auto-save — only `chat` does.
 `LLM.ask` goes through `agent.chat`, so it inherits the same behavior.
+
+Three forwarded readers are the common way to take a result out of a chat:
+`agent.answer` (the content of the final, `previous_response_id`-purged
+message), `agent.final` (that message itself), and `agent.shed` (a new
+one-message chat holding `final`).
 
 ---
 

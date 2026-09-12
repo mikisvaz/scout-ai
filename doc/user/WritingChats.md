@@ -34,6 +34,18 @@ Rules:
   convention; the parser does not require it).
 - Content continues until the next role header or end of file.
 - There is **no comment syntax**: a `#` line is message content.
+- A line matching a role header can be escaped with a leading backslash
+  (`\user: literal text`); the backslash is dropped and the rest is kept
+  as literal content.
+
+Some blocks are protected from role-header parsing, so a line inside them
+that happens to look like `something: text` stays content:
+
+- triple-backtick code fences;
+- `[[ ... ]]` bracket blocks;
+- an XML-ish tag opened as `<tag ...>` with a matching closing tag;
+- command-output markers, written `name:-- command {{{` … `name:-- command }}}`
+  and normalized to `<cmd_output cmd="command">` … `</cmd_output>`.
 
 ---
 
@@ -70,6 +82,17 @@ persist across turns:
 endpoint: anthropic
 model: claude-sonnet-4-20250514
 ```
+
+The full option-related set, and how each behaves:
+
+| Role | Sticky? | Notes |
+|---|---|---|
+| `option` | no | cleared by the next `assistant` reply |
+| `sticky_option` | yes | survives assistant replies |
+| `endpoint`, `model`, `backend`, `agent` | yes | removed from the chat once read |
+| `previous_response_id` | yes | kept in the chat (it is also the Responses-API continuation record) |
+| `persist` | no | ordinary option: cleared by the next `assistant` reply |
+| `format` | no | a JSON-schema response format; a value that is an existing filename is loaded and its JSON used |
 
 ### Declaring tools
 

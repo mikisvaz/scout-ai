@@ -90,7 +90,6 @@ doc/
 │   ├── DelegationInternals.md
 │   └── Provenance.md
 └── ../research/          ← architectural investigation reports
-    ├── chat-core-analysis.md
     ├── prompt-strategies-analysis.md
     ├── agent-delegation-analysis.md
     ├── agent-workflow-analysis.md

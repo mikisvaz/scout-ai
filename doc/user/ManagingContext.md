@@ -160,6 +160,19 @@ This is useful when:
 `clear:` is also ephemeral — it affects what the model sees but does not delete
 the messages from the saved chat file.
 
+Two related directives are honoured inside the `clear:` scan, which walks the
+chat backwards and stops at the last `clear:`:
+
+- `clear_tools:` — drops `function_call` / `function_call_output` pairs from
+  that point forward as well (`clear_tools: false` keeps them; dropping tool
+  calls is the default behaviour of the scan).
+- `clear_role: <role>` (alias `clean_role:`) — after the cut, removes every
+  message of the named role from what survives.
+
+`import:` has two narrower siblings worth knowing: `continue:` imports only
+the last non-empty message of the referenced chat, and `last:` imports its
+last message after purging `previous_response_id` messages.
+
 ---
 
 ## Tips for keeping context manageable

@@ -7,8 +7,9 @@ It is intended for framework contributors.
 
 > For the user-facing chat-file format guide, see
 > [../user/WritingChats.md](../user/WritingChats.md).
-> For deep code investigation, see
-> [../../research/chat-core-analysis.md](../../research/chat-core-analysis.md).
+> For the probe-verified subsystem study (roles, parse/print round-trip,
+> compilation, persistence), see
+> [../subsys/chat.md](../subsys/chat.md) under `research/`.
 
 ---
 
@@ -179,6 +180,13 @@ format (see [../user/WritingChats.md](../user/WritingChats.md)). The
 
 - **Load**: `LLM.chat(path)` or `Chat.setup(Chat.parse(File.read(path)))`.
 - **Save**: `Chat.print(chat)` produces the text representation.
+- `Chat.load(file)` is the **no-compile** reader (`Chat.setup(Chat.parse(...))`
+  only, no task/job/file/import expansion). Provenance inspection uses it so
+  reading a chat never re-executes anything.
+- Annotated chats carry three writers that all default a bare filename to
+  `Scout.chats` and skip existing files unless `force`: `save` (`LLM.print`
+  of the chat), `write` (`self.print` — the processed form), and
+  `write_answer` (the final answer text only).
 
 The format is human-readable and diffable, making it ideal for version control
 and inspection.
@@ -218,4 +226,4 @@ The prompt strategies are documented in
 - [../user/WritingChats.md](../user/WritingChats.md) — Chat-file format from the user perspective.
 - [PromptProcessing.md](PromptProcessing.md) — Context management internals.
 - [Provenance.md](Provenance.md) — Provenance data model.
-- [../../research/chat-core-analysis.md](../../research/chat-core-analysis.md) — Deep investigation.
+- [../../research/subsys/chat.md](../../research/subsys/chat.md) — Probe-verified subsystem study (roles, parsing, compilation, persistence).

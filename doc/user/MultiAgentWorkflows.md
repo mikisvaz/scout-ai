@@ -58,6 +58,10 @@ covers it).
 ### What `chat_task` gives you
 
 - **Caching**: The same chat input produces the same output, cached on disk.
+  (`chat_task` declares its result type as `:chat`; `:chat` is a registered
+  workflow type extension — `Workflow::TYPE_EXTENSIONS[:chat] = :chat` — so
+  plain `task :x => :chat` in any workflow gets the same serialization for
+  free.)
 - **Provenance**: Every agent run is recorded with full chat history.
 - **Agent chat sidecar**: the agent's own conversation is always written to
   `<job>.files/<name>.chat` next to the job (`agent.chat` by default,
