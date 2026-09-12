@@ -90,7 +90,6 @@ doc/
 │   ├── DelegationInternals.md
 │   └── Provenance.md
 └── ../research/          ← architectural investigation reports
-    └── synthesis-report.md
 ```
 
 Each layer becomes progressively more detailed and less stable:

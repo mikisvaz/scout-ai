@@ -201,7 +201,7 @@ provider-private and keep it everywhere.
 
 > **Status: Resolved.** See [user/Python.md](user/Python.md).
 
-**Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
+**Sources:** retired `research/synthesis-report.md` (2026-09-12); gap items D1–D3 above.
 
 ---
 
@@ -220,7 +220,7 @@ Keep `Model.md` as a standalone reference. Add a note in [StartHere.md](StartHer
 pointing to it. Optionally move it to `doc/developer/Model.md` for structural
 consistency. Do not merge into the LLM docs unless explicitly requested.
 
-**Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
+**Sources:** retired `research/synthesis-report.md` (2026-09-12); gap items D1–D3 above.
 
 ---
 
@@ -238,7 +238,7 @@ Consider expanding the Getting Started guide with a more linear tutorial (instal
 configure endpoint → first `ask` → first chat file → first agent → first
 workflow). Low priority since the current guide covers the essentials.
 
-**Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
+**Sources:** retired `research/synthesis-report.md` (2026-09-12); gap items D1–D3 above.
 
 ---
 
@@ -355,7 +355,8 @@ is now the single canonical endpoint reference (hand-written
 table, `Endpoint not found` semantics); GettingStarted and Backends
 cross-reference it instead of restating the details.
 
-**Sources:** [../research/synthesis-report.md](../research/synthesis-report.md).
+**Sources:** retired `research/synthesis-report.md` (2026-09-12); gap item 2.4
+(endpoint configuration).
 
 ---
 

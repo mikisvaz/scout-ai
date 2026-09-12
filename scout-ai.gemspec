@@ -147,7 +147,6 @@ Gem::Specification.new do |s|
     "research/prov-verbosity-fix-notes.md",
     "research/provenance-continuation-accounting.md",
     "research/provenance-navigation-design.md",
-    "research/synthesis-report.md",
     "scout-ai.gemspec",
     "scout_commands/agent/ask",
     "scout_commands/agent/find",
