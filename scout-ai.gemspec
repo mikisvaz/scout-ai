@@ -136,7 +136,6 @@ Gem::Specification.new do |s|
     "research/agent-delegation-analysis.md",
     "research/agent-meta-provenance-integration-plan.md",
     "research/agent-workflow-analysis.md",
-    "research/backends-analysis.md",
     "research/chat-core-analysis.md",
     "research/chatanalyst-provenance/00-baseline.md",
     "research/chatanalyst-provenance/01-repo-map.md",

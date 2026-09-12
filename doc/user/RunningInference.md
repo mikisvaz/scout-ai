@@ -121,6 +121,17 @@ models (Ollama, vLLM) usually need no key.
 
 ---
 
+## Bypassing processing for a daemon (`process:`)
+
+`LLM.ask` accepts a `process:` option (a String). When set, the raw provider
+response JSON is written to `Scout.var.query.response[<process>].json` and
+returned **immediately, unprocessed** — no parsing, no tool loop, no meta.
+This is the mechanism behind the `llm process_queries` daemon (it polls
+`Scout.var.query` for request files and calls
+`LLM.ask(messages, options.merge(process: id))`); the sibling
+`llm process` daemon serves the same role for `Scout.var.ask` files by
+calling plain `LLM.ask` and writing the reply file itself.
+
 ## Caching
 
 By default, `LLM.ask` wraps every round in a `Persist` cache keyed on the

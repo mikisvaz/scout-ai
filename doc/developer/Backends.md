@@ -6,8 +6,9 @@ provider differences. It is intended for framework contributors.
 
 > For the user-facing guide on configuring inference endpoints and providers,
 > see [../user/RunningInference.md](../user/RunningInference.md).
-> For deep code investigation, see
-> [../../research/backends-analysis.md](../../research/backends-analysis.md).
+> For the probe-verified subsystem study (backend registry, the shared loop,
+> provider adapters, sharp edges), see
+> [../subsys/backends.md](../subsys/backends.md) under `research/`.
 
 ---
 
@@ -121,6 +122,16 @@ saved debug copy of the failing messages/options/meta before re-raising:
   and calls the user-supplied `process_exception` Proc (an accessor on the
   agent); returning truthy triggers a `retry`, anything else re-raises.
 
+### Parallel agent fan-out
+
+`LLM.process_calls` is the shared tool executor, so it also collects tool
+results that are `LLM::Agent` objects and runs their `agent.chat
+(return_messages: true)` rounds concurrently through `Open.traverse`. The
+concurrency is
+`Scout::Config.get(:cpus, :agent_ask, :agents, env: 'ASK_AGENTS', default: 3)`.
+Each answer is paired back with the tool call that produced it by position
+(a duplicate agent in one round gets its own answer, not the first one's).
+
 There is no streaming either (`stream_results` does not exist): every request
 is blocking and returns once complete. The only `stream` token in the
 subsystem is ollama's `stream: false`.
@@ -158,8 +169,12 @@ pins it per backend.
 
 ### OpenAI (`LLM::OpenAI`)
 
-- **API client**: `OpenAI::Client` (ruby-openai gem, `request_timeout`
-  default 1200s).
+- **API client**: `OpenAI::Client` (ruby-openai gem). The
+  `request_timeout` default differs by construction path: `client_options`
+  defaults it to **1200** and `client` to **12000** — and since
+  `prepare_client` merges `client_options` into the options before calling
+  `client`, the 1200 default wins in practice unless overridden (the gem's
+  own default is 120).
 - **Tool format**: `type: 'function'` with nested `function:` key; the
   `format_tool_call`/`format_tool_output` pair emits assistant
   `tool_calls` and `role: 'tool'` + `tool_call_id` messages.
@@ -236,6 +251,10 @@ pins it per backend.
   own `ask` with no meta, no prompt strategies and no `save_file`, returning
   joined text. `LLM::Bedrock.embed` exists but no `LLM.embed` dispatch branch
   reaches it; embeddings must be requested from it directly.
+- **Tool-call concurrency**: its private tool loop executes the tool calls of
+  one model round through `Open.traverse` with
+  `Scout::Config.get(:cpus, :tool_calling, default: 3)` — a Bedrock-local
+  knob, distinct from the shared agent fan-out below.
 
 ### GLM (`LLM::GLM`)
 
@@ -298,4 +317,4 @@ pins it per backend.
 
 - [../user/RunningInference.md](../user/RunningInference.md) — User guide for endpoints and providers.
 - [PromptProcessing.md](PromptProcessing.md) — Context management integrated into the backend.
-- [../../research/backends-analysis.md](../../research/backends-analysis.md) — Deep investigation.
+- [../../research/subsys/backends.md](../../research/subsys/backends.md) — Probe-verified subsystem study (registry, shared loop, provider adapters).

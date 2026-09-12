@@ -94,7 +94,6 @@ doc/
     ├── prompt-strategies-analysis.md
     ├── agent-delegation-analysis.md
     ├── agent-workflow-analysis.md
-    ├── backends-analysis.md
     ├── tools-system-analysis.md
     ├── provenance-analysis.md
     ├── multi-agent-patterns-analysis.md
