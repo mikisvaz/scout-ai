@@ -304,6 +304,27 @@ internals and [BuildingAgents.md](BuildingAgents.md) for save semantics.
 
 ---
 
+### SC26-style compositions
+
+`research/multi-agent-patterns-analysis.md` (retired 2026-09-12) catalogued
+seven compositions from a real agent ecosystem: a linear **Planned pipeline**
+(request → search → plan → work → ask as chained `chat_task`s), a **Manager
+control loop** (budgeted Search → Edit → Score → Select driven by the `ask`
+tool with named branch chats), a **Critic** verification stage (JSON
+`PASS`/`NEEDS_WORK`/`BLOCKED` verdict parsed with `Chat.parse_json` and stored
+with `set_info`, the critic agent created with `no_ask_override: true` so it
+cannot delegate), a **Branched** fan-out (a splitter agent partitions the plan,
+`iterate_dictionary ... cpus: N` runs one isolated worker per branch over
+`plan.dup`, an aggregate critic reads the reports), a **Refined**
+worker/critic retry loop (shared chat across rounds, `clear_tools` between
+rounds), and a two-phase **InterpretData** prep pipeline (an analyst agent
+reduces data into artifacts, a worker consumes them). Every idiom involved
+lives in scout-ai — `dep`, `chat_task`, `chat.follow`,
+`iterate_dictionary`, `log_agent`, `self.agent(nil, chat:, tooling:)`,
+`IndiferentHash.setup` over parsed JSON — so treat the paragraph above as the
+surviving summary; the compositions are reproducible from this page's
+vocabulary.
+
 ## Common mistakes
 
 - **Trying to do everything in one giant chat**: Break work into tasks. Each

@@ -75,6 +75,25 @@ agent: `system`, `user`, `assistant`, `file`, `pdf`, `image`,
 `inline_`/`exec_` variants), `format`, `option`, `endpoint`, `model`,
 `association`, and `tag`.
 
+### Agents with a workflow: how `ask` routes
+
+When an agent has a workflow attached **and** that workflow defines an `:ask`
+task, `Agent#ask` does not call `LLM.ask` directly. It serializes the
+conversation, creates `workflow.job(:ask, chat: ...)`, saves agent state *before*
+producing (so the `job=` reference exists while the answer is computed),
+whitelists the job for the chat sandbox, and reads the projected result back
+from the job. Each round is therefore a cached, inspectable Scout job with its
+own `files_dir`, and `scout-ai llm prov` can walk the chain. Set
+`no_ask_override: true` on the agent (an option, settable in the agent's
+directory or via the `agent` helper) to skip this routing and use plain
+`LLM.ask` — a verification-only agent such as a critic usually wants this.
+`SCOUT_NO_ASK_CACHE=true` cleans the cached job before reuse (`recursive` for a
+recursive clean).
+
+A plain agent with no workflow (or a workflow without an `:ask` task) always
+takes the `LLM.ask` branch, with `save_file: self.save_file` and `agent: false`
+so the nested call is not re-detected as an agent round.
+
 ### Getting a response
 
 Call `chat` to send the conversation to the model and get a response:

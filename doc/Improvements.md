@@ -289,7 +289,11 @@ Update ChatAnalyst's `Session` class to delegate to the shared `Chat`
 provenance primitives (`Chat.traverse_provenance`, `Chat.agent_meta_evidence`,
 `Chat.provenance_token_events`) instead of maintaining its own BFS traversal.
 
-**Sources:** [../research/provenance-analysis.md](../research/provenance-analysis.md), [../research/multi-agent-patterns-analysis.md](../research/multi-agent-patterns-analysis.md).
+**Sources:** retired `research/provenance-analysis.md` and
+`research/multi-agent-patterns-analysis.md` (2026-09-12); the ChatAnalyst
+session-traversal findings are preserved in
+[developer/Provenance.md](developer/Provenance.md) and
+[developer/Architecture.md](developer/Architecture.md).
 
 ---
 

@@ -91,7 +91,6 @@ doc/
 │   └── Provenance.md
 └── ../research/          ← architectural investigation reports
     ├── provenance-analysis.md
-    ├── multi-agent-patterns-analysis.md
     ├── commands-analysis.md
     └── synthesis-report.md
 ```
