@@ -8,7 +8,7 @@ provider differences. It is intended for framework contributors.
 > see [../user/RunningInference.md](../user/RunningInference.md).
 > For the probe-verified subsystem study (backend registry, the shared loop,
 > provider adapters, sharp edges), see
-> [../subsys/backends.md](../subsys/backends.md) under `research/`.
+> [../../research/subsys/backends.md](../../research/subsys/backends.md) under `research/`.
 
 ---
 

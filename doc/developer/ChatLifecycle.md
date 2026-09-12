@@ -9,7 +9,7 @@ It is intended for framework contributors.
 > [../user/WritingChats.md](../user/WritingChats.md).
 > For the probe-verified subsystem study (roles, parse/print round-trip,
 > compilation, persistence), see
-> [../subsys/chat.md](../subsys/chat.md) under `research/`.
+> [../../research/subsys/chat.md](../../research/subsys/chat.md) under `research/`.
 
 ---
 
