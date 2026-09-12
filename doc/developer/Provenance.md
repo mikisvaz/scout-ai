@@ -177,6 +177,27 @@ Scout-AI distinguishes two concepts:
 
 Use lineage IDs for detecting copied history. Use addresses to retrieve exact persisted messages.
 
+### Instance collectors over one chat
+
+`process/meta.rb` (with one reader in `annotation.rb`) also annotates a single
+`Chat` with thin readers over the same data — useful when you are already
+holding one chat and want a quick answer without running a traversal:
+
+| reader | returns |
+|---|---|
+| `chat.job_paths` / `chat.jobs` | `Path`s of every `meta job=` producer referenced by this chat |
+| `chat.job_chat_files` | result and logged chat files reachable from this chat's jobs and their dependencies (`Chat.job_chat_files(job, seen)` walks the dependency graph once per job) |
+| `chat.job_agent_chat_files` | the subset actually owned by the job (`.files/<name>.chat` and `.files/<name>.society/**` under the job's own files dir) |
+| `chat.job_chats` / `chat.job_agent_chats` | the same two sets, loaded as `Chat` objects |
+| `chat.message_index` | per-message lineage records (`id`, `role`, `prev`, `fingerprint`, parsed `meta`) |
+| `chat.meta` | metadata hash of this chat's last meta message |
+| `chat.last_job` | the `job` value of that last meta message |
+
+They are the instance-level convenience forms of the class-level traversal and
+collectors above: use them for inspection. For accounting use the
+deduplicated `Chat.token_totals` path — these readers do not deduplicate
+evidence that appears in several chats.
+
 ## Response tracing
 
 `Chat.trace_chats(chats)` groups messages into response segments. A meta message opens a segment; another meta or a user/system turn closes it.
@@ -215,6 +236,33 @@ The common status policy treats:
 Provider call IDs are scoped to a chat; do not assume they are globally unique across files.
 
 Calls named `ask` or `hand_off_to_*` provide semantic evidence of delegation. Workflow-backed calls have structural job/log links. A socialized call's association with a society log may still be inferred from naming conventions, so reports should label that association as inferred rather than authoritative.
+
+## How a delegation chain is laid out on disk
+
+An orchestrator round that delegates through `ask` produces four things at once:
+
+1. a `function_call` with tool name `ask` in the orchestrator's chat, followed
+   by the paired `function_call_output`;
+2. a Scout job (for example `Agent/Worker/ask`) whose `.files/agent.chat` (or
+   `<name>.chat` for a named agent) holds the specialist's **full** conversation
+   — system prompt, tooling, every round — each with its own direct-inference
+   metas;
+3. the job's chat-typed **result**, holding only the new messages
+   (`current_chat - start_chat`) projected with a `meta job=` marker;
+4. that projected result followed back into the orchestrator's chat, giving the
+   parent a zero-direct-token projection segment whose real cost lives in the
+   job's log.
+
+Accounting must therefore be recursive: from the root chat follow every
+`meta job=` to its job, read its logs and dependencies, and sum only the direct
+token fields of deduplicated inference events. Never sum `*_c` or `*_s`
+checkpoints along the chain — the same inference is reachable through several
+of them and would be double-counted.
+
+Delegation with a named `conversation` additionally persists a socialized chat
+under the job's `.files`/`.society` tree. Those files carry the prompt, any
+propagated options, the `meta job=` marker and the response — again with no
+direct tokens; follow the job reference for the real cost.
 
 ## Delegated agent receipts (`meta`)
 

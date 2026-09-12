@@ -56,7 +56,7 @@ call graphs, implementation discoveries, and design rationale.
 | **Add tool support** | user/ToolCalling → (user/Python if needed) |
 | **Configure inference** | user/RunningInference → user/ManagingContext |
 | **Understand the internals** | developer/Architecture → developer/ChatLifecycle → developer/Backends |
-| **Track and inspect provenance** | developer/Provenance → research/provenance-analysis |
+| **Track and inspect provenance** | developer/Provenance |
 | **Write idiomatic code** | developer/DesignPrinciples |
 | **Use the CLI** | user/Cookbook (quick reference) → research/commands-analysis (full detail) |
 
@@ -90,7 +90,6 @@ doc/
 │   ├── DelegationInternals.md
 │   └── Provenance.md
 └── ../research/          ← architectural investigation reports
-    ├── provenance-analysis.md
     ├── commands-analysis.md
     └── synthesis-report.md
 ```

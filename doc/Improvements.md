@@ -29,7 +29,7 @@ Each entry includes a priority to help triage effort:
 > capabilities of `info` (imports, job deduplication, DOT, SVG/PNG/PDF) are
 > available via `scout-ai llm prov -f`, `--dot`, and `-p`/`--plot`.
 
-**Sources:** [../research/commands-analysis.md](../research/commands-analysis.md), [../research/provenance-analysis.md](../research/provenance-analysis.md).
+**Sources:** retired `research/commands-analysis.md` and `research/provenance-analysis.md` (2026-09-12); the `prov` behaviour is documented in [developer/Provenance.md](developer/Provenance.md).
 
 ---
 
@@ -327,7 +327,9 @@ its facts now live in [developer/PromptProcessing.md](developer/PromptProcessing
 > text-tree report and the flow/DOT/SVG capabilities that were formerly in
 > `info`. `prov` is the sole provenance CLI command.
 
-**Sources:** [../research/commands-analysis.md](../research/commands-analysis.md), [../research/provenance-analysis.md](../research/provenance-analysis.md).
+**Sources:** retired `research/commands-analysis.md` and
+`research/provenance-analysis.md` (2026-09-12); `prov` behaviour is
+documented in [developer/Provenance.md](developer/Provenance.md).
 
 ---
 
