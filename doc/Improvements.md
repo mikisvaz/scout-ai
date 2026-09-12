@@ -307,7 +307,8 @@ Implement the registry: define `REGISTERED_STRATEGIES = {}` and add a
 `Chat.register_prompt_strategy(name, &block)` class method. Document the
 extension point in [developer/PromptProcessing.md](developer/PromptProcessing.md).
 
-**Sources:** [../research/prompt-strategies-analysis.md](../research/prompt-strategies-analysis.md).
+**Sources:** retired `research/prompt-strategies-analysis.md` (2026-09-12);
+its facts now live in [developer/PromptProcessing.md](developer/PromptProcessing.md).
 
 ---
 

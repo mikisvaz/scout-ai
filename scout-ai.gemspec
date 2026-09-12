@@ -148,7 +148,6 @@ Gem::Specification.new do |s|
     "research/coding-philosophy-analysis.md",
     "research/commands-analysis.md",
     "research/multi-agent-patterns-analysis.md",
-    "research/prompt-strategies-analysis.md",
     "research/prov-verbosity-fix-notes.md",
     "research/provenance-analysis.md",
     "research/provenance-continuation-accounting.md",

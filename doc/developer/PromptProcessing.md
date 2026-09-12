@@ -6,9 +6,8 @@ contributors.
 
 > For the user-facing guide on what happens when contexts get long, see
 > [../user/ManagingContext.md](../user/ManagingContext.md).
-> For deep code investigation, see
-> [../../research/prompt-strategies-analysis.md](../../research/prompt-strategies-analysis.md)
-> (predates `shorten_tools_epoch_increment`; the code is the source of truth).
+> There is no `research/subsys/` study for this subsystem yet; this page is
+> the deep reference, and the code remains the source of truth.
 
 ---
 
@@ -128,6 +127,13 @@ There is also a character-budget override: if cumulative tool content is below
 `max_tool_chars`, messages are kept at full fidelity regardless of position.
 This means **short conversations are never truncated** — the system is a no-op
 until context pressure is real.
+
+A second guard, easy to miss from the counters table alone: both keep-tests
+also read `user_messages == 0`. The counter starts at 1 and increments only
+when a `user` message is passed, so during the reverse (newest-first) walk
+every tool message met before the *first earlier user message* still sees
+`user_messages == 0` and is kept at full fidelity — the whole newest user
+turn is protected, whatever the age of the tool messages inside it.
 
 ---
 
@@ -415,4 +421,4 @@ Three mechanisms coexist:
 
 - [../user/ManagingContext.md](../user/ManagingContext.md) — User guide for long contexts.
 - [Backends.md](Backends.md) — Where `prepare_prompt` is called in the inference loop.
-- [../../research/prompt-strategies-analysis.md](../../research/prompt-strategies-analysis.md) — Deep investigation.
+- [../../research/subsys/chat.md](../../research/subsys/chat.md) — Chat subsystem study (parsing, roles, compilation); strategies themselves live here.
