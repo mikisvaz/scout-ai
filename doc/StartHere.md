@@ -41,9 +41,13 @@ delegation internals, and the provenance system. It is concise and links to
 
 → Go to **[../research/](../research/)** investigation documents.
 
-These are architectural reports produced during code investigations. They are
-not maintained documentation and may be outdated, but they contain detailed
-call graphs, implementation discoveries, and design rationale.
+The maintained set is `research/subsys/` — one probe-verified study per
+subsystem (chat, backends, tools, agent delegation, agent directories,
+AgentWorkflow, provenance, embeddings/RAG, model, CLI entry). Each is an
+investigation record, not normative documentation: it may state sharp edges
+and open questions that `doc/` does not. One design file is additionally
+retained — `provenance-navigation-design.md`, the rationale tracked by
+[Improvements.md](Improvements.md) A1.
 
 ---
 
@@ -89,7 +93,9 @@ doc/
 │   ├── Backends.md
 │   ├── DelegationInternals.md
 │   └── Provenance.md
-└── ../research/          ← architectural investigation reports
+└── ../research/          ← probe-verified subsystem studies
+    ├── subsys/           ← one study per subsystem
+    └── provenance-navigation-design.md   ← retained for Improvements.md A1
 ```
 
 Each layer becomes progressively more detailed and less stable:
