@@ -212,6 +212,28 @@ Orchestrator → Agent B → Synthesizer
 Multiple agents work in parallel on different aspects, then a synthesizer
 combines results.
 
+### What the `chat_task` block may return
+
+| block returns | outcome |
+|---|---|
+| an agent (`LLM::Agent`) | if its chat does not already end in an assistant message, one more `agent.chat(return_messages: true)` round runs; then the agent is logged (`log_agent`) and this run's delta is projected |
+| a `Chat` / Array of messages | used as-is, roles preserved |
+| a single `Hash` | wrapped as `[hash]` |
+| a `String` / `Integer` / `nil` | not a chat: the projection fails with a `TypeError` and the job ends in `error` |
+| `raise ScoutException` | rescued: the result is an assistant message holding `{exception: ..., job: <short_path>}` as JSON, job status `done` |
+| any other `raise` | propagates; job status `error` (and `log_agent` never runs) |
+
+### Idioms inside a chain
+
+| Idiom | Code | Purpose |
+|---|---|---|
+| Follow a dependency's whole chat | `chat.follow step(:dep).load` | Append the dependency's projected chat result |
+| Follow only its last message | `chat.follow step(:dep).load.last` | Just the final answer, not the tool traffic |
+| Drop tools for a focused step | `chat.message :clear_tools, true` | Remove tool definitions from the step's context |
+| Configurable worker agent | `options[:worker_agent] || 'Worker'` | Pick the agent at run time |
+| Conditional dependency | `dep :search do |jobname,options| ... end` | Skip a stage on demand |
+| Iterative refinement | `raise` + `retry` on your own exception class | Loop control inside a `chat_task` block (plain Ruby; `ScoutException` is special-cased by `chat_task`, so use a distinct class for retry) |
+
 ---
 
 ## Logging agent activity

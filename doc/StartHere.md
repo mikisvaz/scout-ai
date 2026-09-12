@@ -90,7 +90,6 @@ doc/
 │   ├── DelegationInternals.md
 │   └── Provenance.md
 └── ../research/          ← architectural investigation reports
-    ├── agent-workflow-analysis.md
     ├── provenance-analysis.md
     ├── multi-agent-patterns-analysis.md
     ├── commands-analysis.md

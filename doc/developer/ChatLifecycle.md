@@ -187,6 +187,12 @@ format (see [../user/WritingChats.md](../user/WritingChats.md)). The
   `Scout.chats` and skip existing files unless `force`: `save` (`LLM.print`
   of the chat), `write` (`self.print` — the processed form), and
   `write_answer` (the final answer text only).
+- `.chat` is also a **workflow result type** (`Workflow::TYPE_EXTENSIONS[:chat]`
+  with `Persist.save_drivers`/`load_drivers` in `chat/persist.rb`). Saving an
+  `LLM::Agent` through that driver writes `current_chat - start_chat` — this
+  run's delta, not the seeded preamble — while saving a plain Chat/Array writes
+  every message. That is why a `chat_task` result file and the agent's
+  full-conversation sidecar (`<job>.files/<name>.chat`) differ in length.
 
 The format is human-readable and diffable, making it ideal for version control
 and inspection.

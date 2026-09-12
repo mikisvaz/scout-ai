@@ -134,7 +134,6 @@ Gem::Specification.new do |s|
     "python/tests/test_runner.py",
     "research/ChatAnalyst-required-changes.md",
     "research/agent-meta-provenance-integration-plan.md",
-    "research/agent-workflow-analysis.md",
     "research/chatanalyst-provenance/00-baseline.md",
     "research/chatanalyst-provenance/01-repo-map.md",
     "research/chatanalyst-provenance/02-event-reconstruction.md",
