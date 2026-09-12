@@ -155,7 +155,6 @@ Gem::Specification.new do |s|
     "research/provenance-continuation-accounting.md",
     "research/provenance-navigation-design.md",
     "research/synthesis-report.md",
-    "research/tools-system-analysis.md",
     "scout-ai.gemspec",
     "scout_commands/agent/ask",
     "scout_commands/agent/find",

@@ -87,6 +87,29 @@ When the model calls a workflow tool:
 3. The result is converted to text and returned as a tool output message.
 4. The model sees the result and continues.
 
+Three call parameters are not part of the task schema but steer how the job
+is produced (they are consumed by the dispatch, never forwarded as inputs):
+
+- `jobname` — pins the job name instead of the content-derived default, so a
+  specific job can be re-invoked by name.
+- `return_path` — runs the job in the background and answers the model with
+  the job *path* on disk (also whitelisted for the chat read access) rather
+  than waiting for the result.
+- `exec_type=exec` — runs the job in-process and synchronously with
+  `job.exec`, without persisting a Step. Tasks exported as `exec` exports
+  behave this way regardless of the parameter.
+
+A recursion guard backs the normal path: if the requested job is already
+running in the same process (same pid), the call raises
+`ScoutException: Potential recursive call` unless the model passes
+`allow_recursive=true`; the guard exists so a workflow tool cannot
+indirectly re-enter itself.
+
+Tool calls that return a **Step** are deferred, not run one by one: all the
+steps of a round are collected and batch-produced together
+(`Workflow.produce`), so several workflow tools called in the same turn
+can execute concurrently.
+
 ### Inline workflow definition
 
 In Ruby, you can define a workflow inline on an agent:
@@ -140,6 +163,20 @@ agent = LLM::Agent.new(knowledge_base: 'my_kb')
 
 The KB's databases are automatically wired as tools.
 
+### Registering a TSV as a database mid-conversation
+
+The `association:` chat role registers a TSV file as a knowledge-base
+database on the fly and immediately exposes the same two tools for it:
+
+```text
+association: my_db /path/to/data.tsv fields=col1,col2 type=double
+```
+
+The first token is the database name, the second the TSV path;
+`fields=` and `type=` become the database options (`fields=` takes a
+comma-separated list). `clear_associations:` drops everything registered
+this way (it does not touch `kb:`-declared databases).
+
 ---
 
 ## MCP tools
@@ -169,6 +206,13 @@ Only the named tools will be available. Note that with `mcp: stdio <command>`,
 **every token after the command is a tool-name filter**, not an argument to the
 command — `mcp: stdio echo x` runs `echo` and selects the tool named `x`.
 
+### Serving a Scout workflow over MCP
+
+The other direction exists too: `Workflow#mcp` wraps a workflow's tasks as
+MCP tools (one per exported task, or one per task named explicitly) and
+returns an `MCP::Server`; `mcp_stdio` mounts it on the stdio transport.
+The CLI entry point is `scout-ai workflow mcp [tasks...]`.
+
 ---
 
 ## Tool calling in action
@@ -182,7 +226,11 @@ function_call_output: {"id":"call_1","name":"search","content":"Ruby blocks are.
 
 The output envelope also carries `error`, `stack`, `meta`, `step`,
 `start_timestamp` and `timestamp` when applicable, and oversized results are
-replaced by a truncation notice that points at the persisted step.
+replaced by a truncation notice that points at the persisted step. The
+threshold is `LLM.max_content_length` (config key `max_content_length`,
+scopes `:llm_tools`, `:tools`, `:llm`, `:ask`; default 100,000 characters);
+the replacement is a JSON error object with a `Log.fingerprint` of the content
+so the model can still identify what it lost.
 
 The tool-calling loop is automatic. If the model calls multiple tools in one
 turn, or calls a tool and then needs to call another, Scout-AI handles the
