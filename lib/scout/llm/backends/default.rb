@@ -448,13 +448,48 @@ module LLM
       end
 
       def reasoning(response, current_meta = nil)
-        begin
-          reasoning_content = response.dig('choices', 0, 'message', 'reasoning_content')
-          reasoning_content = reasoning_content.gsub("\n", ' ') if String === reasoning_content
-          Log.medium "Reasoning:\n" + Log.color(:cyan, reasoning_content) if reasoning_content
-          reasoning_content
-        rescue
+        return unless Hash === response
+
+        readable = lambda { |value| String === value && !value.strip.empty? }
+        parts = []
+
+        if Array === response['output']
+          response['output'].each do |item|
+            next unless Hash === item && item['type'] == 'reasoning'
+            next unless Array === item['summary']
+
+            item['summary'].each do |summary|
+              next unless Hash === summary && summary['type'] == 'summary_text'
+              parts << summary['text'] if readable.call(summary['text'])
+            end
+          end
+        elsif Array === response['choices']
+          choice = response['choices'].first
+          message = choice['message'] if Hash === choice
+          return unless Hash === message
+
+          # Prefer the plain field so duplicated reasoning_details are not
+          # displayed twice. Keep the legacy reasoning_content spelling.
+          text = [message['reasoning_content'], message['reasoning']].find(&readable)
+          if text
+            parts << text
+          elsif Array === message['reasoning_details']
+            message['reasoning_details'].each do |detail|
+              next unless Hash === detail
+              text = case detail['type']
+                     when 'reasoning.summary' then detail['summary']
+                     when 'reasoning.text' then detail['text']
+                     end
+              parts << text if readable.call(text)
+            end
+          end
         end
+
+        return if parts.empty?
+
+        reasoning_content = parts.join("\n").gsub("\n", ' ')
+        Log.medium "Reasoning:\n" + Log.color(:cyan, reasoning_content)
+        reasoning_content
       end
 
 
