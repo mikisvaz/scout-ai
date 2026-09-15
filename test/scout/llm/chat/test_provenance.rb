@@ -157,6 +157,56 @@ class TestNewLayoutProvenance < Test::Unit::TestCase
     end
   end
 
+  # (b2) the Lean regression: the top-level file is the agent TRANSCRIPT
+  #      (differs from the root conversation) and carries the meta job=
+  #      references of delegated work.  A chat-root traversal must include
+  #      the transcript itself and follow its reference into the job tree.
+  def test_new_layout_top_level_transcript_is_traversed_from_chat_root
+    TmpFile.with_dir do |dir|
+      job = make_job(dir, 'Planned/work/Default_1',
+                     logs: {'agent.chat' =>
+                            "user: work\nmeta: pt=10 ct=5 tt=15 inference_id=w1\nassistant: ok\n"})
+      chat = write_chat(dir, 'session.chat',
+                        "user: hi\nmeta: pt=2 ct=1 tt=3 inference_id=s0\nassistant: done\n")
+
+      files = File.expand_path(chat + '.files')
+      FileUtils.mkdir_p(files)
+      # Transcript: same session but not a copy -- the agent conversation
+      # carries the delegated job reference the root file does not.
+      File.write(File.join(files, 'agent.chat'),
+                 "system: you are the harness\n" \
+                 "user: hi\nmeta: pt=2 ct=1 tt=3 inference_id=s0\nassistant: done\n" \
+                 "user: go\nmeta: job=#{job}\nassistant: done\n")
+
+      visits = Chat.traverse_provenance(chat).to_a
+      paths = visits.collect { |_k, object, _pk, _p, _r, _f| object.to_s }
+      job_paths = visits.select { |kind, *_| kind == :job }
+                        .collect { |_k, object, *_| object.path.to_s }
+
+      transcript = File.join(files, 'agent.chat')
+      assert_include paths, transcript,
+                     'the top-level agent transcript must be traversed from the chat root'
+      assert_include job_paths, job,
+                     'the job referenced by the transcript must be reached'
+      assert_include paths, File.join(job + '.files', 'agent.chat'),
+                     'the job log chat must be reached through the transcript ref'
+
+      edges = Chat.provenance_edges(chat)
+                   .collect { |e| [e[:from].to_s,
+                                   e[:to].respond_to?(:path) ? e[:to].path.to_s : e[:to].to_s,
+                                   e[:relation]] }
+      assert_include edges, [File.expand_path(chat), transcript, :log],
+                     'the transcript must be linked to its chat root with a :log edge'
+      assert_include edges, [transcript, job, :job],
+                     'the transcript job reference must produce a chat->job edge'
+
+      # The transcript meta (s0 duplicated, plus w1 through the job log) still
+      # aggregates without double counting: identity grouping keeps s0 once.
+      assert_equal({pt: 12, ct: 6, tt: 18, cct: 0, cwt: 0, rt: 0},
+                   Chat.provenance_token_totals(chat))
+    end
+  end
+
   # (c) a leftover legacy tree contributes nothing: no duplicate visits and
   #     no tokens from the legacy files.
   def test_both_layouts_coexist_without_duplicates

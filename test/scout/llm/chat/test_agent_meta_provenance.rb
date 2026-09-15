@@ -469,6 +469,46 @@ TXT
     end
   end
 
+  # The Lean regression at the agent-meta level: the top-level sidecar is the
+  # agent TRANSCRIPT (not a copy of the root conversation) and it is the only
+  # place the session's meta job= references live.  A chat-root traversal must
+  # follow them into the job tree.
+  def test_saved_chat_follows_job_refs_in_its_transcript_sidecar
+    TmpFile.with_dir do |dir|
+      worker = make_job(dir, 'Planned/work/Default_1',
+                        logs: {'agent.chat' =>
+                               "user: work\nmeta: pt=10 ct=5 tt=15 inference_id=w1\nassistant: ok\n"})
+      chat = write_chat(dir, 'saved.chat',
+                        "user: hi\nmeta: pt=2 ct=1 tt=3 inference_id=s0\nassistant: done\n")
+
+      log = File.expand_path(chat + '.files')
+      FileUtils.mkdir_p(log)
+      # Transcript: carries the delegated job receipt the root file lacks.
+      File.write(File.join(log, 'agent.chat'),
+                 "system: you are the harness\n" \
+                 "user: hi\nmeta: pt=2 ct=1 tt=3 inference_id=s0\nassistant: done\n" \
+                 "user: go\nmeta: job=#{worker}\nassistant: done\n")
+
+      visits = Chat.traverse_provenance(chat).to_a
+      paths = visits.collect { |_k, object, _pk, _p, _r, _f| object.to_s }
+      job_paths = visits.select { |kind, *_| kind == :job }
+                        .collect { |_k, object, *_| object.path.to_s }
+
+      transcript = File.join(log, 'agent.chat')
+      assert_include paths, transcript,
+                     'the transcript sidecar must be visited from the chat root'
+      assert_include job_paths, worker,
+                     'the job referenced only by the transcript must be reached'
+      assert_include paths, File.join(worker.to_s + '.files', 'agent.chat'),
+                     'the referenced job log chat must be reached'
+
+      # Identity grouping keeps s0 counted once even though the transcript
+      # repeats the root conversation before adding its own turns.
+      assert_equal({pt: 12, ct: 6, tt: 18, cct: 0, cwt: 0, rt: 0},
+                   Chat.provenance_token_totals(chat))
+    end
+  end
+
   def test_saved_chat_sidecar_visits_are_unique_and_repeateable
     TmpFile.with_dir do |dir|
       chat = write_chat(dir, 'saved.chat',

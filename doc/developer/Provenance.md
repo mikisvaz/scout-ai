@@ -21,7 +21,7 @@ The structural relations are:
 | chat | `agent_job` | job | A delegated tool call returned an agent whose receipt entry carries a `job` field naming the producer job. |
 | job | `dependency` | job | A normal Scout Workflow dependency. |
 | job | `log` | chat | A persisted agent conversation under `.files/*.chat` or `.files/*.society/**/*.chat`. |
-| chat | `log` | chat | A saved agent conversation under the chat's own `.files` sidecar, same two globs (root copy excluded). |
+| chat | `log` | chat | A saved agent conversation under the chat's own `.files` sidecar, same two globs (byte-identical root copy excluded). |
 | job | `result` | chat | The job result is itself a chat file. |
 
 Relations describe root-outward discovery. A renderer may reverse `job` or `dependency` when drawing natural data flow.
@@ -36,7 +36,7 @@ Restart snapshots written by `Agent#start` live under `.files/resets/<timestamp>
 The two `log` parents are deliberately asymmetric:
 
 - a **job** root includes its own top-level `<job>.files/<name>.chat` (`agent.chat` and friends) as a real log node; renderers such as `scout-ai llm prov` hide it from the tree because it duplicates the job node itself;
-- a **chat** root excludes its root copy — every top-level `<save_file>.files/<name>.chat` — because the save mechanism writes a full copy of the root conversation there and including it would duplicate the root as its own child. The exclusion is for the **top level** only: society conversations under `<name>.society/<agent>/<conversation>/agent.chat` are also named `agent.chat` and **are** included.
+- a **chat** root **includes** its top-level `<save_file>.files/<name>.chat` — that file is the agent **transcript**, written by `Agent#save` with the full agent conversation (system and tooling messages included), while the root file itself is appended by the caller. The transcript is what carries the `meta job=` references of delegated work, so following it is how a chat-root traversal reaches the job tree. Only a top-level file that is **byte-identical to the root conversation** is excluded: legacy trees (written by older scout-ai versions) and hand-made copies carry no extra information and would duplicate the root as its own child. Society conversations under `<name>.society/<agent>/<conversation>/agent.chat` are also named `agent.chat` and **are** included, never guarded.
 
 Imported and continued chats are **not** provenance relations. They are a chat-compilation concern resolved during `Chat.parse` and `LLM.chat`. The persisted `.chat` file already contains the full inlined conversation. Provenance traversal therefore never follows `import`, `continue`, or `last` chat references.
 

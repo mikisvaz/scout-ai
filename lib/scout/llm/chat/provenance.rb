@@ -21,7 +21,7 @@ module Chat
 
   # Glob DIRECT_LOG_CHAT_GLOBS under `files_dir` and return a de-duplicated,
   # sorted list of existing chat files (Path objects).  Callers that must
-  # exclude the root copy of the root conversation
+  # exclude byte-identical copies of the root conversation
   # (Chat.direct_chat_sidecar_files) filter afterwards.
   def self.direct_log_chat_glob(files_dir)
     files_dir = files_dir.to_s
@@ -50,21 +50,32 @@ module Chat
   # job is.  This method is deliberately not recursive; recursion belongs to
   # traverse_provenance.
   #
-  # Glob DIRECT_LOG_CHAT_GLOBS (see the constant) plus the root-copy
-  # exclusion.  The save mechanism writes a full copy of the ROOT conversation
-  # at the TOP LEVEL of the files dir (<path>.files/<name>.chat, e.g.
-  # agent.chat); such top-level copies must be excluded here or the chat would
-  # get a self-edge duplicating the root node.  Note the asymmetry with
-  # direct_job_chat_files: a JOB's own top-level agent.chat IS traversed
-  # (renderers hide it), a CHAT's root copy is NOT.  Only TOP-LEVEL *.chat
-  # files are excluded: society chats under <name>.society/ are independent
-  # conversations and are included.
+  # Glob DIRECT_LOG_CHAT_GLOBS (see the constant) plus the root-copy guard.
+  # The TOP LEVEL of the files dir (<path>.files/<name>.chat, e.g. agent.chat)
+  # holds the agent TRANSCRIPT, not a copy of the root conversation: it is
+  # written by Agent#save (the full agent conversation incl. its system and
+  # tooling messages) while the root file is appended by the caller, and it is
+  # the transcript that carries the meta job= references of delegated work.
+  # It must be INCLUDED so a chat-root traversal follows those references into
+  # the job tree.  The guard keeps the anti-self-edge rationale for layouts
+  # where the top-level file IS a byte-identical copy of the root conversation
+  # (legacy trees written by older scout-ai, or hand-made copies): such a file
+  # adds no information and would duplicate the root node.  Note the asymmetry
+  # with direct_job_chat_files: a JOB's own top-level agent.chat IS traversed
+  # (renderers hide it).  Society chats under <name>.society/ are independent
+  # conversations and are never guarded.
   def self.direct_chat_sidecar_files(path)
     files_dir = path.to_s + '.files'
     return [] unless File.directory?(files_dir)
     top_level = Dir.glob(File.join(files_dir, '*.chat')).collect { |file| File.expand_path(file) }
+    root_path = File.expand_path(path.to_s)
+    root_content = File.file?(root_path) ? Open.read(root_path) : nil
     direct_log_chat_glob(files_dir).reject do |file|
-      top_level.include?(file.to_s)
+      next false unless top_level.include?(file.to_s)
+
+      # A transcript differs from the root conversation; a byte-identical
+      # legacy copy does not.
+      root_content && File.file?(file.to_s) && Open.read(file.to_s) == root_content
     end
   end
 
