@@ -199,7 +199,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    }
   }
  }
- ,s,hare=share{
+ share=share{
   server=server files="*"{
    chat.html
    chat.js
