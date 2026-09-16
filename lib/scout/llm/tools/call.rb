@@ -200,6 +200,8 @@ module LLM
           error = :error
           content = if String === content.exception
                       {exception: content.exception}.to_json
+                    elsif Hash === content.exception
+                      content = content.exception
                     else
                       content = {exception: content.exception.message, exception_line: content.exception.backtrace&.first}.to_json
                     end
