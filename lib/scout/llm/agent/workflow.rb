@@ -171,7 +171,9 @@ module Workflow
       require_workflow_old(name, ...)
     rescue => e
       begin
-        LLM.load_agent(name).workflow
+        wf = LLM.load_agent(name).workflow
+        raise e unless wf.name.to_s == name.to_s
+        wf
       rescue
         raise e
       end
