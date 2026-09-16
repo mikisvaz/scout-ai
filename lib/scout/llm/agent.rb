@@ -10,7 +10,7 @@ module LLM
   end
 
   class Agent
-    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options, :path, :job
+    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options, :path, :job, :request_context
 
     def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
       @workflow = workflow
@@ -31,6 +31,7 @@ module LLM
                         m.extend Workflow
                         m.name = 'ScoutAgent'
                         m.tasks = {}
+                        m.libdir = nil
                         m
                       end
       end
@@ -64,6 +65,7 @@ module LLM
     # function: takes an array of messages and calls LLM.ask with them
     def ask(messages = nil, options = {})
       messages, options = nil, messages if options.empty? && Hash === messages
+      request_context = options.delete(:request_context) || @request_context
       messages = current_chat if messages.nil?
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
@@ -83,7 +85,7 @@ module LLM
           end
 
           job = workflow.job(:ask, chat: Chat.print(messages))
-          job.save_info
+          was_done = job.done?
 
           self.message(:meta, Chat.serialize_meta(job: job.short_path))
           self.save
@@ -95,6 +97,7 @@ module LLM
           Chat.allow_job job
 
           job.produce
+          RequestContext.write_producer_context(job, request_context, produced: !was_done) if request_context
           
           messages = Chat.load(job.path)
           if options[:return_messages]
@@ -130,7 +133,7 @@ module LLM
           end
 
           options[:tools] = tools
-          LLM.ask messages, @other_options.except(:no_ask_override).merge(log_errors: true, save_file: self.save_file).merge(options).merge(agent: false)
+          LLM.ask messages, @other_options.except(:no_ask_override).merge(log_errors: true, save_file: self.save_file).merge(options).merge(request_context: request_context, agent: false)
         end
       rescue
         exception = $!
@@ -230,6 +233,7 @@ module LLM
 end
 
 require_relative 'agent/chat'
+require_relative 'agent/construction'
 require_relative 'agent/iterate'
 require_relative 'agent/conversation'
 require_relative 'agent/delegate'

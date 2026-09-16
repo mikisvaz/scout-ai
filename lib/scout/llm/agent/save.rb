@@ -137,8 +137,7 @@ module LLM
     # useful contract is "these files now hold this state").
     def save(path = nil, visited: nil, seen_agents: nil, depth: 0)
       path ||= save_file
-      raise ScoutException,
-            "No save file for agent. Pass a path or configure agent.save_file = <chat file>" if path.nil?
+      return if path.nil?
 
       path = path.to_s
       visited ||= Set.new

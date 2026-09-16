@@ -1,6 +1,7 @@
 require 'scout'
 require 'aws-sdk-bedrockruntime'
 require_relative '../chat'
+require_relative '../request_context'
 
 module LLM
   module Bedrock
@@ -37,7 +38,7 @@ module LLM
     end
 
     def self.ask(question, options = {}, &block)
-      client, region, access_key, secret_key, type = IndiferentHash.process_options options, :client, :region, :access_key, :secret_key, :type
+      client, region, access_key, secret_key, type, request_context = IndiferentHash.process_options options, :client, :region, :access_key, :secret_key, :type, :request_context
 
       model_options = IndiferentHash.pull_keys options, :model
       model = IndiferentHash.process_options model_options, :model
@@ -91,7 +92,7 @@ module LLM
 
         cpus = Scout::Config.get :cpus, :tool_calling, default: 3
         tool_calls.each do |tool_call|
-          response_message = LLM.tool_response(tool_call, &block)
+          response_message = LLM.tool_response(tool_call, request_context: request_context, &block)
           messages << response_message
         end
 

@@ -39,6 +39,30 @@ class TestLLMAgentConversation < Test::Unit::TestCase
     assert_not_same template.start_chat, first.start_chat
   end
 
+  def test_shared_construction_clones_seed_and_options_and_anchors_before_start
+    template = LLM::Agent.new(
+      start_chat: Chat.setup([{role: :system, content: 'template'}]),
+      nested: {labels: ['original']}
+    )
+    seed = Chat.setup([{role: :user, content: 'seed'}])
+    job = Object.new
+    built = LLM::Agent::Construction.build(template, seed: seed,
+                                            anchor: File.join(@dir, 'built.chat'),
+                                            job: job)
+
+    assert_not_same template, built
+    assert_not_same template.start_chat, built.start_chat
+    assert_equal File.join(@dir, 'built.chat'), built.save_file
+    assert_same job, built.job
+
+    built.start_chat.first[:content].replace 'changed'
+    built.other_options[:nested][:labels] << 'child'
+    seed.first[:content].replace 'changed seed'
+    assert_equal 'template', template.start_chat.first[:content]
+    assert_equal ['original'], template.other_options[:nested][:labels]
+    assert_equal 'seed', built.current_chat.first[:content]
+  end
+
   def test_open_conversation_defaults
     agent = parent_agent
     agent.save_file = File.join(@dir, 'root.chat')

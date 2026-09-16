@@ -1,4 +1,5 @@
 require 'scout/workflow'
+require_relative '../request_context'
 module LLM
   def self.scout_to_tool_input_type(type)
     type = :text if type == :chat
@@ -90,8 +91,8 @@ module LLM
     end
   end
 
-  def self.call_workflow(workflow, task_name, parameters={})
-    parameters = {} if parameters.nil?
+  def self.call_workflow(workflow, task_name, parameters={}, request_context: nil, **keyword_parameters)
+    parameters = (parameters || {}).merge(keyword_parameters)
     jobname, return_path, exec_type, allow_recursive = IndiferentHash.process_options parameters, :jobname, :return_path, :exec_type, :allow_recursive
     begin
       job = workflow.job(task_name.to_sym, jobname, parameters)
@@ -99,7 +100,9 @@ module LLM
         job.exec
       else
         if return_path
+          was_done = job.done?
           job.run(true)
+          RequestContext.write_producer_context(job, request_context, produced: !was_done) if request_context
           Chat.allow_read_job job
           job.path
         else

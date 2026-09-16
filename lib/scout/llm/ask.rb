@@ -1,5 +1,6 @@
 require 'scout'
 require_relative 'chat'
+require_relative 'request_context'
 
 module LLM
 
@@ -10,8 +11,11 @@ module LLM
   end
 
   def self.ask(question, options = {}, &block)
+    options = options.dup
+    request_context = RequestContext.capture(options.delete(:request_context), endpoint: options[:endpoint], backend: options[:backend], model: options[:model])
     messages = LLM.chat(question)
     options = IndiferentHash.add_defaults options, LLM.options(messages)
+    request_context = RequestContext.capture(request_context, endpoint: options[:endpoint], backend: options[:backend], model: options[:model])
 
     agent_name, agent_save_file  = IndiferentHash.process_options options, :agent, :agent_save_file
     agent_name = nil if %(none false nil).include?(agent_name.to_s)
@@ -19,7 +23,7 @@ module LLM
       agent = LLM::Agent.load_agent agent_name
       agent.save_file = agent_save_file if agent_save_file
       agent.follow messages
-      res = agent.chat options
+      res = agent.chat options.merge(request_context: request_context)
       return res
     end
 
@@ -86,38 +90,38 @@ module LLM
       case backend
       when :openai, "openai"
         require_relative 'backends/openai'
-        LLM::OpenAI.ask(messages, options, &block)
+        LLM::OpenAI.ask(messages, options.merge(request_context: request_context), &block)
       when :anthropic, "anthropic"
         require_relative 'backends/anthropic'
-        LLM::Anthropic.ask(messages, options, &block)
+        LLM::Anthropic.ask(messages, options.merge(request_context: request_context), &block)
       when :responses, "responses"
         require_relative 'backends/responses'
-        LLM::Responses.ask(messages, options, &block)
+        LLM::Responses.ask(messages, options.merge(request_context: request_context), &block)
       when :ollama, "ollama"
         require_relative 'backends/ollama'
-        LLM::OLlama.ask(messages, options, &block)
+        LLM::OLlama.ask(messages, options.merge(request_context: request_context), &block)
       when :vllm, "vllm"
         require_relative 'backends/vllm'
-        LLM::VLLM.ask(messages, options, &block)
+        LLM::VLLM.ask(messages, options.merge(request_context: request_context), &block)
       when :openwebui, "openwebui"
         require_relative 'backends/openwebui'
-        LLM::OpenWebUI.ask(messages, options, &block)
+        LLM::OpenWebUI.ask(messages, options.merge(request_context: request_context), &block)
       when :huggingface, "huggingface"
         require_relative 'backends/huggingface'
-        LLM::Huggingface.ask(messages, options, &block)
+        LLM::Huggingface.ask(messages, options.merge(request_context: request_context), &block)
       when :relay, "relay"
         require_relative 'backends/relay'
-        LLM::Relay.ask(messages, options, &block)
+        LLM::Relay.ask(messages, options.merge(request_context: request_context), &block)
       when :bedrock, "bedrock"
         require_relative 'backends/bedrock'
-        LLM::Bedrock.ask(messages, options, &block)
+        LLM::Bedrock.ask(messages, options.merge(request_context: request_context), &block)
       when :glm, "glm"
         require_relative 'backends/glm'
-        LLM::GLM.ask(messages, options, &block)
+        LLM::GLM.ask(messages, options.merge(request_context: request_context), &block)
       else
         mod = BACKENDS[backend]
         raise "Unknown backend: #{backend}" if mod.nil?
-        mod.ask(messages, options, &block)
+        mod.ask(messages, options.merge(request_context: request_context), &block)
       end
     end
 
@@ -130,8 +134,8 @@ module LLM
 
   def self.workflow_ask(workflow, question, options = {})
     workflow_tools = LLM.workflow_tools(workflow)
-    self.ask(question, options.merge(tools: workflow_tools)) do |task_name,parameters|
-      workflow.job(task_name, parameters).run
+    self.ask(question, options.merge(tools: workflow_tools)) do |task_name,parameters,request_context|
+      LLM.call_workflow(workflow, task_name, parameters, request_context: request_context).run
     end
   end
 

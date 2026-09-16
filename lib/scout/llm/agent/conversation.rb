@@ -61,8 +61,11 @@ module LLM
         return agent
       end
 
-      agent = start_social_chat(agent_name, options, inherit, template: template, preamble: preamble, adopt: adopt)
-      agent.save_file = anchor || society_save_file(agent_name, conversation)
+      # The construction primitive receives the anchor before start, so the
+      # first branch has the same save/restart behavior as later rounds.
+      agent = start_social_chat(agent_name, options, inherit, template: template,
+                                preamble: preamble, adopt: adopt,
+                                anchor: anchor || society_save_file(agent_name, conversation))
 
       @chats[key] ||= agent
     end
@@ -180,46 +183,28 @@ module LLM
     end
 
     def social_duplicate(value)
-      case value
-      when Hash
-        value.each_with_object({}) do |(key, item), copy|
-          copy[social_duplicate(key)] = social_duplicate(item)
-        end
-      when Array
-        value.collect { |item| social_duplicate(item) }
-      when String
-        value.dup
-      else
-        value
-      end
+      Construction.duplicate(value)
     end
 
     def social_chat_copy(chat)
-      Chat.setup(social_duplicate(chat || []))
+      Construction.chat_copy(chat)
     end
 
     def clone_social_agent(template)
-      agent = template.clone
-      agent.start_chat = social_chat_copy(template.start_chat)
-      agent.other_options = IndiferentHash.setup(social_duplicate(template.other_options || {}))
-      agent.society = nil
-      agent.chats = nil
-      agent.instance_variable_set(:@current_chat, nil)
-      agent
+      Construction.clone_agent(template)
     end
 
     # Seed one specialist conversation. `template:` (a pre-built Agent)
     # bypasses `load_agent`; `preamble:` messages are followed after the
     # inherited context and before `start`.
-    def start_social_chat(agent_name, options, inherit, template: nil, preamble: nil, adopt: nil)
+    def start_social_chat(agent_name, options, inherit, template: nil, preamble: nil,
+                          adopt: nil, anchor: nil)
       template ||= load_agent(agent_name, options)
-      agent = clone_social_agent(template)
-      initial_chat = social_chat_copy(agent.start_chat)
+      initial_chat = social_chat_copy(template.start_chat)
       initial_chat.follow(social_context_delta(template)) if adopt == :current
       initial_chat.follow(social_inherited_context(inherit))
       initial_chat.follow(preamble) if preamble
-      agent.start(initial_chat)
-      agent
+      Construction.build(template, seed: initial_chat, anchor: anchor)
     end
 
     # Delta of one agent's current chat over its own start_chat: what that

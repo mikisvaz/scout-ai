@@ -1,3 +1,4 @@
+require_relative '../request_context'
 # LLM::Agent is referenced below in content dispatch, but the require chain
 # chat -> tools -> tools/call does not pull in scout/llm/agent (agent.rb
 # requires ask.rb, which requires chat.rb, so loading agent from chat would
@@ -45,7 +46,7 @@ module LLM
     end.compact
   end
 
-  def self.process_calls(tools, calls, save_file: nil, &block)
+  def self.process_calls(tools, calls, save_file: nil, request_context: nil, &block)
     max_content_length = LLM.max_content_length
     IndiferentHash.setup tools
 
@@ -75,14 +76,14 @@ module LLM
                             else
                               wf = Workflow.require_workflow obj
                             end
-                            call_workflow(wf, function_name, function_arguments)
+                            call_workflow(wf, function_name, function_arguments, request_context: request_context)
                           when Workflow
-                            call_workflow(obj, function_name, function_arguments)
+                            call_workflow(obj, function_name, function_arguments, request_context: request_context)
                           when KnowledgeBase
                             call_knowledge_base(obj, function_name, function_arguments.dup)
                           else
                             if block_given?
-                              block.call function_name, function_arguments
+                              LLM.call_tool_callback(block, function_name, function_arguments, request_context)
                             else
                               ParameterException.new "Tool or function not found '#{function_name}'. Called with parameters #{Log.fingerprint function_arguments}" if obj.nil? && definition.nil?
                             end
@@ -135,6 +136,7 @@ module LLM
 
     jobs = tool_call_content.collect{|p| p.last }.select{|c| Step === c }
     workload = jobs.reject{|job| job.done? }
+    produced_jobs = workload.dup
     if workload.any?
       # Live-workload sidecar to help provenance traversal: a SIBLING of the
       # chat save_file holding the short paths of every workflow job still in
@@ -148,6 +150,11 @@ module LLM
       Open.write(jobs_file, workload.collect{|j| j.short_path } * "\n") if jobs_file
       begin
         Workflow.produce jobs
+        if request_context
+          # A cached job is not a producer for this invocation. Its metadata
+          # belongs to the first invocation that created the result.
+          produced_jobs.each { |job| RequestContext.write_producer_context(job, request_context, produced: true) }
+        end
       rescue
       ensure
         Open.rm jobs_file if jobs_file && Open.exists?(jobs_file)
@@ -162,7 +169,7 @@ module LLM
       cpus = Scout::Config.get(:cpus, :agent_ask, :agents, env: 'ASK_AGENTS', default: 3)
       Open.traverse (0..agents.length-1).to_a, cpus: cpus, bar: 'Asking agents', type: :list, into: agent_answers do |i|
         agent = agents[i]
-        res = agent.chat return_messages: true
+        res = agent.chat return_messages: true, request_context: request_context
         path = Step === agent.job ? agent.job.path : nil
         [i, [res, path]]
       end

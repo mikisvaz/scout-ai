@@ -1,5 +1,6 @@
 require 'scout'
 require_relative '../chat'
+require_relative '../request_context'
 
 module LLM
 	module Relay
@@ -25,8 +26,13 @@ module LLM
         server = IndiferentHash.process_options options, :server
         server ||= Scout::Config.get :server, :ask_relay, :relay, :ask, env: 'ASK_ENDPOINT,LLM_ENDPOINT', default: :openai
 
-        options[:question] = question
-        TmpFile.with_file(options.to_json) do |file|
+        # Relay is an external JSON transport. Context is an explicit,
+        # optional field in that envelope and is projected before crossing
+        # the boundary.
+        request_context = RequestContext.project(options.delete(:request_context)) if options.key?(:request_context)
+        payload = options.merge(question: question)
+        payload[:request_context] = request_context if request_context
+        TmpFile.with_file(payload.to_json) do |file|
           id = upload(server, file)
           gather(server, id)
         end

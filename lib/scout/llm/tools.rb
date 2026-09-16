@@ -5,6 +5,17 @@ require_relative 'tools/workflow'
 require_relative 'tools/knowledge_base'
 require_relative 'tools/call'
 module LLM
+  # Keep the historical two-argument tool callback contract. A context-aware
+  # callback opts in by accepting a third positional argument (including a
+  # splat); this matters for strict lambdas, which raise on extra arguments.
+  def self.call_tool_callback(block, function_name, function_arguments, request_context)
+    if block && (block.arity == 3 || block.arity < 0)
+      block.call function_name, function_arguments, request_context
+    else
+      block.call function_name, function_arguments
+    end
+  end
+
   def self.call_tools(tool_calls, &block)
     tool_calls.collect{|tool_call|
       response_message = LLM.tool_response(tool_call, &block)
@@ -17,7 +28,7 @@ module LLM
     }.flatten
   end
 
-  def self.tool_response(tool_call, &block)
+  def self.tool_response(tool_call, request_context: nil, &block)
     tool_call_id = tool_call.dig("call_id") || tool_call.dig("id")
     if tool_call['function']
       function_name = tool_call.dig("function", "name")
@@ -32,7 +43,7 @@ module LLM
     Log.high "Calling function #{function_name} with arguments #{Log.fingerprint function_arguments}"
 
     function_response = begin
-                          block.call function_name, function_arguments
+                          LLM.call_tool_callback(block, function_name, function_arguments, request_context)
                         rescue
                           $!
                         end

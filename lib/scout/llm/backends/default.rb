@@ -381,7 +381,7 @@ module LLM
         end.compact
 
         save_file = options[:save_file]
-        tool_call_outputs = LLM.process_calls(tools, tool_calls, save_file: save_file, &block)
+        tool_call_outputs = LLM.process_calls(tools, tool_calls, save_file: save_file, request_context: options[:request_context], &block)
 
         output = response['output'].collect do |output|
           case output['type']
@@ -516,6 +516,7 @@ module LLM
 
       def ask(question, options = {}, &block)
         original_options = options.dup
+        request_context = options.delete(:request_context)
 
         return_messages, log_response, current_meta, relay, process, prompt_strategies, save_file = IndiferentHash.process_options options, 
           :return_messages, :log_response, :current_meta, :relay, :process, :prompt_strategies, :save_file,
@@ -532,6 +533,7 @@ module LLM
         else
 
           client = prepare_client options, messages
+          request_context = RequestContext.augment(request_context, backend: (self::TAG rescue nil), model: options[:model])
           prompt = Chat.prepare_prompt(messages, prompt_strategies, save_file: save_file)
           formatted_prompt = format_messages(prompt)
           tools = tools(formatted_prompt, options)
@@ -580,7 +582,7 @@ module LLM
         end
 
         output = begin
-                   process_response messages, response, tools, options.merge(save_file: save_file), &block
+                   process_response messages, response, tools, options.merge(save_file: save_file, request_context: request_context), &block
                  rescue Exception => e
 
                    Log.debug 'Processing response error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
@@ -610,7 +612,7 @@ module LLM
         # like save_file, relay, client, current_meta) has to be re-merged
         # into the options passed to chain_tools; otherwise the recursive
         # `ask` re-reads a nil and silently falls back to defaults.
-        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta, relay: relay, save_file: save_file, prompt_strategies: prompt_strategies)
+        output = chain_tools messages, output, tools, options.merge(client: client, tools: tools, log_response: log_response, current_meta: meta, relay: relay, save_file: save_file, prompt_strategies: prompt_strategies, request_context: request_context)
 
         if log_response && meta && meta.any?
           # The meta is about to become the first message of a segment that

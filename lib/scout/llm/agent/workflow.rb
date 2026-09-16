@@ -50,7 +50,11 @@ module AgentWorkflow
     tooling = self.tooling if tooling.nil?
     options = IndiferentHash.add_defaults kwargs, options
 
-    agent = LLM.load_agent name, agent_options(options)
+    # Resolve the workflow template, then use the same independent clone
+    # mechanics as social conversations. The seed additions below remain
+    # workflow policy (tooling, job messages, files, and dependent chat).
+    template = LLM.load_agent name, agent_options(options)
+    agent = LLM::Agent::Construction.clone_agent(template)
     agent.job = self
     agent.start_chat.follow tooling if tooling && !tooling.empty?
     agent.save_file = LLM::Agent.canonical_chat_file(files_dir, name)
