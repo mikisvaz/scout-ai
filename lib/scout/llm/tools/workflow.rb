@@ -61,7 +61,17 @@ module LLM
     if not workflow.exec_exports.include?(task_name.to_sym)
       properties[:return_path] = {
         type: 'boolean',
-        description: 'Instead of the result of the job, return the path where it is persisted'
+        description: 'Instead of returning the result, return the path where the result is persisted. Use this when you want to pass the result to another tool or script, move it, or process it as a file without loading its contents into the conversation.'
+      }
+      properties[:refresh] = {
+        type: 'string',
+        enum: ['refresh', 'deep_refresh'],
+        description: 'Control whether cached results may be reused. Use "refresh" to recompute this task; use "deep_refresh" when results used by this task may also be stale and should be refreshed.'
+      }
+    else
+      properties[:return_path] = {
+        type: 'boolean',
+        description: 'Instead of returning the result, write it to a temporary file and return its path. Use this when you want to pass the result to another tool or script, move it, or process it as a file without loading its contents into the conversation.'
       }
     end
 
@@ -93,12 +103,25 @@ module LLM
 
   def self.call_workflow(workflow, task_name, parameters={}, request_context: nil, **keyword_parameters)
     parameters = (parameters || {}).merge(keyword_parameters)
-    jobname, return_path, exec_type, allow_recursive = IndiferentHash.process_options parameters, :jobname, :return_path, :exec_type, :allow_recursive
+    jobname, return_path, exec_type, allow_recursive, refresh = IndiferentHash.process_options parameters, :jobname, :return_path, :exec_type, :allow_recursive, :refresh
     begin
       job = workflow.job(task_name.to_sym, jobname, parameters)
       if workflow.exec_exports.include?(task_name.to_sym) || exec_type.to_s == 'exec'
-        job.exec
+        if return_path
+          result = job.exec
+          file = TmpFile.tmp_file
+          Open.write(file, result)
+          file
+        else
+          job.exec
+        end
       else
+        case refresh
+        when 'refresh'
+          job.clean
+        when 'deep_refresh'
+          job.recursive_clean
+        end
         if return_path
           was_done = job.done?
           job.run(true)
