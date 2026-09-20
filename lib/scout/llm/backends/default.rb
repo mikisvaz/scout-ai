@@ -518,8 +518,8 @@ module LLM
         original_options = options.dup
         request_context = options.delete(:request_context)
 
-        return_messages, log_response, current_meta, relay, process, prompt_strategies, save_file = IndiferentHash.process_options options, 
-          :return_messages, :log_response, :current_meta, :relay, :process, :prompt_strategies, :save_file,
+        return_messages, return_response, log_response, current_meta, relay, process, prompt_strategies, save_file = IndiferentHash.process_options options, 
+          :return_messages, :return_response, :log_response, :current_meta, :relay, :process, :prompt_strategies, :save_file,
           return_messages: false, log_response: true
 
         messages = self.messages question, options
@@ -581,7 +581,9 @@ module LLM
           messages_with_meta = Chat.setup(messages + [{role: :meta, content: Chat.serialize_meta(meta)}])
         end
 
+
         output = begin
+                   return response if return_response
                    process_response messages, response, tools, options.merge(save_file: save_file, request_context: request_context), &block
                  rescue Exception => e
 
@@ -605,6 +607,7 @@ module LLM
                  ensure
                    Open.write save_file, Chat.print(messages_with_meta) if save_file
                  end
+
 
         # ScoutCoder: IndiferentHash.process_options deletes the keys it
         # extracts, so anything pulled out of `options` at the top of `ask`
