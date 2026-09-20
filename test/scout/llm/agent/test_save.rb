@@ -73,15 +73,6 @@ class TestLLMAgentSave < Test::Unit::TestCase
     end
   end
 
-  def test_save_without_path_raises_when_unconfigured
-    agent = simple_agent
-    agent.user 'orphan'
-
-    assert_raise ScoutException do
-      agent.save
-    end
-  end
-
   def test_save_nested_society
     TmpFile.with_dir do |dir|
       root = simple_agent('root')

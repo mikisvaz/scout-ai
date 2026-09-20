@@ -56,5 +56,49 @@ class TestLLMToolWorkflow < Test::Unit::TestCase
 
     assert_equal "30 minutes", LLM.call_workflow(m, :step_time, step: 'bake', exec_type: 'exec')
   end
-end
 
+  def test_refresh_applies_to_ordinary_tasks_before_return_semantics
+    calls = 0
+    workflow = Module.new do
+      extend Workflow
+      self.name = "RefreshWorkflow"
+      input :value, :string
+      task :count => :integer do |_value|
+        calls += 1
+      end
+    end
+
+    first = LLM.call_workflow(workflow, :count, value: 'same')
+    first.produce
+    assert_equal 1, first.load
+
+    refreshed = LLM.call_workflow(workflow, :count, value: 'same', refresh: 'refresh')
+    assert(Step === refreshed)
+    refreshed.produce
+    assert_equal 2, refreshed.load
+
+    refreshed_path = LLM.call_workflow(workflow, :count, value: 'same', return_path: true, refresh: 'refresh')
+    assert_equal 3, Open.read(refreshed_path).to_i
+
+    deeply_refreshed_path = LLM.call_workflow(workflow, :count, value: 'same', return_path: true, refresh: 'deep_refresh')
+    assert_equal 4, Open.read(deeply_refreshed_path).to_i
+  end
+
+  def test_exported_task_return_semantics
+    workflow = Module.new do
+      extend Workflow
+      self.name = "ExportedWorkflow"
+      input :value, :string
+      task :exported_value => :string do |value|
+        "exported-#{value}"
+      end
+      export_exec :exported_value
+    end
+
+    assert_equal "exported-result", LLM.call_workflow(workflow, :exported_value, value: 'result')
+
+    path = LLM.call_workflow(workflow, :exported_value, value: 'result', return_path: true)
+    assert_kind_of String, path
+    assert_equal "exported-result", Open.read(path)
+  end
+end

@@ -142,7 +142,12 @@ class TestLLMToolDefinition < Test::Unit::TestCase
         recipe: { type: :string, description: 'Recipe for which to extract steps' },
         return_path: {
           type: 'boolean',
-          description: 'Instead of the result of the job, return the path where it is persisted'
+          description: 'Instead of returning the result, return the path where the result is persisted. Use this when you want to pass the result to another tool or script, move it, or process it as a file without loading its contents into the conversation.'
+        },
+        refresh: {
+          type: 'string',
+          enum: ['refresh', 'deep_refresh'],
+          description: 'Control whether cached results may be reused. Use "refresh" to recompute this task; use "deep_refresh" when results used by this task may also be stale and should be refreshed.'
         }
       },
       required: [],
@@ -167,7 +172,7 @@ class TestLLMToolDefinition < Test::Unit::TestCase
     m = setup_workflow_module
     definition = LLM.task_tool_definition(m, :step_time, ['step'])
 
-    assert_equal %i(step return_path), definition[:parameters][:properties].keys
+    assert_equal %i(step return_path refresh), definition[:parameters][:properties].keys
     # The empty defaults Hash recorded when inputs are given is preserved.
     assert_equal({}, definition[:parameters][:defaults])
     assert_equal false, definition[:parameters][:additionalProperties]
@@ -177,7 +182,7 @@ class TestLLMToolDefinition < Test::Unit::TestCase
     m = setup_workflow_module
     definition = LLM.task_tool_definition(m, :recipe_steps, ['recipe=lasagna'])
 
-    assert_equal %i(return_path), definition[:parameters][:properties].keys
+    assert_equal %i(return_path refresh), definition[:parameters][:properties].keys
     assert_equal({ 'recipe' => 'lasagna' }, definition[:parameters][:defaults])
     assert_equal false, definition[:parameters][:additionalProperties]
   end
