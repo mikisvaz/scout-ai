@@ -61,6 +61,8 @@ messages.each do |message|
 #{message['content']}
 
     EOF
+  when 'file', 'last', 'continue', 'import', 'pdf', 'image', 'attach', 'tool', 'introduce', 'agent', 'endpoint'
+    out.push "#{message['role']}: #{Log.fingerprint message['content']}"
   else
     next
   end

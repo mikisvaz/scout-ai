@@ -60,6 +60,10 @@ messages.each do |message|
     EOF
   when 'assistant'
     out.push message['content']
+  when 'file', 'last', 'continue', 'import', 'pdf', 'image', 'attach', 'tool', 'introduce', 'agent', 'endpoint'
+    out.push "\n" + '::: {custom-style="OneLiner"}'
+    out.push "#{message['role']}: #{Log.fingerprint message['content']}"
+    out.push ':::' + "\n"
   else
     next
   end
