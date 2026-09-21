@@ -110,7 +110,12 @@ module LLM
         if return_path
           result = job.exec
           file = TmpFile.tmp_file
-          Open.write(file, result)
+          case result
+          when Chat
+            Open.write(file, Chat.print(result))
+          else
+            Open.write(file, result.to_s)
+          end
           file
         else
           job.exec
