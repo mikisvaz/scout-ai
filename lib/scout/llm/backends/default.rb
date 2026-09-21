@@ -518,8 +518,8 @@ module LLM
         original_options = options.dup
         request_context = options.delete(:request_context)
 
-        return_messages, return_response, log_response, current_meta, relay, process, prompt_strategies, save_file = IndiferentHash.process_options options, 
-          :return_messages, :return_response, :log_response, :current_meta, :relay, :process, :prompt_strategies, :save_file,
+        return_messages, return_response, return_tool_calls, log_response, current_meta, relay, process, prompt_strategies, save_file = IndiferentHash.process_options options, 
+          :return_messages, :return_response, :return_tool_calls, :log_response, :current_meta, :relay, :process, :prompt_strategies, :save_file,
           return_messages: false, log_response: true
 
         messages = self.messages question, options
@@ -609,6 +609,7 @@ module LLM
                  end
 
 
+        return output if return_tool_calls
         # ScoutCoder: IndiferentHash.process_options deletes the keys it
         # extracts, so anything pulled out of `options` at the top of `ask`
         # that must still hold on tool-call re-entry (here prompt_strategies,
