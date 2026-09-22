@@ -3,6 +3,7 @@ require_relative '../request_context'
 module LLM
   def self.scout_to_tool_input_type(type)
     type = :text if type == :chat
+    type = :text if type == :json
     type = :string if type == :text
     type = :string if type == :select
     type = :string if type == :path
