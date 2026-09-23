@@ -36,6 +36,7 @@ module LLM
       next acc if names and not names.include?(input)
       type = task_info[:input_types][input]
       description = task_info[:input_descriptions][input]
+      options = task_info[:input_options][input]
 
       type = scout_to_tool_input_type(type) 
       type = :array if type.to_s.end_with?('_array')
@@ -56,23 +57,39 @@ module LLM
         end
       end
 
+      if options && options[:file].to_s == 'true'
+        acc[input] = {
+          oneOf: [
+            acc[input],
+            {
+              type: :string,
+              description: 'Path to a file containing the input values'
+            }
+          ],
+          description: description || ''
+        }
+      end
+
       acc
     end
 
     if not workflow.exec_exports.include?(task_name.to_sym)
       properties[:return_path] = {
         type: 'boolean',
-        description: 'Instead of returning the result, return the path where the result is persisted. Use this when you want to pass the result to another tool or script, move it, or process it as a file without loading its contents into the conversation.'
+        description: 'Instead of returning the result, return the path where the result is persisted. Use this when you want to pass the result to another tool or script, move it, or process it as a file without loading its contents into the conversation.',
+        default: false
       }
       properties[:refresh] = {
         type: 'string',
-        enum: ['refresh', 'deep_refresh'],
-        description: 'Control whether cached results may be reused. Use "refresh" to recompute this task; use "deep_refresh" when results used by this task may also be stale and should be refreshed.'
+        enum: ['false', 'refresh', 'deep_refresh'],
+        description: 'Control whether cached results may be reused. Use "refresh" to recompute this task; use "deep_refresh" when results used by this task may also be stale and should be refreshed.',
+        default: 'false'
       }
     else
       properties[:return_path] = {
         type: 'boolean',
-        description: 'Instead of returning the result, write it to a temporary file and return its path. Use this when you want to pass the result to another tool or script, move it, or process it as a file without loading its contents into the conversation.'
+        description: 'Instead of returning the result, write it to a temporary file and return its path. Use this when you want to pass the result to another tool or script, move it, or process it as a file without loading its contents into the conversation.',
+        default: false
       }
     end
 
