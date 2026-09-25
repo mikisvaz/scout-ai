@@ -145,6 +145,31 @@ flag.
 
 ---
 
+## Request context for workflow tasks
+
+`LLM.ask` accepts an optional `request_context:` hash for non-provider metadata
+that should follow a request into workflow tasks invoked as tools. Scout projects
+the hash to JSON-safe fields, filters credential-like or otherwise unsafe
+values, and records it in the task Step's `.info` metadata; it is not added to
+the task's declared inputs and therefore does not change the workflow task's
+input identity. Within a task body it is available as `request_context`:
+
+```ruby
+LLM.ask(question,
+        request_context: {request_id: 'req-123', source: 'my-app'},
+        tools: workflow_tools,
+        persist: false)
+
+# In a workflow task body:
+request_context # => {request_id: "req-123", source: "my-app", ...}
+```
+
+Use only non-sensitive descriptive metadata. Provider credentials, clients,
+messages, and other unsafe fields are excluded. Context is persisted as Step
+metadata for provenance and task access, not sent as a provider prompt field.
+
+---
+
 ## Choosing the right model
 
 | Use case | Suggested approach |

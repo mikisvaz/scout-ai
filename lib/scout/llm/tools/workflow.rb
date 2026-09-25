@@ -125,6 +125,10 @@ module LLM
     begin
       job = workflow.job(task_name.to_sym, jobname, parameters)
       if workflow.exec_exports.include?(task_name.to_sym) || exec_type.to_s == 'exec'
+        if request_context
+          job.extend(RequestContext::StepExtension)
+          job.register_request_context(request_context)
+        end
         if return_path
           result = job.exec
           file = TmpFile.tmp_file
@@ -146,14 +150,22 @@ module LLM
           job.recursive_clean
         end
         if return_path
-          was_done = job.done?
-          job.run(true)
-          RequestContext.write_producer_context(job, request_context, produced: !was_done) if request_context
+          if request_context
+            job.extend(RequestContext::StepExtension)
+            job.register_request_context(request_context)
+            job.run
+          else
+            job.run(true)
+          end
           Chat.allow_read_job job
           job.path
         else
           raise ScoutException, 'Potential recursive call' if allow_recursive != 'true' &&
             (job.running? and job.info[:pid] == Process.pid)
+          if request_context
+            job.extend(RequestContext::StepExtension)
+            job.register_request_context(request_context)
+          end
           job
         end
       end

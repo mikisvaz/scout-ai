@@ -1,3 +1,5 @@
+require_relative '../../request_context'
+
 module Chat
 
   def self.allow_path(path)
@@ -40,7 +42,7 @@ module Chat
                end
   end
 
-  def self.tasks(messages, original = nil)
+  def self.tasks(messages, original = nil, request_context: nil)
     jobs =  []
     new = messages.collect do |message|
       if message[:role] == 'task' || message[:role] == 'inline_task' || message[:role] == 'exec_task'
@@ -56,6 +58,11 @@ module Chat
         end
 
         job = workflow.job(task, jobname, options)
+        context = request_context || (original && LLM::RequestContext.fields_from(original))
+        if context
+          job.extend(LLM::RequestContext::StepExtension)
+          job.register_request_context(context)
+        end
 
         jobs << job unless message[:role] == 'exec_task'
 

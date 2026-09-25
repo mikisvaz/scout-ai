@@ -35,6 +35,7 @@ module LLM
       # option, society, or live-conversation state.
       def clone_agent(template)
         agent = template.clone
+        agent.request_context = template.request_context
         agent.start_chat = chat_copy(template.start_chat)
         agent.other_options = IndiferentHash.setup(duplicate(template.other_options || {}))
         agent.society = nil

@@ -88,6 +88,7 @@ module LLM
                                              template: template, adopt: adopt,
                                              job: job)
 
+      agent.request_context = IndiferentHash.add_defaults(agent.request_context || {}, self.request_context || {})
       agent.user(prompt)
 
       agent

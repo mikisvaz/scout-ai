@@ -27,7 +27,7 @@ module LLM
     Chat.parse question
   end
 
-  def self.chat(file = [], original = nil)
+  def self.chat(file = [], original = nil, request_context: nil)
     original ||= (String === file and Open.exists?(file)) ? file : Path.setup($0.dup)
     caller_lib_dir = Path.caller_lib_dir(nil, 'chats')
 
@@ -54,7 +54,9 @@ module LLM
     messages = Chat.clean messages, :skip
 
     messages = Chat.config messages
-    messages = Chat.tasks messages
+    # The context must be carried into task parsing because task Steps can run
+    # before the backend receives the request.
+    messages = Chat.tasks messages, original, request_context: request_context
     messages = Chat.jobs messages
     messages = Chat.files messages, original, caller_lib_dir
 

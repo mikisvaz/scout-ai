@@ -3,6 +3,7 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\\
 require 'scout/llm/request_context'
 require 'scout/llm/tools/call'
 require 'scout/llm/tools/workflow'
+require 'scout/llm/ask'
 require 'open3'
 
 class TestLLMRequestContext < Test::Unit::TestCase
@@ -13,6 +14,13 @@ class TestLLMRequestContext < Test::Unit::TestCase
       input :value, :string
       task :echo => :string do |value|
         value
+      end
+      task :read_context => :string do
+        request_context.to_json
+      end
+      dep :read_context
+      task :parent => :string do
+        step(:read_context).load
       end
     end
   end
@@ -93,9 +101,48 @@ class TestLLMRequestContext < Test::Unit::TestCase
 
     job = context_workflow.job(:echo, nil, value: value)
     assert_equal value, job.run
-    assert_equal 'R1', job.info[:request_context][:request_id]
-    assert_equal value, job.info['provided_inputs']['value']
-    assert(!job.info['provided_inputs'].key?('request_context'))
+    assert_equal JSON.parse(JSON.generate(version: 1, fields: context)), job.info[:request_context]
+    assert_equal value, job.info[:provided_inputs]['value']
+    assert(!job.info[:provided_inputs].key?('request_context'))
+  end
+
+  def test_task_body_reads_context_from_persisted_info_without_identity_change
+    context = {request_id: 'body-R', endpoint: 'test', backend: 'mock'}
+    first = context_workflow.job(:read_context, nil, value: 'body-context')
+    first.extend(LLM::RequestContext::StepExtension)
+    first.register_request_context(context)
+    first.clean
+    first.produce
+    loaded = Step.load(first.path)
+    expected_path = first.path.to_s
+    assert_equal expected_path, loaded.path.to_s
+    assert_equal first.inputs, context_workflow.job(:read_context, nil, value: 'body-context').inputs
+    assert_equal expected_path, context_workflow.job(:read_context, nil, value: 'body-context').path.to_s
+    assert_equal JSON.parse(JSON.generate(version: 1, fields: context)), loaded.info[:request_context]
+    assert(!loaded.info[:provided_inputs].keys.any? { |key| key.to_s == 'request_context' })
+    assert_equal context.transform_keys(&:to_s), JSON.parse(loaded.load)
+  end
+
+  def test_llm_ask_forwards_request_context_to_workflow_tool_step
+    context = {request_id: 'ask-R', endpoint: 'mock', backend: 'mock'}
+    tools = {'echo' => [context_workflow, LLM.task_tool_definition(context_workflow, :echo)]}
+    backend = Module.new
+    backend.define_singleton_method(:ask) do |_messages, options|
+      LLM.process_calls(options[:tools],
+                        [{name: 'echo', arguments: {value: 'ask-context'}, id: 'ask-call'}],
+                        request_context: options[:request_context])
+      'done'
+    end
+    LLM.register_backend(:request_context_test, backend)
+
+    result = LLM.ask('Return the result from the echo tool.', tools: tools,
+                     request_context: context, persist: false, backend: :request_context_test)
+
+    assert_include result, 'done'
+    step = context_workflow.job(:echo, nil, value: 'ask-context')
+    assert_equal JSON.parse(JSON.generate(version: 1, fields: context)), step.info[:request_context]
+    assert_equal 'ask-context', step.info[:provided_inputs]['value']
+    assert(!step.info[:provided_inputs].key?('request_context'))
   end
 
   def test_save_file_keyword_remains_compatible
@@ -107,6 +154,37 @@ class TestLLMRequestContext < Test::Unit::TestCase
                                  request_context: {request_id: 'R2'})
       assert_equal 'saved', JSON.parse(result[1][:content])['content']
     end
+  end
+  def test_done_and_contextualized_dependencies_are_not_overwritten
+    context = {request_id: 'existing-R', endpoint: 'test'}
+    dependency = context_workflow.job(:read_context)
+    dependency.extend(LLM::RequestContext::StepExtension)
+    dependency.register_request_context(context)
+    dependency.clean
+    dependency.produce
+    before = File.binread(dependency.info_file)
+
+    parent = LLM.call_workflow(context_workflow, :parent, {},
+                               request_context: {request_id: 'parent-R'})
+    parent.clean
+    parent.produce
+
+    assert_equal before, File.binread(dependency.info_file)
+    assert_equal context.transform_keys(&:to_s), JSON.parse(Step.load(dependency.path).load)
+  end
+
+  def test_dependency_task_body_reads_parent_context
+    context = {request_id: 'dependency-R', endpoint: 'test'}
+    parent = LLM.call_workflow(context_workflow, :parent, {}, request_context: context)
+    dependency_path = context_workflow.job(:read_context).path
+    parent.clean
+    assert(!File.exist?(dependency_path.to_s + '.info'))
+    parent.produce
+
+    dependency = Step.load(dependency_path)
+    assert_equal context.transform_keys(&:to_s), JSON.parse(dependency.load)
+    assert_equal JSON.parse(JSON.generate(version: 1, fields: context)), dependency.info[:request_context]
+    assert(!dependency.info[:provided_inputs].keys.any? { |key| key.to_s == 'request_context' })
   end
 
   def test_context_does_not_change_workflow_job_identity
@@ -126,7 +204,7 @@ class TestLLMRequestContext < Test::Unit::TestCase
 
     LLM.process_calls(tools, calls, request_context: {request_id: 'A'})
     job = context_workflow.job(:echo, nil, value: value)
-    assert_equal 'A', job.info[:request_context][:request_id]
+    assert_equal 'A', job.info[:request_context][:fields][:request_id]
     original_info = File.binread(job.info_file)
 
     script = File.join(tmpdir.to_s, 'cold_replay.rb')
@@ -152,7 +230,7 @@ class TestLLMRequestContext < Test::Unit::TestCase
     stdout, stderr, status = Open3.capture3(RbConfig.ruby, script)
     assert status.success?, "cold replay failed: #{stdout}\n#{stderr}"
     assert_equal original_info, File.binread(job.info_file)
-    assert_equal 'A', Step.load(job.path).info[:request_context][:request_id]
+    assert_equal 'A', Step.load(job.path).info[:request_context][:fields][:request_id]
   end
 
   def test_concurrent_producers_write_one_first_context_and_one_raw_key
@@ -180,7 +258,8 @@ class TestLLMRequestContext < Test::Unit::TestCase
     request_context_keys = raw.keys.select { |key| key == 'request_context' }
     assert_equal ['request_context'], request_context_keys
     assert_kind_of Hash, raw['request_context']
-    assert_match(/producer-\d+/, raw['request_context']['request_id'])
+    assert_equal 1, raw['request_context']['version']
+    assert_match(/producer-\d+/, raw['request_context']['fields']['request_id'])
     assert_equal 1, raw_text.scan(/"request_context"\s*:/).length
     assert_equal 1, raw.keys.count { |key| key == 'request_context' }
   end

@@ -13,7 +13,7 @@ module LLM
   def self.ask(question, options = {}, &block)
     options = options.dup
     request_context = RequestContext.capture(options.delete(:request_context), endpoint: options[:endpoint], backend: options[:backend], model: options[:model])
-    messages = LLM.chat(question)
+    messages = LLM.chat(question, request_context: request_context)
     options = IndiferentHash.add_defaults options, LLM.options(messages)
     request_context = RequestContext.capture(request_context, endpoint: options[:endpoint], backend: options[:backend], model: options[:model])
 
@@ -21,6 +21,7 @@ module LLM
     agent_name = nil if %(none false nil).include?(agent_name.to_s)
     if agent_name
       agent = LLM::Agent.load_agent agent_name
+      agent.request_context = request_context
       agent.save_file = agent_save_file if agent_save_file
       agent.follow messages
       res = agent.chat options.merge(request_context: request_context)

@@ -122,7 +122,9 @@ module LLM
               # ..., save_file: save_file, &block)) so the <base>.jobs sidecar
               # and per-round saves work during tool rounds; the mock must do
               # the same or tool-round probes/tests silently lose both.
-              new_calls = LLM.process_calls(tool_definitions, script_calls, save_file: options[:save_file], &block).flatten
+              new_calls = LLM.process_calls(tool_definitions, script_calls,
+                                            save_file: options[:save_file],
+                                            request_context: options[:request_context], &block).flatten
               tool_calls.concat new_calls
               # next round sees the original messages plus the tool call
               # round, exactly like Backend#chain_tools does

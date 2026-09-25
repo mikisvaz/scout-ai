@@ -81,11 +81,14 @@ elsif file
 end
 
 if chat
+  request_context = {main_chat: chat}
+
   conversation = Open.exist?(chat)? LLM.chat(chat) : Chat.setup([])
   conversation.message :tool, workflow if workflow
 
   convo_options = LLM.options conversation
   agent.start
+  agent.request_context.merge!(request_context)
   agent.follow(Chat.setup(conversation)) if conversation.any?
   agent.current_chat.concat LLM.chat(question) if question && ! question.empty?
   imports.each{|import| agent.import import } if imports

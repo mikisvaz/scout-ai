@@ -75,6 +75,8 @@ elsif file
 end
 
 if chat
+  request_context = {main_chat: chat}
+
   conversation = Open.exist?(chat)? Chat.load(chat) : Chat.setup([])
   imports.each{|import| conversation.import import } if imports
   convo_options = LLM.options conversation
@@ -93,7 +95,7 @@ if chat
   # option, so the name is always 'agent'; the layout rule is owned by
   # LLM::Agent.canonical_chat_file.
   agent_save_file = LLM::Agent.canonical_chat_file(chat + '.files')
-  new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true, agent_save_file: agent_save_file)))
+  new = LLM.ask(conversation, convo_options.merge(options.merge(return_messages: true, agent_save_file: agent_save_file).merge(request_context: request_context)))
   Open.open(chat, mode: 'a') do |f|
     f.puts LLM.print([{role: :user, content: question}]) unless question.empty?
     f.puts LLM.print(new)
@@ -123,7 +125,7 @@ elsif inline
 
     imports.each{|import| chat.import import } if imports
 
-    response = LLM.ask(LLM.chat(chat))
+    response = LLM.ask(LLM.chat(chat), request_context: request_context)
     new_file << <<-EOF
 # Response start
 #{response}

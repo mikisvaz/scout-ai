@@ -135,8 +135,8 @@ module LLM
     end
 
     jobs = tool_call_content.collect{|p| p.last }.select{|c| Step === c }
+    jobs.each { |job| job.extend(RequestContext::StepExtension) if request_context }
     workload = jobs.reject{|job| job.done? }
-    produced_jobs = workload.dup
     if workload.any?
       # Live-workload sidecar to help provenance traversal: a SIBLING of the
       # chat save_file holding the short paths of every workflow job still in
@@ -150,11 +150,6 @@ module LLM
       Open.write(jobs_file, workload.collect{|j| j.short_path } * "\n") if jobs_file
       begin
         Workflow.produce jobs
-        if request_context
-          # A cached job is not a producer for this invocation. Its metadata
-          # belongs to the first invocation that created the result.
-          produced_jobs.each { |job| RequestContext.write_producer_context(job, request_context, produced: true) }
-        end
       rescue
       ensure
         Open.rm jobs_file if jobs_file && Open.exists?(jobs_file)

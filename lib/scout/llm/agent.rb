@@ -65,10 +65,15 @@ module LLM
     # function: takes an array of messages and calls LLM.ask with them
     def ask(messages = nil, options = {})
       messages, options = nil, messages if options.empty? && Hash === messages
-      request_context = options.delete(:request_context) || @request_context
+
+      request_context = options.delete(:request_context) || @request_context || {}
+      request_context[:caller] = self.save_file if self.save_file
+      request_context = IndiferentHash.add_defaults request_context, main_chat: request_context[:caller]
+
       messages = current_chat if messages.nil?
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
+
 
       no_ask_override = @other_options[:no_ask_override]
 
@@ -85,7 +90,10 @@ module LLM
           end
 
           job = workflow.job(:ask, chat: Chat.print(messages))
-          was_done = job.done?
+          if request_context
+            job.extend(RequestContext::StepExtension)
+            job.register_request_context(request_context)
+          end
 
           self.message(:meta, Chat.serialize_meta(job: job.short_path))
           self.save
@@ -97,7 +105,6 @@ module LLM
           Chat.allow_job job
 
           job.produce
-          RequestContext.write_producer_context(job, request_context, produced: !was_done) if request_context
           
           messages = Chat.load(job.path)
           if options[:return_messages]
