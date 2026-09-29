@@ -67,7 +67,7 @@ module AgentWorkflow
       # around job.produce never sees these lines.
       agent.start_chat.system <<-EOF
 Your current working directory is #{Dir.pwd}.
-You are working through an ask job with path #{self.path} and files_dir #{self.files_dir}.
+You are working through an workflow inference job with path #{self.path} and files_dir #{self.files_dir}.
       EOF
 
       if dependencies.any?
