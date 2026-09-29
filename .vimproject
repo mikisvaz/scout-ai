@@ -47,7 +47,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   provenance_cortex
   provenance_cortex.analysis
 
-
   expanding_epochs
   test_abort
 
@@ -72,6 +71,13 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   cortex_coder.bugs
 
   test_live_meta
+
+  request_context
+  test_request_context
+
+
+  interface_move
+  
   test=test{
    task
    clean
@@ -90,20 +96,24 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    }
    llm=llm{
     ask.rb
+    chat.rb
     embed.rb
     image.rb
+    interface.rb
     mcp.rb
     rag.rb
+    request_context.rb
+    tools.rb
     utils.rb
-    chat.rb
     chat=chat{
+     agent_meta.rb
      annotation.rb
      parse.rb
      persist.rb
      process.rb
+     prompt.rb
      provenance.rb
      tool_calls.rb
-     prompt.rb
      prompt=prompt{
       inbox.rb
       shorten_tools.rb
@@ -118,19 +128,18 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
       tools.rb
      }
     }
-    tools.rb
     tools=tools{
      call.rb
+     definition.rb
      knowledge_base.rb
      mcp.rb
      workflow.rb
     }
     backends=backends{
-     default.rb
-
-     glm.rb
      anthropic.rb
      bedrock.rb
+     default.rb
+     glm.rb
      huggingface.rb
      ollama.rb
      openai.rb
@@ -143,6 +152,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     agent=agent{
      attach.rb
      chat.rb
+     construction.rb
      conversation.rb
      delegate.rb
      iterate.rb
@@ -151,12 +161,15 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     }
    }
    model=model{
+    base.rb
     util=util{
      save.rb
      run.rb
     }
-    base.rb
-
+    decision=decision{
+     base.rb
+     jev.rb
+    }
     python=python{
      base.rb
      torch.rb
@@ -246,10 +259,12 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   tools-system-analysis.md
  }
  test=test {
+  test_helper.rb
   data=data filter="*"{
+   cat.jpg
    person=person{
-    identifiers
     brothers
+    identifiers
     marriages
     parents
    }
@@ -260,14 +275,37 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     test_ask.rb
     test_chat.rb
     test_embed.rb
-    test_mcp.rb
-    test_parse.rb
+    test_interface_append_step3.rb
+    test_interface_conversation_edit.rb
+    test_interface_core_step2.rb
+    test_interface_prompt_edit.rb
+    test_interface_provenance_resolution.rb
+    test_interface_tuile.rb
+    test_interface_tuile_viewport.rb
+    test_interface_view_api.rb
     test_rag.rb
+    test_request_context.rb
     test_tools.rb
     test_utils.rb
     chat=chat{
+     agent_meta_fixtures.rb
+     prov_plot_fixtures.rb
+     test_agent_meta.rb
+     test_agent_meta_provenance.rb
+     test_agent_meta_tokens.rb
+     test_agent_view.rb
+     test_live_report.rb
+     test_live_workload.rb
      test_parse.rb
      test_process.rb
+     test_prompt.rb
+     test_prov_cli.rb
+     test_prov_cli_live.rb
+     test_prov_plot.rb
+     test_prov_timeline.rb
+     test_provenance.rb
+     test_society_view.rb
+     test_tool_calls.rb
      process=process{
       test_meta.rb
       test_normalize_usage.rb
@@ -278,10 +316,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      test_bedrock.rb
      test_huggingface.rb
      test_ollama.rb
-     test_openai.rb
      test_openwebui.rb
+     test_reasoning.rb
      test_relay.rb
-     test_responses.rb
     }
    }
   }
@@ -290,9 +327,19 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    fake_clients.rb
    fixtures.rb
    infrastructure_probes.rb
+   interface_fake_executor.rb
    mock_backend.rb
   }
-  test_helper.rb
+  integration=integration{
+   scout=scout{
+    model=model{
+     test_base.rb
+     decision=decision{
+      test_jev.rb
+     }
+    }
+   }
+  }
  }
  bin=bin filter="*"{
   scout-ai
