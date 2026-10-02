@@ -43,6 +43,10 @@ module LLM
       end * "\n"
     end
 
+    def agent_name
+      workflow.to_s
+    end
+
     #def system_prompt
     #  system = @system
     #  system = [] if system.nil?
@@ -140,7 +144,17 @@ module LLM
           end
 
           options[:tools] = tools
-          LLM.ask messages, @other_options.except(:no_ask_override).merge(log_errors: true, save_file: self.save_file).merge(options).merge(request_context: request_context, agent: false)
+
+          ask_options = @other_options.except(:no_ask_override)
+          IndiferentHash.setup(ask_options)
+          ask_options= ask_options.merge(log_errors: true, save_file: self.save_file)
+          ask_options = ask_options.merge(options)
+          ask_options = ask_options.merge(request_context: request_context, agent: false)
+
+          config_endpoint = Scout::Config.get('endpoint', agent_name)
+          ask_options[:endpoint] = config_endpoint if config_endpoint
+
+          LLM.ask messages, ask_options       
         end
       rescue
         exception = $!

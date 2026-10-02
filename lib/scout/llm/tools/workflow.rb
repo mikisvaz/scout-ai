@@ -36,7 +36,9 @@ module LLM
       next acc if names and not names.include?(input)
       type = task_info[:input_types][input]
       description = task_info[:input_descriptions][input]
-      options = task_info[:input_options][input]
+      options = task_info[:input_options][input] || {}
+      required = options[:required]
+      default = task_info[:input_defaults][input]
 
       type = scout_to_tool_input_type(type) 
       type = :array if type.to_s.end_with?('_array')
@@ -45,6 +47,8 @@ module LLM
         type: type,
         description: description || ''
       }
+
+      acc[input][:default] = default unless default.nil?
 
       if type == :array
         acc[input]['items'] = {type: :string}
@@ -94,7 +98,7 @@ module LLM
     end
 
     required_inputs = task_info[:inputs].select do |input|
-      next if names and not names.include?(input.to_sym)
+      next false if names and not names.include?(input.to_sym)
       task_info[:input_options].include?(input) && task_info[:input_options][input][:required]
     end
 

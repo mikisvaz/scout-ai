@@ -320,8 +320,6 @@ module LLM
         tools.merge!(LLM.tools messages)
         tools.merge!(LLM.associations messages)
 
-        Log.medium "Tools: #{Log.fingerprint tools.keys}" if tools
-
         tools
       end
 
@@ -432,6 +430,7 @@ module LLM
         # distinguish two genuinely repeated, otherwise identical inferences.
         meta['inference_id'] = SecureRandom.uuid
         meta['provider_response_id'] = response['id'] if response['id']
+        meta['model'] = response['model'] if response['model']
         tokens.each do |name, value|
           session_name = name + '_s'
           Thread.current[session_name] = Thread.current[session_name].to_i + value.to_i
@@ -487,9 +486,7 @@ module LLM
 
         return if parts.empty?
 
-        reasoning_content = parts.join("\n").gsub("\n", ' ')
-        Log.medium "Reasoning:\n" + Log.color(:cyan, reasoning_content)
-        reasoning_content
+        parts.join("\n").gsub("\n", ' ')
       end
 
 
@@ -524,12 +521,32 @@ module LLM
 
         messages = self.messages question, options
         
+        if String === save_file
+          main_chat_file, agent_chat_file = save_file.split(/\.files\//)
+          if Open.exists?(main_chat_file+'.info')
+            main_chat_job = Step.load(main_chat_file)
+            job_name = main_chat_job.clean_name == 'Default' ? main_chat_file.split('_').last[0..5] : main_chat_job.clean_name
+            main_chat_file = [[main_chat_job.workflow, main_chat_job.task_name].compact.collect{|p| p.to_s}*'/', job_name].compact * ' '
+          else
+            main_chat_file = File.basename(main_chat_file)
+          end
+
+          parts = agent_chat_file.split('/').reject{|p| p.end_with?('.society') }.reject{|p| p == 'agent.chat' }
+          agent_chat_file = parts * '/'
+
+          tag = [main_chat_file, agent_chat_file].compact * ' '
+          pre_message = Log.color(:blue, tag + ' ')
+        else
+          pre_message = ''
+        end
+
         if relay
           id = upload_messages(relay,  messages, options)
           response = gather_response(relay, id)
           IndiferentHash.setup(response)
           formatted_prompt = format_messages(messages)
           tools = tools(formatted_prompt, options)
+          Log.medium pre_message + "Tools: #{Log.fingerprint tools.keys}" if tools
         else
 
           client = prepare_client options, messages
@@ -537,9 +554,10 @@ module LLM
           prompt = Chat.prepare_prompt(messages, prompt_strategies, save_file: save_file)
           formatted_prompt = format_messages(prompt)
           tools = tools(formatted_prompt, options)
+          Log.medium pre_message + "Tools: #{Log.fingerprint tools.keys}" if tools
 
           response = begin
-                       Log.medium "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
+                       Log.medium pre_message + "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"
                        query(client, formatted_prompt, tools, options)
                      rescue Exception => e
                        Log.debug 'Asking error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
@@ -568,11 +586,12 @@ module LLM
           return response
         end
 
-        Log.debug "Response: #{Log.fingerprint response}"
+        Log.debug pre_message + "Response: #{Log.fingerprint response}"
 
         raise 'No response' if response.nil?
 
         reasoning = reasoning response
+        Log.medium pre_message + "Reasoning:\n" + Log.color(:cyan, reasoning) if reasoning
 
         if log_response
           meta = self.update_meta response, current_meta
@@ -587,7 +606,7 @@ module LLM
                    process_response messages, response, tools, options.merge(save_file: save_file, request_context: request_context), &block
                  rescue Exception => e
 
-                   Log.debug 'Processing response error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
+                   Log.debug pre_message + 'Processing response error. Options: ' + "\n" + JSON.pretty_generate(options.except(:tools))
                    begin
                      tmpfile = TmpFile.tmp_file 
                      previous_response_id_error = options.delete

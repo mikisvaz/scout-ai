@@ -103,7 +103,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     mcp.rb
     rag.rb
     request_context.rb
-    tools.rb
     utils.rb
     chat=chat{
      agent_meta.rb
@@ -128,6 +127,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
       tools.rb
      }
     }
+    tools.rb
     tools=tools{
      call.rb
      definition.rb

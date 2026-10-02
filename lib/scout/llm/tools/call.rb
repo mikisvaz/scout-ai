@@ -189,6 +189,7 @@ module LLM
       meta = []
       if Step === content
         step = content
+        Chat.allow_read_job step
         if content.done?
           content = content.load
         elsif content.error? && content.exception
