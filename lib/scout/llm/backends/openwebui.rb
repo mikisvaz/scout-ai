@@ -39,16 +39,23 @@ module LLM
       parameters[:model] ||= model
       parameters[:tools] = format_tool_definitions(tools) if tools && tools.any?
       parameters[:messages] = messages
-      parameters[:verify_ssl] = false
-      parameters[:timeout] = timeout.to_i if timeout
-      parameters[:read_timeout] = timeout.to_i if timeout
-      parameters[:open_timeout] = timeout.to_i if timeout
 
-      headers = IndiferentHash.setup({ 'Authorization' => "Bearer #{key}", 'Content-Type' => 'application/json' })
+      headers = IndiferentHash.setup({ 'Authorization' => "Bearer #{key}", 'Content-Type' => 'application/json'})
       Misc.insist do
         response = case method.to_sym
                    when :post
-                     RestClient.post(url, parameters.to_json, headers)
+                     request_options = {
+                       method: :post,
+                       url: url,
+                       payload: parameters.to_json,
+                       headers: headers
+                     }
+
+                     request_options[:timeout] = timeout.to_i if timeout
+                     request_options[:open_timeout] = timeout.to_i if timeout
+                     request_options[:verify_ssl] = false
+
+                     RestClient::Request.execute(**request_options)
                    else
                      raise 'Get not supported'
                    end
