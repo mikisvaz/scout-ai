@@ -210,8 +210,8 @@ module LLM
 
       if agent_name
 
-        workflow_path = Scout.workflows[agent_name]
         agent_path = Scout.Agent[agent_name]
+        workflow_path = agent_path['workflow.rb'].exists? ? agent_path : Scout.workflows[agent_name]
         agent_path = Scout.var.Agent[agent_name] unless agent_path.exists?
         agent_path = Scout.chats.Agent[agent_name] unless agent_path.exists?
         agent_path = Scout.chats[agent_name] unless agent_path.exists?
