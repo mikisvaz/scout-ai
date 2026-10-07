@@ -3,7 +3,7 @@ require 'mcp_client'
 
 module LLM
   def self.mcp_tools(url, options = {})
-    timeout = Scout::Config.get :timeout, :mcp, :tools
+    timeout = Scout::Config.get :timeout, :mcp, :tools, default: 600
 
     options = IndiferentHash.add_defaults options, read_timeout: timeout.to_i if timeout && timeout != ""
 
