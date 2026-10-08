@@ -141,12 +141,14 @@ class TestLLMToolDefinition < Test::Unit::TestCase
       properties: {
         recipe: { type: :string, description: 'Recipe for which to extract steps' },
         return_path: {
+          default: false,
           type: 'boolean',
           description: 'Instead of returning the result, return the path where the result is persisted. Use this when you want to pass the result to another tool or script, move it, or process it as a file without loading its contents into the conversation.'
         },
         refresh: {
+          default: 'false',
           type: 'string',
-          enum: ['refresh', 'deep_refresh'],
+          enum: ['false', 'refresh', 'deep_refresh'],
           description: 'Control whether cached results may be reused. Use "refresh" to recompute this task; use "deep_refresh" when results used by this task may also be stale and should be refreshed.'
         }
       },

@@ -1,31 +1,22 @@
 require_relative '../../request_context'
+require_relative '../../sandbox'
 
 module Chat
 
   def self.allow_path(path)
-    Thread.current['allowed_paths'] ||= []
-    return if Thread.current['allowed_paths'].include?(path)
-    Log.medium "Allow #{path}"
-    Thread.current['allowed_paths'] << path
+    LLM::Sandbox.allow_path(path)
   end
 
   def self.allow_read_path(path)
-    Thread.current['allowed_read_paths'] ||= []
-    return if Thread.current['allowed_read_paths'].include?(path)
-    Log.medium "Allow read #{path}"
-    Thread.current['allowed_read_paths'] << path
+    LLM::Sandbox.allow_read_path(path)
   end
 
   def self.allow_job(job)
-    allow_path(job.path)
-    allow_path(job.info_file)
-    allow_path(job.files_dir)
+    LLM::Sandbox.allow_job(job)
   end
 
   def self.allow_read_job(job)
-    allow_read_path(job.path)
-    allow_read_path(job.info_file)
-    allow_read_path(job.files_dir)
+    LLM::Sandbox.allow_read_job(job)
   end
 
 
