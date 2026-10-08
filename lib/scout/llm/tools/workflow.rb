@@ -2,11 +2,13 @@ require 'scout/workflow'
 require_relative '../request_context'
 module LLM
   def self.scout_to_tool_input_type(type)
+    type = type.to_sym
     type = :text if type == :chat
     type = :text if type == :json
     type = :string if type == :text
     type = :string if type == :select
     type = :string if type == :path
+    type = :string if type == :file
     type = :number if type == :float
     type = :array if type.to_s.end_with?('_array')
     type
@@ -124,7 +126,11 @@ module LLM
   end
 
   def self.call_workflow(workflow, task_name, parameters={}, request_context: nil, **keyword_parameters)
-    parameters = (parameters || {}).merge(keyword_parameters)
+    parameters = IndiferentHash.setup((parameters || {}).merge(keyword_parameters))
+
+    # Some models use '' for optional parameters
+    parameters = parameters.reject{|k,v| v == ''}
+
     jobname, return_path, exec_type, allow_recursive, refresh = IndiferentHash.process_options parameters, :jobname, :return_path, :exec_type, :allow_recursive, :refresh
     begin
       job = workflow.job(task_name.to_sym, jobname, parameters)

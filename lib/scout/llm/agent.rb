@@ -219,11 +219,11 @@ module LLM
         raise ScoutException, "No agent found with name #{agent_name}" unless workflow_path.exists? || agent_path.exists?
 
         @@agent_workflow ||= {}
-        workflow = @@agent_workflow[agent_name] ||= if workflow_path.exists?
+        workflow = @@agent_workflow[agent_name] ||= if agent_path.workflow.find_with_extension("rb").exists?
+                                                      Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
+                                                    elsif workflow_path.exists?
                                                       agent_path = workflow_path
                                                       Workflow.require_workflow agent_name
-                                                    elsif agent_path.workflow.find_with_extension("rb").exists?
-                                                      Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
                                                     elsif agent_path.python.exists? && agent_path.python.glob('*.py').any?
                                                       require 'scout/workflow/python'
                                                       PythonWorkflow.load_directory agent_path.python, 'ScoutAgent'
