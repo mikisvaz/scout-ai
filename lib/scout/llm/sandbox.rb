@@ -13,10 +13,10 @@ module LLM
     # Missing components are retained lexically beneath the resolved ancestor.
     def resolve_path(path, base_path: nil)
       spelling = path.to_s
-      raise ArgumentError, 'path must not be empty' if spelling.empty?
+      raise ParameterException, 'path must not be empty' if spelling.empty?
       unless spelling.start_with?(File::SEPARATOR)
-        raise ArgumentError, 'relative paths require an explicit base_path' unless base_path
-        raise ArgumentError, 'base_path must be absolute' unless base_path.to_s.start_with?(File::SEPARATOR)
+        raise ParameterException, 'relative paths require an explicit base_path' unless base_path
+        raise ParameterException, 'base_path must be absolute' unless base_path.to_s.start_with?(File::SEPARATOR)
       end
 
       absolute = spelling.start_with?(File::SEPARATOR) ? spelling : File.join(base_path.to_s, spelling)
@@ -74,7 +74,7 @@ module LLM
     # would make decisions depend on ambient process state. Missing targets are
     # checked against their resolved existing ancestor plus remaining components.
     def authorize_path(path, root:, writable_paths: [], read_paths: [], mode: :read, base_path: nil)
-      raise ArgumentError, "unsupported path access mode: #{mode.inspect}" unless [:read, :write].include?(mode.to_sym)
+      raise ParameterException, "unsupported path access mode: #{mode.inspect}" unless [:read, :write].include?(mode.to_sym)
 
       target = resolve_path(path, base_path: base_path)
       unless target[:canonical_path]

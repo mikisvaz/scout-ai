@@ -2,7 +2,7 @@ module LLM
   class Agent
     
     ATACH_TYPES = %w(auto image pdf png jpeg)
-    def attachments
+    def attachments(options = {})
       @other_options[:tools] ||= {}
 
       task_name = :attach
@@ -26,9 +26,9 @@ module LLM
 
           case file_type
           when 'image', 'png', 'jpeg'
-            self.image path
+            self.image path, options
           when 'pdf'
-            self.pdf path
+            self.pdf path, options
           else
             raise ScoutException, "Unkown file type: #{parameters[:file_type]}"
           end

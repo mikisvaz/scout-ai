@@ -118,17 +118,37 @@ module LLM
           end
         else
 
-          if (list = messages.select{|info| info[:role] == 'socialize'}).any?
-            socialize = list.last[:content]
-            messages.delete_if{|info| info[:role] == 'socialize' }
-            self.socialize(options.dup) if socialize && %w(true TRUE True T 1).include?(socialize.to_s)
+          workflows = Chat.find_role(messages, :tool).collect{|m| m[:content].split(' ').first }.uniq.compact
+
+          workflows.each do |workflow|
+            begin
+              Workflow.require_workflow workflow
+            rescue
+            end
           end
 
-          if (list = messages.select{|info| info[:role] == 'attachments'}).any?
-            attachments = list.last[:content]
-            messages.delete_if{|info| info[:role] == 'attachments' }
-            self.attachments if attachments && %w(true TRUE True T 1).include?(attachments.to_s)
+          %w(socialize attachments path).each do |capability|
+            if (list = messages.remove_role(capability)).any?
+              status = list.last[:content]
+              next if status.nil?
+              status = status.to_s
+              next if %w(false FALSE False F 0).include?(status)
+              next unless %w(true TRUE True T 1).include?(status)
+              self.send(capability.to_sym, options.dup) 
+            end
           end
+
+          #if (list = messages.select{|info| info[:role] == 'socialize'}).any?
+          #  socialize = list.last[:content]
+          #  messages.delete_if{|info| info[:role] == 'socialize' }
+          #  self.socialize(options.dup) if socialize && %w(true TRUE True T 1).include?(socialize.to_s)
+          #end
+
+          #if (list = messages.select{|info| info[:role] == 'attachments'}).any?
+          #  attachments = list.last[:content]
+          #  messages.delete_if{|info| info[:role] == 'attachments' }
+          #  self.attachments if attachments && %w(true TRUE True T 1).include?(attachments.to_s)
+          #end
 
 
           tools = options[:tools] || {}
@@ -136,7 +156,6 @@ module LLM
             other_tools = JSON.parse other_tools if String === other_tools
             tools = tools.merge other_tools
           end
-
 
           if workflow || knowledge_base
             tools.merge!(LLM.workflow_tools(workflow)) if workflow && workflow.tasks.any?
@@ -197,7 +216,7 @@ module LLM
 
     def self.load_agent(agent_name = nil, options = {})
       agent_name = agent_name.to_s if Symbol === agent_name
-      if agent_name && Path.is_filename?(agent_name) 
+      if agent_name && ::Path.is_filename?(agent_name) 
         if File.directory?(agent_name)
           dir = Path.setup(agent_name) unless Path === agent_name
           if dir.agent.find_with_extension("rb").exists?
@@ -261,3 +280,4 @@ require_relative 'agent/delegate'
 require_relative 'agent/attach'
 require_relative 'agent/save'
 require_relative 'agent/workflow'
+require_relative 'agent/path'

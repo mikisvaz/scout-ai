@@ -2,6 +2,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  README.md
  USER_GUIDE.md
  Rakefile
+ cortex_path_map.yaml
  chats=chats filter="*"{
   system=system{
    agent
@@ -43,47 +44,22 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     }
    }
   }
-  save_locations
-  provenance_cortex
-  provenance_cortex.analysis
-
-  expanding_epochs
-  test_abort
-
-  simplify_delegation
-
-  test_simplify_delegation
-
-  overseer
-
-  inbox_test
-
-  test_meta_follow
-  test_meta_follow_ask
-
-  test_workflow
-
-  meta_follow
-  live_meta
-
-  cortex_coder
-
-  cortex_coder.bugs
-
-  test_live_meta
-
-  request_context
-  test_request_context
-
 
   interface_move
   
+  sandbox
+
+  paths
+  paths.test
+
   test=test{
    task
    clean
    direct
    ask
    cortex
+   socialize
+   path
   }
  }
  lib=lib {
@@ -104,6 +80,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     rag.rb
     request_context.rb
     utils.rb
+    sandbox.rb
     chat=chat{
      agent_meta.rb
      annotation.rb
@@ -155,6 +132,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      construction.rb
      conversation.rb
      delegate.rb
+     path.rb
      iterate.rb
      save.rb
      workflow.rb
