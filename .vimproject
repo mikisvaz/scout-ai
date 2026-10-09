@@ -71,16 +71,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
     entity.rb
    }
    llm=llm{
-    ask.rb
     chat.rb
-    embed.rb
-    image.rb
-    interface.rb
-    mcp.rb
-    rag.rb
-    request_context.rb
-    utils.rb
-    sandbox.rb
     chat=chat{
      agent_meta.rb
      annotation.rb
@@ -104,6 +95,15 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
       tools.rb
      }
     }
+    ask.rb
+    embed.rb
+    image.rb
+    interface.rb
+    mcp.rb
+    rag.rb
+    request_context.rb
+    utils.rb
+    sandbox.rb
     tools.rb
     tools=tools{
      call.rb

@@ -34,7 +34,12 @@ require 'scout-ai'
 agent = LLM.agent(endpoint: :openai)
 ```
 
-### Setting the system prompt
+### Setting the system prompt### Setting the system prompt
+
+> Agents can also expose *path kinds* — typed, sandboxed filesystem
+> namespaces with read/write/edit/patch operations and per-kind custom
+> operations; see the
+> [Path engine](../developer/PathEngine.md) developer document.
 
 The system prompt lives on `start_chat`:
 

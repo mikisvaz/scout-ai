@@ -70,7 +70,7 @@ class TestClass < Test::Unit::TestCase
   end
 
   def test_register_path_kind_rejects_empty_name
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.register_path_kind("")
     end
   end
@@ -84,7 +84,7 @@ class TestClass < Test::Unit::TestCase
   end
 
   def test_register_path_kind_rejects_non_boolean_sandbox_setting
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.register_path_kind("invalid", "sandbox" => "false")
     end
   end
@@ -99,7 +99,7 @@ class TestClass < Test::Unit::TestCase
       "validate" => ->(*) { called = true }
     )
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_validate("kind" => "custom", "path" => "item")
     end
     assert_false called
@@ -123,7 +123,7 @@ class TestClass < Test::Unit::TestCase
     original = sandbox.method(:authorize_path)
     sandbox.define_singleton_method(:authorize_path) { |*| raise NoMethodError, "unavailable" }
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_read("kind" => "text", "path" => "item")
     end
   ensure
@@ -158,7 +158,7 @@ class TestClass < Test::Unit::TestCase
     File.symlink(outside, File.join(@tmpdir, "escape"))
     @agent.path_write("kind" => "text", "path" => "source", "content" => "x")
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_move("kind" => "text", "path" => "source", "destination" => "escape/new")
     end
     assert File.file?(File.join(@tmpdir, "source"))
@@ -167,7 +167,7 @@ class TestClass < Test::Unit::TestCase
   end
 
   def test_register_path_kind_rejects_invalid_default_location
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.register_path_kind(
         "text",
         "locations" => ["project"],
@@ -201,7 +201,7 @@ class TestClass < Test::Unit::TestCase
   end
 
   def test_path_kind_definition_rejects_unknown_kind
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_kind_definition("missing")
     end
   end
@@ -245,7 +245,7 @@ class TestClass < Test::Unit::TestCase
   def test_resolve_path_rejects_invalid_location
     register_text_kind
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.resolve_path("text", "hello.txt", "missing")
     end
   end
@@ -294,7 +294,7 @@ class TestClass < Test::Unit::TestCase
     outside = Dir.mktmpdir("path-outside")
     target = File.join(outside, "must-not-exist.txt")
 
-    error = assert_raise(ArgumentError) do
+    error = assert_raise(ParameterException) do
       @agent.path_write("kind" => "text", "path" => target, "content" => "denied")
     end
 
@@ -326,7 +326,7 @@ class TestClass < Test::Unit::TestCase
     outside = Dir.mktmpdir("path-outside")
     denied_destination = File.join(outside, "must-not-exist.txt")
     @agent.path_write("kind" => "text", "path" => source, "content" => "stay put")
-    error = assert_raise(ArgumentError) do
+    error = assert_raise(ParameterException) do
       @agent.path_move("kind" => "text", "path" => source,
                        "destination" => denied_destination)
     end
@@ -361,7 +361,7 @@ class TestClass < Test::Unit::TestCase
       "resolve" => ->(_agent, _path, _location) { outside_target }
     )
 
-    error = assert_raise(ArgumentError) do
+    error = assert_raise(ParameterException) do
       @agent.path_write("kind" => "custom", "path" => "item", "content" => "denied")
     end
 
@@ -395,7 +395,7 @@ class TestClass < Test::Unit::TestCase
   def test_path_write_respects_write_capability
     register_text_kind("text", "write" => false)
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_write(
         "kind" => "text",
         "path" => "hello.txt",
@@ -407,7 +407,7 @@ class TestClass < Test::Unit::TestCase
   def test_path_read_rejects_missing_path
     register_text_kind
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_read(
         "kind" => "text",
         "path" => "missing.txt"
@@ -485,7 +485,7 @@ class TestClass < Test::Unit::TestCase
   end
 
   def test_path_edit_rejects_invalid_selector
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_apply_selector(
         "hello world",
         {"type" => "unknown"},
@@ -494,8 +494,65 @@ class TestClass < Test::Unit::TestCase
     end
   end
 
+  # Review point 3 (Phase 0 fixes): a non-String regexp pattern is invalid
+  # input and must surface as ParameterException at the operation boundary,
+  # never as a TypeError escaping Regexp.new.
+  def test_path_edit_regexp_selector_non_string_pattern_raises_parameter_exception
+    register_text_kind
+
+    @agent.path_write(
+      "kind" => "text",
+      "path" => "hello.txt",
+      "content" => "hello world"
+    )
+
+    [nil, 5, :x].each do |pattern|
+      error = assert_raise(ParameterException) do
+        @agent.path_edit(
+          "kind" => "text",
+          "path" => "hello.txt",
+          "selector" => {"type" => "regexp", "pattern" => pattern},
+          "replacement" => "Scout"
+        )
+      end
+
+      assert_match(/pattern must be a String, got /, error.message)
+    end
+  end
+
+  # Review point 3: the same normalization must hold through the
+  # agent-facing tool callable, whose rescue serializes ScoutException
+  # subclasses.  A raw TypeError would escape it entirely.
+  def test_path_edit_regexp_selector_non_string_pattern_through_tool_callable
+    register_text_kind
+
+    @agent.path_write(
+      "kind" => "text",
+      "path" => "hello.txt",
+      "content" => "hello world"
+    )
+
+    tools = @agent.instance_variable_get(:@other_options)[:tools]
+
+    result = JSON.parse(
+      tools["path_edit"].first.call(
+        "path_edit",
+        {
+          "kind" => "text",
+          "path" => "hello.txt",
+          "selector" => {"type" => "regexp", "pattern" => nil},
+          "replacement" => "Scout"
+        }
+      )
+    )
+
+    # Serialized ParameterException message, not a raw TypeError escape.
+    assert_match(/pattern must be a String/, result["exception"])
+    assert result.key?("exception_line")
+  end
+
   def test_path_edit_rejects_invalid_line_range
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_apply_selector(
         "one\ntwo\n",
         {
@@ -509,7 +566,7 @@ class TestClass < Test::Unit::TestCase
   end
 
   def test_path_edit_rejects_invalid_character_range
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_apply_selector(
         "hello",
         {
@@ -635,7 +692,7 @@ class TestClass < Test::Unit::TestCase
   def test_path_rename_rejects_missing_rename_capability_even_when_move_is_supported
     register_text_kind("text", "rename" => false, "move" => true)
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_rename(
         "kind" => "text",
         "path" => "one.txt",
@@ -660,6 +717,766 @@ class TestClass < Test::Unit::TestCase
 
     assert_equal true, result["deleted"]
     assert !File.exist?(File.join(@tmpdir, "hello.txt"))
+  end
+
+  # Review point 4 (Phase 0 fixes): deleting a nonexistent target is invalid
+  # input and must surface as ParameterException using the engine's uniform
+  # "does not exist" contract, not as a raw Errno::ENOENT escaping the tool
+  # callable's ScoutException-only rescue.
+  def test_custom_operation_registration_stores_normalized_spec
+    register_text_kind
+
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "precise_edit" => {
+          "description" => "Precise edit",
+          "parameters" => {"properties" => {"selector" => {"type" => "string"}}, "required" => ["selector"]},
+          "implementation" => ->(_agent, _target, _args) { "ok" },
+          "authorization" => :read,
+          "type" => :content
+        }
+      }
+    )
+
+    spec = @agent.path_custom_operation("fancy", "precise_edit")
+    assert_equal "precise_edit", spec["name"]
+    assert_equal "Precise edit", spec["description"]
+    assert_equal ["selector"], spec["parameters"]["required"]
+    assert_equal :read, spec["authorization"]
+    assert_equal :content, spec["type"]
+    assert spec["implementation"].respond_to?(:call)
+
+    assert_equal ["precise_edit"], @agent.path_custom_operations
+    assert @agent.path_operation_support?("fancy", "precise_edit")
+    assert_equal :read, @agent.path_operation_authorization("fancy", "precise_edit")
+    assert !@agent.path_operation_support?("text", "precise_edit")
+  end
+
+  def test_custom_operation_defaults_fail_closed_to_write_and_full_handler
+    register_text_kind
+
+    @agent.register_path_kind(
+      "plain",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {"noop" => ->(_a, _t, _args) { "ok" }}
+    )
+
+    spec = @agent.path_custom_operation("plain", "noop")
+    assert_equal :write, spec["authorization"]
+    assert_equal :full, spec["type"]
+    assert_equal :write, @agent.path_operation_authorization("plain", "noop")
+  end
+
+  # ------------------------------------------------------------------
+  # Step 4 — tool aggregation
+  # ------------------------------------------------------------------
+
+  def register_two_kinds_with_same_operation(first_description: "First kind operation", second_description: nil)
+    @agent.register_path_kind(
+      "alpha",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "precise_edit" => {
+          "description" => first_description,
+          "parameters" => {
+            "properties" => {
+              "selector" => {"type" => "object"},
+              "replacement" => {"type" => "string"}
+            },
+            "required" => ["replacement"]
+          },
+          "implementation" => ->(content, args) { "alpha:#{content}" },
+          "authorization" => :write,
+          "type" => :content
+        }
+      }
+    )
+    return if second_description.nil?
+
+    @agent.register_path_kind(
+      "beta",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "precise_edit" => {
+          "description" => second_description,
+          "parameters" => {
+            "properties" => {
+              "selector" => {"type" => "object"},
+              "replacement" => {"type" => "string"}
+            },
+            "required" => ["replacement"]
+          },
+          "implementation" => ->(content, args) { "beta:#{content}" },
+          "authorization" => :write,
+          "type" => :content
+        }
+      }
+    )
+  end
+
+  def step4_tools
+    @agent.instance_variable_get(:@other_options)[:tools]
+  end
+
+  def test_two_kinds_with_same_operation_install_exactly_one_shared_tool
+    register_two_kinds_with_same_operation(
+      first_description: "Alpha precise edit",
+      second_description: "Beta precise edit"
+    )
+
+    tools = step4_tools
+    assert tools.key?("precise_edit")
+    assert_equal 1, tools.keys.count("precise_edit")
+
+    schema = tools["precise_edit"][1][:function][:parameters]
+    assert_equal %w[alpha beta], schema[:properties]["kind"]["enum"].sort
+    assert_equal ["kind", "path", "replacement"].sort, schema[:required].sort
+  end
+
+  def test_conflicting_contracts_are_rejected_at_installation
+    @agent.register_path_kind(
+      "alpha",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "precise_edit" => {
+          "description" => "Alpha precise edit",
+          "parameters" => {
+            "properties" => {"replacement" => {"type" => "string"}},
+            "required" => ["replacement"]
+          },
+          "implementation" => ->(content, args) { content }
+        }
+      }
+    )
+
+    # type mismatch on the same parameter
+    error = assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "beta",
+        "roots" => {"project" => @tmpdir},
+        "operations" => {
+          "precise_edit" => {
+            "description" => "Beta precise edit",
+            "parameters" => {
+              "properties" => {"replacement" => {"type" => "integer"}},
+              "required" => ["replacement"]
+            },
+            "implementation" => ->(content, args) { content }
+          }
+        }
+      )
+    end
+    assert error.message.include?("precise_edit")
+    assert error.message.include?("alpha")
+    assert error.message.include?("beta")
+    assert error.message.include?("replacement")
+
+    # required-set mismatch
+    error2 = assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "gamma",
+        "roots" => {"project" => @tmpdir},
+        "operations" => {
+          "precise_edit" => {
+            "description" => "Gamma precise edit",
+            "parameters" => {
+              "properties" => {"replacement" => {"type" => "string"}},
+              "required" => []
+            },
+            "implementation" => ->(content, args) { content }
+          }
+        }
+      )
+    end
+    assert error2.message.include?("required")
+  end
+
+  def test_description_resolves_by_registration_order
+    register_two_kinds_with_same_operation(
+      first_description: "Alpha precise edit",
+      second_description: "Beta precise edit"
+    )
+    tools = step4_tools
+    assert tools["precise_edit"][1][:function][:description].include?("Beta precise edit")
+
+    # deterministic: swap the registration order in a fresh agent and the
+    # other description wins.
+    other = LLM.agent
+    other.register_path_kind(
+      "zeta",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "precise_edit" => {
+          "description" => "Zeta precise edit",
+          "parameters" => {
+            "properties" => {"replacement" => {"type" => "string"}},
+            "required" => ["replacement"]
+          },
+          "implementation" => ->(content, args) { content }
+        }
+      }
+    )
+    other.register_path_kind(
+      "alpha",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "precise_edit" => {
+          "description" => "Alpha precise edit",
+          "parameters" => {
+            "properties" => {"replacement" => {"type" => "string"}},
+            "required" => ["replacement"]
+          },
+          "implementation" => ->(content, args) { content }
+        }
+      }
+    )
+    other_tools = other.instance_variable_get(:@other_options)[:tools]
+    assert other_tools["precise_edit"][1][:function][:description].include?("Alpha precise edit")
+  end
+
+  def test_aggregated_tool_fails_cleanly_for_unsupported_kind
+    register_two_kinds_with_same_operation(first_description: "Alpha precise edit")
+
+    tools = step4_tools
+    result = tools["precise_edit"][0].call(
+      "precise_edit",
+      {"kind" => "text", "path" => "a.txt", "replacement" => "x"}
+    )
+    payload = JSON.parse(result)
+    assert payload["exception"].include?("Unknown Path kind")
+  end
+
+  def test_custom_tool_visible_immediately_and_not_dropped_by_later_registration
+    register_two_kinds_with_same_operation(first_description: "Alpha precise edit")
+
+    tools = step4_tools
+    assert tools.key?("precise_edit")
+    assert tools.key?("path_read")
+
+    @agent.register_path_kind(
+      "extra",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "other_op" => {
+          "description" => "Other",
+          "parameters" => {"properties" => {}, "required" => []},
+          "implementation" => ->(content, args) { content }
+        }
+      }
+    )
+
+    tools = step4_tools
+    assert tools.key?("precise_edit")
+    assert tools.key?("other_op")
+    assert tools.key?("path_read")
+  end
+
+  def test_builtin_schemas_unchanged_by_custom_registration
+    before = {}
+    @agent.register_path_kind("text", "roots" => {"project" => @tmpdir})
+    @agent.install_path_tools
+    step4_tools.each do |name, pair|
+      before[name] = pair[1][:function]
+    end
+
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "overrides" => {"edit" => ->(a, t, args) { "overridden" }},
+      "operations" => {
+        "precise_edit" => {
+          "description" => "Fancy precise edit",
+          "parameters" => {
+            "properties" => {"replacement" => {"type" => "string"}},
+            "required" => ["replacement"]
+          },
+          "implementation" => ->(content, args) { content }
+        }
+      }
+    )
+
+    after = {}
+    step4_tools.each do |name, pair|
+      after[name] = pair[1][:function]
+    end
+
+    %w[path_kinds path_read path_write path_edit path_list path_move path_rename path_delete path_validate path_test path_promote path_smoke].each do |builtin|
+      next unless before.key?(builtin)
+      assert_equal before[builtin][:name], after[builtin][:name], builtin
+      assert_equal before[builtin][:description], after[builtin][:description], builtin
+      assert_equal before[builtin][:parameters].reject { |k, _| k == :properties },
+                   after[builtin][:parameters].reject { |k, _| k == :properties },
+                   builtin
+      before_props = before[builtin][:parameters][:properties].dup
+      after_props = after[builtin][:parameters][:properties].dup
+      # kind property enum legitimately grows with new kinds; compare the rest.
+      assert_equal before_props["kind"]["type"], after_props["kind"]["type"]
+      before_props.delete("kind")
+      after_props.delete("kind")
+      assert_equal before_props, after_props, builtin
+    end
+  end
+
+  def test_builtin_tools_still_call_engine_methods_directly
+    register_text_kind
+    @agent.path_write("kind" => "text", "path" => "hello.txt", "content" => "hello")
+
+    tools = step4_tools
+    result = tools["path_read"][0].call("path_read", {"kind" => "text", "path" => "hello.txt"})
+    assert_equal "hello", result["content"]
+  end
+
+
+  # ------------------------------------------------------------------
+  # Step 5: centralized dispatch with authorization
+  # ------------------------------------------------------------------
+
+  def step5_spy(calls)
+    ->(*args) { calls << args; "SPY" }
+  end
+
+  def register_fancy_with_operation(operation_name, spec_extra = {}, &)
+    spec = {
+      "parameters" => {"properties" => {}, "required" => []},
+      "implementation" => ->(content, args) { content }
+    }.merge(spec_extra)
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {operation_name => spec}
+    )
+  end
+
+  def test_dispatch_custom_content_operation_reads_transforms_and_writes
+    register_text_kind
+    register_fancy_with_operation(
+      "precise_edit",
+      "implementation" => ->(content, args) { content + args.fetch("marker", "!") },
+      "type" => :content
+    )
+    @agent.path_write("kind" => "fancy", "path" => "a.txt", "content" => "hello")
+
+    result = @agent.path_dispatch(
+      kind: "fancy", operation: "precise_edit",
+      "path" => "a.txt", "marker" => "!!"
+    )
+
+    assert_equal "hello!!", result["content"]
+    assert_equal "hello!!", File.read(File.join(@tmpdir, "a.txt"))
+    assert_equal true, result["changed"]
+  end
+
+  def test_dispatch_custom_full_operation_receives_agent_and_target
+    register_text_kind
+    seen = []
+    register_fancy_with_operation(
+      "audit",
+      "implementation" => ->(agent, target, args) {
+        seen << [agent.class, target.to_s, args["path"]]
+        "AUDIT #{File.basename(target.to_s)}"
+      },
+      "type" => :full
+    )
+
+    result = @agent.path_dispatch(
+      kind: "fancy", operation: "audit", "path" => "x.txt"
+    )
+
+    assert_equal "AUDIT x.txt", result
+    assert_equal 1, seen.length
+    assert_equal LLM::Agent, seen.first.first
+  end
+
+  def test_dispatch_unsupported_kind_and_operation_fail_cleanly
+    register_text_kind
+
+    assert_raise(ParameterException) do
+      @agent.path_dispatch(kind: "nope", operation: "read", "path" => "a")
+    end
+
+    assert_raise(ParameterException) do
+      @agent.path_dispatch(kind: "text", operation: "smoke", "path" => "a")
+    end
+
+    # no cross-kind fallback: "precise_edit" on fancy is not reachable
+    # through kind "text"
+    register_fancy_with_operation("precise_edit")
+    assert_raise(ParameterException) do
+      @agent.path_dispatch(kind: "text", operation: "precise_edit", "path" => "a")
+    end
+  end
+
+  def test_dispatch_authorization_failure_runs_no_callback_and_mutates_nothing
+    register_text_kind
+    calls = []
+    register_fancy_with_operation(
+      "rewrite",
+      "implementation" => step5_spy(calls),
+      "type" => :full
+    )
+    outside = File.join(Dir.tmpdir, "step5_outside_#{Process.pid}.txt")
+    File.write(outside, "KEEP")
+
+    assert_raise(ParameterException) do
+      @agent.path_dispatch(
+        kind: "fancy", operation: "rewrite",
+        "path" => "../#{File.basename(outside)}"
+      )
+    end
+
+    assert_empty calls
+    assert_equal "KEEP", File.read(outside)
+  ensure
+    File.delete(outside) if outside && File.exist?(outside)
+  end
+
+  def test_dispatch_content_op_outside_sandbox_invokes_no_callback
+    register_text_kind
+    calls = []
+    register_fancy_with_operation(
+      "rewrite",
+      "implementation" => step5_spy(calls),
+      "type" => :content
+    )
+
+    assert_raise(ParameterException) do
+      @agent.path_dispatch(
+        kind: "fancy", operation: "rewrite",
+        "path" => "../../etc/hostname"
+      )
+    end
+
+    assert_empty calls
+  end
+
+  def test_dispatch_edit_override_authorization_failure_runs_no_override
+    register_text_kind
+    calls = []
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "overrides" => {"edit" => step5_spy(calls)}
+    )
+    @agent.path_write("kind" => "fancy", "path" => "keep.txt", "content" => "KEEP")
+    before = File.read(File.join(@tmpdir, "keep.txt"))
+
+    assert_raise(ParameterException) do
+      @agent.path_edit(
+        "kind" => "fancy",
+        "path" => "../../etc/hostname",
+        "selector" => {"type" => "lines", "start" => 1},
+        "replacement" => "x"
+      )
+    end
+
+    assert_empty calls
+    assert_equal before, File.read(File.join(@tmpdir, "keep.txt"))
+  end
+
+  def test_dispatch_content_op_cannot_redirect_write_to_other_file
+    register_text_kind
+    register_fancy_with_operation(
+      "stubborn_edit",
+      "implementation" => ->(content, args) { "smuggled" },
+      "type" => :content
+    )
+    @agent.path_write("kind" => "fancy", "path" => "one.txt", "content" => "original")
+
+    @agent.path_dispatch(
+      kind: "fancy", operation: "stubborn_edit", "path" => "one.txt"
+    )
+
+    assert_equal "smuggled", File.read(File.join(@tmpdir, "one.txt"))
+    files = Dir.glob(File.join(@tmpdir, "**", "*")).select { |f| File.file?(f) }
+    assert_equal ["#{File.join(@tmpdir.to_s, 'one.txt')}"], files.sort.map { |f| f }
+  end
+
+  def test_dispatch_edit_content_override_preserves_final_newline
+    register_text_kind
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "overrides" => {
+        # replaces the final line wherever it is; deliberately returns a
+        # value with a trailing newline to prove engine-side preservation
+        "edit" => ->(content, args) {
+          content.sub(/b\n?\z/, "x\n")
+        }
+      }
+    )
+
+    @agent.path_write("kind" => "fancy", "path" => "plain.txt", "content" => "a\nb")
+    @agent.path_edit(
+      "kind" => "fancy", "path" => "plain.txt",
+      "selector" => {"type" => "lines", "start" => 2},
+      "replacement" => "x"
+    )
+    assert_equal "a\nx", File.read(File.join(@tmpdir, "plain.txt"))
+
+    @agent.path_write("kind" => "fancy", "path" => "term.txt", "content" => "a\nb\n")
+    @agent.path_edit(
+      "kind" => "fancy", "path" => "term.txt",
+      "selector" => {"type" => "lines", "start" => 2},
+      "replacement" => "x"
+    )
+    # terminated original keeps its final newline even though the override
+    # return value itself ends in one
+    assert_equal "a\nx\n", File.read(File.join(@tmpdir, "term.txt"))
+  end
+
+  def test_dispatch_custom_op_authorization_modes
+    register_text_kind
+    write_calls = []
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "no_mode" => {
+          "parameters" => {"properties" => {}, "required" => []},
+          "implementation" => step5_spy(write_calls),
+          "type" => :full
+        },
+        "read_mode" => {
+          "parameters" => {"properties" => {}, "required" => []},
+          "implementation" => step5_spy(write_calls),
+          "authorization" => :read,
+          "type" => :full
+        }
+      }
+    )
+
+    assert_equal :write, @agent.path_operation_authorization("fancy", "no_mode")
+    assert_equal :read, @agent.path_operation_authorization("fancy", "read_mode")
+
+    @agent.path_write("kind" => "fancy", "path" => "ro.txt", "content" => "ok")
+    result = @agent.path_dispatch(
+      kind: "fancy", operation: "read_mode", "path" => "ro.txt"
+    )
+    assert_equal "SPY", result
+  end
+
+  def test_dispatch_builtin_without_override_uses_engine_default
+    register_text_kind
+    @agent.path_write("kind" => "text", "path" => "one.txt", "content" => "x")
+
+    result = @agent.path_dispatch(
+      kind: "text", operation: "read", "path" => "one.txt"
+    )
+    assert_equal "x", result["content"]
+  end
+  def test_override_does_not_resurrect_capability_disabled_builtin
+    # The "kind" tool is agent-global and the capability gate lives inside the
+    # engine method, so an override can never re-enable edit for a kind that
+    # has the edit capability off. The direct engine call must still refuse.
+    register_text_kind("locked", "edit" => false)
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "capabilities" => {"edit" => false},
+      "overrides" => {
+        "edit" => ->(agent, target, args) { "OVERRIDDEN" }
+      }
+    )
+
+    assert_equal false, @agent.path_kind_capable?("fancy", "edit")
+
+    exception = assert_raise(ParameterException) do
+      @agent.path_edit(
+        "kind" => "fancy",
+        "path" => "a.txt",
+        "selector" => {"type" => "lines", "start" => 1},
+        "replacement" => "x"
+      )
+    end
+    assert exception.message.include?("does not support edit")
+  end
+
+  def test_custom_operation_parameter_colliding_with_path_arguments_is_rejected
+    error = assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "alpha",
+        "roots" => {"project" => @tmpdir},
+        "operations" => {
+          "weird_op" => {
+            "description" => "Weird",
+            "parameters" => {
+              "properties" => {"kind" => {"type" => "string"}},
+              "required" => []
+            },
+            "implementation" => ->(content, args) { content }
+          }
+        }
+      )
+    end
+    assert error.message.include?("weird_op")
+    assert error.message.include?("kind")
+  end
+
+  def test_custom_operation_name_collision_with_builtin_is_rejected
+    register_text_kind
+
+    assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "bad",
+        "roots" => {"project" => @tmpdir},
+        "operations" => {"edit" => ->(_a, _t, _args) { "x" }}
+      )
+    end
+
+    assert !@agent.path_kind_registry.key?("bad")
+  end
+
+  def test_custom_operation_without_callable_is_rejected
+    register_text_kind
+
+    assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "bad",
+        "roots" => {"project" => @tmpdir},
+        "operations" => {"noop" => {"implementation" => :not_callable}}
+      )
+    end
+  end
+
+  def test_override_registration_selects_override_implementation
+    override_calls = []
+    register_text_kind
+
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "overrides" => {
+        "edit" => ->(_agent, _target, _args) { override_calls << _args; "overridden" }
+      }
+    )
+
+    assert @agent.path_operation_override?("fancy", "edit")
+    assert !@agent.path_operation_override?("text", "edit")
+    assert_equal "overridden", @agent.path_operation_implementation("fancy", "edit").call(nil, nil, nil)
+    impl = @agent.path_operation_implementation("fancy", "edit")
+    assert_same impl, @agent.path_kind_definition("fancy")["overrides"]["edit"]["implementation"]
+    assert_equal :write, @agent.path_operation_authorization("fancy", "edit")
+    assert @agent.path_operation_support?("fancy", "edit")
+  end
+
+  def test_override_must_target_builtin_and_requires_callable
+    register_text_kind
+
+    assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "bad",
+        "roots" => {"project" => @tmpdir},
+        "overrides" => {"precise_edit" => ->(_a, _t, _args) { "x" }}
+      )
+    end
+
+    assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "bad2",
+        "roots" => {"project" => @tmpdir},
+        "overrides" => {"edit" => :not_callable}
+      )
+    end
+  end
+
+  def test_built_in_capability_queries_follow_defaults
+    register_text_kind
+
+    assert @agent.path_operation_support?("text", "read")
+    assert @agent.path_operation_support?("text", "write")
+    assert @agent.path_operation_support?("text", "edit")
+    assert @agent.path_operation_support?("text", "list")
+    assert @agent.path_operation_support?("text", "move")
+    assert @agent.path_operation_support?("text", "rename")
+    assert @agent.path_operation_support?("text", "delete")
+    assert !@agent.path_operation_support?("text", "validate")
+    assert !@agent.path_operation_support?("text", "test")
+    assert !@agent.path_operation_support?("text", "promote")
+    assert !@agent.path_operation_support?("text", "smoke")
+    assert !@agent.path_operation_support?("text", "precise_edit")
+    assert_equal :read, @agent.path_operation_authorization("text", "read")
+    assert_equal :read, @agent.path_operation_authorization("text", "list")
+    assert_equal :write, @agent.path_operation_authorization("text", "write")
+    assert_equal :write, @agent.path_operation_authorization("text", "delete")
+    assert_nil @agent.path_operation_authorization("text", "validate")
+  end
+
+  def test_registry_is_agent_local
+    register_text_kind
+
+    other = LLM.agent
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {"precise_edit" => ->(_a, _t, _args) { "ok" }}
+    )
+
+    assert @agent.path_kind_registry.key?("fancy")
+    assert !other.path_kind_registry.key?("fancy")
+    assert_equal ["precise_edit"], @agent.path_custom_operations
+    assert other.path_custom_operations.empty?
+
+    assert_raise(ParameterException) do
+      other.path_custom_operation("fancy", "precise_edit")
+    end
+  end
+
+  def test_path_delete_missing_file_raises_parameter_exception
+    register_text_kind
+
+    error = assert_raise(ParameterException) do
+      @agent.path_delete(
+        "kind" => "text",
+        "path" => "ghost.txt"
+      )
+    end
+
+    assert_match(/Path does not exist or is not readable/, error.message)
+    assert_match(/ghost\.txt/, error.message)
+  end
+
+  # Review point 4: the serialized error through the agent-facing tool
+  # callable must be ParameterException, with no raw Errno::ENOENT escape.
+  def test_path_delete_missing_file_through_tool_callable
+    register_text_kind
+
+    tools = @agent.instance_variable_get(:@other_options)[:tools]
+
+    result = JSON.parse(
+      tools["path_delete"].first.call(
+        "path_delete",
+        {"kind" => "text", "path" => "ghost.txt"}
+      )
+    )
+
+    # Serialized ParameterException message, not a raw Errno::ENOENT escape.
+    assert_match(/Path does not exist or is not readable/, result["exception"])
+    assert_match(/ghost\.txt/, result["exception"])
+    assert result.key?("exception_line")
+  end
+
+  # Review point 4 control: the ENOENT normalization must not change the
+  # happy path.  Deleting an existing file still works and the file is gone.
+  def test_path_delete_existing_file_still_deletes_after_enoent_normalization
+    register_text_kind
+
+    @agent.path_write(
+      "kind" => "text",
+      "path" => "present.txt",
+      "content" => "bye"
+    )
+
+    assert File.exist?(File.join(@tmpdir, "present.txt"))
+
+    result = @agent.path_delete(
+      "kind" => "text",
+      "path" => "present.txt"
+    )
+
+    assert_equal true, result["deleted"]
+    assert !File.exist?(File.join(@tmpdir, "present.txt"))
   end
 
   def test_path_kinds
@@ -704,7 +1521,7 @@ class TestClass < Test::Unit::TestCase
   def test_path_kind_specific_operation_requires_capability
     register_text_kind
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_validate(
         "kind" => "text",
         "path" => "hello.txt"
@@ -720,7 +1537,7 @@ class TestClass < Test::Unit::TestCase
       "capabilities" => {"validate" => true}
     )
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_validate(
         "kind" => "text",
         "path" => "hello.txt"
@@ -729,21 +1546,17 @@ class TestClass < Test::Unit::TestCase
   end
 
   def test_path_promote
-    calls = []
+    tmp_root = File.join(@tmpdir, "promote_tmp")
+    project_root = File.join(@tmpdir, "promote_project")
+    [tmp_root, project_root].each { |dir| FileUtils.mkdir_p(dir) }
+    File.write(File.join(tmp_root, "show.slim"), "content h1 Hello\n")
 
     @agent.register_path_kind(
       "view",
       "locations" => ["tmp", "project"],
       "default_location" => "tmp",
-      "roots" => {
-        "tmp" => File.join(@tmpdir, "tmp"),
-        "project" => File.join(@tmpdir, "project")
-      },
-      "capabilities" => {"promote" => true},
-      "promote" => lambda do |agent, path, location, args|
-        calls << [agent, path, location, args]
-        {"promoted" => true, "path" => path}
-      end
+      "roots" => {"tmp" => tmp_root, "project" => project_root},
+      "capabilities" => {"promote" => true}
     )
 
     result = @agent.path_promote(
@@ -753,15 +1566,17 @@ class TestClass < Test::Unit::TestCase
 
     assert_equal true, result["promoted"]
     assert_equal "show.slim", result["path"]
-    assert_equal @agent, calls.first[0]
-    assert_equal "show.slim", calls.first[1]
-    assert_equal "tmp", calls.first[2]
+    assert_equal "tmp", result["location"]
+    assert_equal({"location" => "project", "path" => "show.slim"},
+                 result["destination"])
+    assert_equal "content h1 Hello\n", File.read(File.join(project_root, "show.slim"))
+    assert !File.exist?(File.join(tmp_root, "show.slim"))
   end
 
   def test_path_promote_requires_capability
     register_text_kind
 
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       @agent.path_promote(
         "kind" => "text",
         "path" => "hello.txt"
@@ -769,24 +1584,104 @@ class TestClass < Test::Unit::TestCase
     end
   end
 
-  def test_path_promote_requires_implementation
-    @agent.register_path_kind(
-      "view",
-      "locations" => ["tmp", "project"],
-      "default_location" => "tmp",
-      "roots" => {
-        "tmp" => File.join(@tmpdir, "tmp"),
-        "project" => File.join(@tmpdir, "project")
-      },
-      "capabilities" => {"promote" => true}
-    )
+  def test_path_promote_promotes_without_a_mover_callback
+    # Engine-controlled promotion: no "promote" mover callback is required or
+    # consulted; the ENGINE performs the move to the authorized destination.
+    definition = register_promotable_kind("promote" => nil)
+    tmp_root = definition["roots"]["tmp"]
+    project_root = definition["roots"]["project"]
+    File.write(File.join(tmp_root, "show.slim"), "payload\n")
 
-    assert_raise(ArgumentError) do
-      @agent.path_promote(
-        "kind" => "view",
-        "path" => "show.slim"
-      )
-    end
+    result = @agent.path_promote("kind" => "view", "path" => "show.slim")
+
+    assert_equal true, result["promoted"]
+    assert_equal "payload\n", File.read(File.join(project_root, "show.slim"))
+    assert !File.exist?(File.join(tmp_root, "show.slim"))
+  end
+
+  def test_path_promote_legacy_mover_callback_is_not_invoked
+    # A legacy "promote" mover callback must NOT be invoked by the engine;
+    # the engine is the only writer.  Any callback content must be absent.
+    called = false
+    definition = register_promotable_kind(
+      "promote" => lambda do |_agent, _path, _location, _args|
+        called = true
+        {"promoted" => true}
+      end
+    )
+    tmp_root = definition["roots"]["tmp"]
+    File.write(File.join(tmp_root, "show.slim"), "payload\n")
+
+    @agent.path_promote("kind" => "view", "path" => "show.slim")
+
+    assert !called
+    assert_equal "payload\n",
+                 File.read(File.join(definition["roots"]["project"], "show.slim"))
+  end
+
+  def test_path_promote_callback_redirect_attack_writes_only_at_authorized_destination
+    # REDIRECT ATTACK: a kind whose legacy mover callback tries to write
+    # somewhere else.  Content must land ONLY at the engine-authorized
+    # destination; the redirect target must not be created.
+    outside = Dir.mktmpdir("path-outside")
+    redirect_target = File.join(outside, "hijacked.txt")
+    definition = register_promotable_kind(
+      "promote" => lambda do |_agent, _path, _location, args|
+        File.write(redirect_target, "hijacked")
+        FileUtils.rm(args["promotion_source_target"])
+        {"promoted" => true, "destination" => redirect_target}
+      end
+    )
+    tmp_root = definition["roots"]["tmp"]
+    project_root = definition["roots"]["project"]
+    source = File.join(tmp_root, "show.slim")
+    File.write(source, "legitimate\n")
+
+    result = @agent.path_promote("kind" => "view", "path" => "show.slim")
+
+    authorized = File.join(project_root, "show.slim")
+    assert_equal true, result["promoted"]
+    # The engine's authorized endpoint wins over any callback claim.
+    assert_equal authorized, result["promotion_target"]
+    assert_equal({"location" => "project", "path" => "show.slim"},
+                 result["destination"])
+    assert_equal "legitimate\n", File.read(authorized)
+    assert !File.exist?(redirect_target)
+    assert !File.exist?(source)
+    # Nothing else was mutated: only the two authorized endpoints changed.
+    assert_equal ["show.slim"], Dir.children(project_root).sort
+  ensure
+    FileUtils.remove_entry(outside) if outside && File.exist?(outside)
+  end
+
+  def test_path_promote_post_move_hook_receives_authorized_endpoints
+    hook_calls = []
+    definition = register_promotable_kind(
+      "promotion_post_move" => lambda do |agent, path, location, args|
+        hook_calls << [agent, path, location, args]
+        {"extra" => "cleanup-done"}
+      end
+    )
+    tmp_root = definition["roots"]["tmp"]
+    File.write(File.join(tmp_root, "show.slim"), "payload\n")
+
+    result = @agent.path_promote("kind" => "view", "path" => "show.slim")
+
+    assert_equal 1, hook_calls.length
+    agent, path, location, args = hook_calls.first
+    assert_equal @agent, agent
+    assert_equal "show.slim", path
+    assert_equal "tmp", location
+    assert_equal File.join(definition["roots"]["project"], "show.slim"),
+                 args["promotion_target"]
+    assert_equal File.join(tmp_root, "show.slim"),
+                 args["promotion_source_target"]
+    assert_equal({"location" => "project", "path" => "show.slim"},
+                 args["promotion_destination"])
+    assert_equal false, args["overwrite"]
+    # Hook extras merge into the result without overriding engine fields.
+    assert_equal "cleanup-done", result["extra"]
+    assert_equal true, result["promoted"]
   end
 
   def test_load_path_plugin
@@ -827,6 +1722,7 @@ class TestClass < Test::Unit::TestCase
     # These should not be installed until at least one kind supports them.
     assert !tools.key?("path_validate")
     assert !tools.key?("path_test")
+    assert !tools.key?("path_smoke")
     assert !tools.key?("path_promote")
   end
 
@@ -908,4 +1804,1049 @@ class TestClass < Test::Unit::TestCase
 
     assert properties.key?("name")
   end
+
+  # ------------------------------------------------------------------
+  # Error normalization matrix
+  #
+  # Every expected invalid-input state must surface as the framework's
+  # ParameterException, never as an incidental KeyError/ArgumentError
+  # raised by an implementation detail.
+  # ------------------------------------------------------------------
+
+  def test_error_matrix_unknown_kind
+    error = assert_raise(ParameterException) do
+      @agent.path_read("kind" => "nope", "path" => "hello.txt")
+    end
+    assert_match(/Unknown path kind: nope/, error.message)
+  end
+
+  def test_error_matrix_unknown_location
+    register_text_kind
+    error = assert_raise(ParameterException) do
+      @agent.resolve_path("text", "hello.txt", "missing")
+    end
+    assert_match(/Location "missing" is not supported by path kind text/, error.message)
+  end
+
+  def test_error_matrix_location_without_configured_root
+    @agent.register_path_kind(
+      "orphan", "locations" => ["tmp", "custom"], "default_location" => "tmp",
+      "roots" => {"tmp" => @tmpdir}
+    )
+
+    error = assert_raise(ParameterException) do
+      @agent.path_read("kind" => "orphan", "path" => "hello.txt",
+                       "location" => "custom")
+    end
+    assert_match(/No root configured for orphan at location custom/, error.message)
+  end
+
+  def test_error_matrix_missing_required_argument
+    register_text_kind
+    error = assert_raise(ParameterException) do
+      @agent.path_read("kind" => "text")
+    end
+    assert_match(/Missing required argument "path"/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_write("kind" => "text", "path" => "hello.txt")
+    end
+    assert_match(/Missing required argument "content"/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_edit("kind" => "text", "path" => "hello.txt")
+    end
+    assert_match(/Missing required argument "selector"/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_move("kind" => "text", "path" => "hello.txt")
+    end
+    assert_match(/Missing required argument "destination"/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_rename("kind" => "text", "path" => "hello.txt")
+    end
+    assert_match(/Missing required argument "name"/, error.message)
+  end
+
+  def test_error_matrix_invalid_selector
+    register_text_kind
+
+    error = assert_raise(ParameterException) do
+      @agent.path_apply_selector("hello world", {"type" => "unknown"}, "x")
+    end
+    assert_match(/Unknown selector type "unknown"/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_apply_selector("hello world", {"start" => 1, "end" => 2}, "x")
+    end
+    assert_match(/Invalid selector: missing key "type"/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_apply_selector("hello world", nil, "x")
+    end
+    assert_match(/Invalid selector: expected a mapping/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_apply_selector("hello world", {"type" => "lines"}, "x")
+    end
+    assert_match(/Invalid selector: missing key "start"/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_apply_selector("hello world", {"type" => "regexp"}, "x")
+    end
+    assert_match(/Invalid selector: missing key "pattern"/, error.message)
+  end
+
+  def test_error_matrix_malformed_selector_values_reject_and_never_mutate
+    register_text_kind
+    @agent.path_write(
+      "kind" => "text", "path" => "keep.txt", "content" => "a\nb\nc\n"
+    )
+    target = File.join(@tmpdir, "keep.txt")
+    before = File.read(target)
+
+    malformed = [
+      ["nil start", {"type" => "lines", "start" => nil, "end" => 1}],
+      ["nil end", {"type" => "lines", "start" => 0, "end" => nil}],
+      ["string start", {"type" => "lines", "start" => "1", "end" => 2}],
+      ["float start", {"type" => "lines", "start" => 1.5, "end" => 2}],
+      ["start beyond document", {"type" => "lines", "start" => 9, "end" => 10}],
+      ["start > end", {"type" => "lines", "start" => 2, "end" => 1}],
+      ["chars nil index", {"type" => "chars", "start" => nil, "end" => 2}],
+      ["chars string index", {"type" => "chars", "start" => "0", "end" => 2}],
+      ["chars out of range", {"type" => "chars", "start" => 99, "end" => 120}],
+      ["invalid regexp", {"type" => "regexp", "pattern" => "["}]
+    ]
+
+    malformed.each do |label, selector|
+      error = assert_raise(ParameterException) do
+        @agent.path_edit(
+          "kind" => "text", "path" => "keep.txt",
+          "selector" => selector, "replacement" => "z"
+        )
+      end
+      assert_equal "a\nb\nc\n", File.read(target),
+                   "#{label}: file must stay byte-identical"
+    end
+
+    assert_equal before, File.read(target)
+  end
+
+  def test_error_matrix_path_outside_grant
+    register_text_kind
+    outside = Dir.mktmpdir("path-outside")
+    target = File.join(outside, "escape.txt")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_write("kind" => "text", "path" => target, "content" => "no")
+    end
+    assert_equal "Path access denied by sandbox (outside_grants)", error.message
+    assert_false File.exist?(target)
+  ensure
+    FileUtils.remove_entry(outside) if outside && File.exist?(outside)
+  end
+
+  def test_error_matrix_unsupported_operation
+    register_text_kind("text", "validate" => false, "test" => false,
+                       "promote" => false, "rename" => false)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_validate("kind" => "text", "path" => "hello.txt")
+    end
+    assert_match(/Path kind text does not support validate/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "text", "path" => "hello.txt")
+    end
+    assert_match(/Path kind text does not support promote/, error.message)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_rename("kind" => "text", "path" => "hello.txt", "name" => "x.txt")
+    end
+    assert_match(/Path kind text does not support rename/, error.message)
+  end
+
+  # ------------------------------------------------------------------
+  # Promotion (ENGINE-CONTROLLED)
+  #
+  # The engine resolves the destination from a declarative spec, authorizes
+  # BOTH endpoints, enforces no-clobber, and performs the move itself via
+  # path_move_target.  A kind callback is never the writer.  Optional
+  # post-move behavior hooks through "promotion_post_move".  Every
+  # rejection case asserts that no filesystem mutation happened (source
+  # unchanged, destination absent).
+  # ------------------------------------------------------------------
+
+  def register_promotable_kind(overrides = {})
+    tmp_root = File.join(@tmpdir, "ptmp")
+    project_root = File.join(@tmpdir, "pproject")
+    outside_root = File.join(@tmpdir, "poutside")
+    [tmp_root, project_root, outside_root].each { |dir| FileUtils.mkdir_p(dir) }
+
+    definition = {
+      "locations" => %w[tmp project],
+      "default_location" => "tmp",
+      "roots" => {"tmp" => tmp_root, "project" => project_root},
+      "capabilities" => {"promote" => true},
+      "promotion_destination" => {"location" => "project"}
+    }.merge(overrides)
+
+    @agent.register_path_kind("view", definition)
+    definition
+  end
+
+  def test_promotion_moves_content_to_project_location
+    definition = register_promotable_kind
+    tmp_root = definition["roots"]["tmp"]
+    project_root = definition["roots"]["project"]
+    File.write(File.join(tmp_root, "show.slim"), "content h1 Hello\n")
+
+    result = @agent.path_promote("kind" => "view", "path" => "show.slim")
+
+    assert_equal true, result["promoted"]
+    assert_equal File.join(project_root, "show.slim"), result["promotion_target"]
+    assert_equal({"location" => "project", "path" => "show.slim"},
+                 result["destination"])
+    assert_equal "content h1 Hello\n", File.read(File.join(project_root, "show.slim"))
+    assert !File.exist?(File.join(tmp_root, "show.slim"))
+  end
+
+  def test_promotion_denies_source_outside_roots
+    definition = register_promotable_kind
+    outside = File.join(@tmpdir, "poutside", "rogue.txt")
+    File.write(outside, "rogue")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "view", "path" => outside)
+    end
+    assert_match(/Path access denied by sandbox/, error.message)
+
+    assert_equal "rogue", File.read(outside)
+    assert !File.exist?(File.join(definition["roots"]["project"], "rogue.txt"))
+  end
+
+  def test_promotion_denies_destination_location_without_configured_root
+    definition = register_promotable_kind(
+      "locations" => %w[tmp elsewhere],
+      "promotion_destination" => {"location" => "elsewhere"}
+    )
+    File.write(File.join(definition["roots"]["tmp"], "show.slim"), "content")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "view", "path" => "show.slim")
+    end
+    assert_match(/No root configured for view at location elsewhere/, error.message)
+
+    assert File.exist?(File.join(definition["roots"]["tmp"], "show.slim"))
+    assert !File.exist?(File.join(@tmpdir, "elsewhere", "show.slim"))
+  end
+
+  def test_promotion_denies_destination_traversal
+    definition = register_promotable_kind(
+      "promotion_destination" => {"location" => "project", "path" => "../escape.txt"}
+    )
+    source = File.join(definition["roots"]["tmp"], "show.slim")
+    File.write(source, "content")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "view", "path" => "show.slim")
+    end
+    assert_match(/Path access denied by sandbox/, error.message)
+
+    assert File.exist?(source)
+    assert !File.exist?(File.join(@tmpdir, "escape.txt"))
+  end
+
+  def test_promotion_denies_absolute_destination_outside_roots
+    definition = register_promotable_kind(
+      "promotion_destination" => {
+        "location" => "project",
+        "path" => File.join(@tmpdir, "poutside", "absolute.txt")
+      }
+    )
+    source = File.join(definition["roots"]["tmp"], "show.slim")
+    File.write(source, "content")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "view", "path" => "show.slim")
+    end
+    assert_match(/Path access denied by sandbox/, error.message)
+
+    assert File.exist?(source)
+    assert !File.exist?(File.join(@tmpdir, "poutside", "absolute.txt"))
+  end
+
+  def test_promotion_denies_symlinked_destination_escape
+    definition = register_promotable_kind(
+      "promotion_destination" => {"location" => "project", "path" => "link.slim"}
+    )
+    source = File.join(definition["roots"]["tmp"], "show.slim")
+    File.write(source, "content")
+    escape_target = File.join(@tmpdir, "poutside", "escape_target.txt")
+    File.symlink(escape_target, File.join(definition["roots"]["project"], "link.slim"))
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "view", "path" => "show.slim")
+    end
+    assert_match(/Path access denied by sandbox/, error.message)
+
+    assert File.exist?(source)
+    assert !File.exist?(escape_target)
+  end
+
+  def test_promotion_denies_existing_destination_by_default
+    definition = register_promotable_kind
+    source = File.join(definition["roots"]["tmp"], "show.slim")
+    File.write(source, "new content")
+    destination = File.join(definition["roots"]["project"], "show.slim")
+    File.write(destination, "old content")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "view", "path" => "show.slim")
+    end
+    assert_match(/Promotion destination already exists/, error.message)
+
+    assert_equal "old content", File.read(destination)
+    assert_equal "new content", File.read(source)
+  end
+
+  def test_promotion_overwrite_replaces_existing_destination
+    definition = register_promotable_kind
+    source = File.join(definition["roots"]["tmp"], "show.slim")
+    File.write(source, "new content")
+    destination = File.join(definition["roots"]["project"], "show.slim")
+    File.write(destination, "old content")
+
+    result = @agent.path_promote(
+      "kind" => "view", "path" => "show.slim", "overwrite" => true
+    )
+
+    assert_equal true, result["promoted"]
+    assert_equal "new content", File.read(destination)
+    assert !File.exist?(source)
+  end
+
+  def test_promotion_rejects_invalid_destination_specification
+    definition = register_promotable_kind("promotion_destination" => 42)
+    File.write(File.join(definition["roots"]["tmp"], "show.slim"), "content")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "view", "path" => "show.slim")
+    end
+    assert_match(/Invalid promotion destination for path kind view/, error.message)
+
+    assert File.exist?(File.join(definition["roots"]["tmp"], "show.slim"))
+    assert !File.exist?(File.join(definition["roots"]["project"], "show.slim"))
+  end
+
+  def test_promotion_callable_destination_spec_is_rejected
+    # A Callable promotion destination would have to run BEFORE the
+    # destination is authorized; a side-effecting callable could mutate
+    # anywhere.  The declarative-only contract rejects it up front.
+    called = false
+    definition = register_promotable_kind(
+      "promotion_destination" => lambda do |_agent, _path, _location, _args|
+        called = true
+        {"location" => "project"}
+      end
+    )
+    File.write(File.join(definition["roots"]["tmp"], "show.slim"), "content")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "view", "path" => "show.slim")
+    end
+    assert_match(/Invalid promotion destination for path kind view/, error.message)
+    assert !called
+
+    assert File.exist?(File.join(definition["roots"]["tmp"], "show.slim"))
+    assert !File.exist?(File.join(definition["roots"]["project"], "show.slim"))
+  end
+
+  def test_promotion_string_destination_spec_selects_location
+    definition = register_promotable_kind("promotion_destination" => "project")
+    File.write(File.join(definition["roots"]["tmp"], "show.slim"), "content")
+
+    result = @agent.path_promote("kind" => "view", "path" => "show.slim")
+
+    assert_equal({"location" => "project", "path" => "show.slim"},
+                 result["destination"])
+    assert File.exist?(File.join(definition["roots"]["project"], "show.slim"))
+    assert !File.exist?(File.join(definition["roots"]["tmp"], "show.slim"))
+  end
+
+  def test_promotion_destination_path_renames_target
+    definition = register_promotable_kind(
+      "promotion_destination" => {"location" => "project", "path" => "release.slim"}
+    )
+    File.write(File.join(definition["roots"]["tmp"], "show.slim"), "content")
+
+    result = @agent.path_promote("kind" => "view", "path" => "show.slim")
+
+    assert_equal File.join(definition["roots"]["project"], "release.slim"),
+                 result["promotion_target"]
+    assert File.exist?(File.join(definition["roots"]["project"], "release.slim"))
+    assert !File.exist?(File.join(definition["roots"]["tmp"], "show.slim"))
+  end
+
+  def test_promotion_missing_source_is_rejected_before_anything_moves
+    definition = register_promotable_kind
+
+    error = assert_raise(ParameterException) do
+      @agent.path_promote("kind" => "view", "path" => "ghost.slim")
+    end
+    assert_match(/Path does not exist or is not readable/, error.message)
+
+    assert !File.exist?(File.join(definition["roots"]["project"], "ghost.slim"))
+  end
+
+  # ------------------------------------------------------------------
+  # Selector semantics regression matrix (lines + chars)
+  #
+  # Lines contract: 0-based start, exclusive end; a line includes its
+  # terminator; untouched lines byte-identical; final newline preserved IFF
+  # it existed before the edit; empty replacement deletes the span.
+  # ------------------------------------------------------------------
+
+  def write_selector_fixture(content)
+    register_text_kind
+    @agent.path_write(
+      "kind" => "text", "path" => "selector.txt", "content" => content
+    )
+  end
+
+  def edit_lines(content, start, finish, replacement)
+    write_selector_fixture(content)
+    result = @agent.path_edit(
+      "kind" => "text",
+      "path" => "selector.txt",
+      "selector" => {"type" => "lines", "start" => start, "end" => finish},
+      "replacement" => replacement
+    )
+    [result["content"], File.read(File.join(@tmpdir, "selector.txt"))]
+  end
+
+  def edit_chars(content, start, finish, replacement)
+    write_selector_fixture(content)
+    result = @agent.path_edit(
+      "kind" => "text",
+      "path" => "selector.txt",
+      "selector" => {"type" => "chars", "start" => start, "end" => finish},
+      "replacement" => replacement
+    )
+    [result["content"], File.read(File.join(@tmpdir, "selector.txt"))]
+  end
+
+  def assert_edit_result(expected, got)
+    reported, on_disk = got
+    assert_equal expected, reported
+    assert_equal expected, on_disk
+  end
+
+  def test_lines_selector_first_middle_final_line
+    assert_edit_result "A\ntwo\nthree\n", edit_lines("one\ntwo\nthree\n", 0, 1, "A")
+    assert_edit_result "one\nX\nthree\n", edit_lines("one\ntwo\nthree\n", 1, 2, "X")
+    assert_edit_result "one\ntwo\nZ\n", edit_lines("one\ntwo\nthree\n", 2, 3, "Z")
+  end
+
+  def test_lines_selector_final_line_keeps_missing_final_newline
+    assert_edit_result "one\ntwo\nZ", edit_lines("one\ntwo\nthree", 2, 3, "Z")
+    assert_edit_result "one\nX\nthree", edit_lines("one\ntwo\nthree", 1, 2, "X")
+  end
+
+  def test_lines_selector_single_line_file_with_and_without_final_newline
+    assert_edit_result "new\n", edit_lines("only\n", 0, 1, "new")
+    assert_edit_result "new", edit_lines("only", 0, 1, "new")
+  end
+
+  def test_lines_selector_replacement_without_trailing_newline_is_corruption_fixed
+    assert_edit_result "one\nX\nthree\n", edit_lines("one\ntwo\nthree\n", 1, 2, "X")
+    assert_edit_result "a\nchanged\nc\n", edit_lines("a\nb\nc\n", 1, 2, "changed")
+  end
+
+  def test_lines_selector_replacement_with_trailing_newline_is_not_doubled
+    assert_edit_result "a\nchanged\nc\n", edit_lines("a\nb\nc\n", 1, 2, "changed\n")
+  end
+
+  def test_lines_selector_eof_trailing_newline_in_replacement_is_stripped
+    # Defect 2: the original has no final newline, so the replacement's
+    # trailing newline must NOT introduce one at the EOF boundary.
+    assert_edit_result "a\nx", edit_lines("a\nb", 1, 2, "x\n")
+  end
+
+  def test_lines_selector_eof_counterpart_keeps_final_newline
+    assert_edit_result "a\nx\n", edit_lines("a\nb\n", 1, 2, "x\n")
+  end
+
+  def test_lines_selector_eof_repeated_trailing_newlines_are_stripped
+    assert_edit_result "a\ny\nz", edit_lines("a\nb\nc", 1, 3, "y\nz\n\n")
+  end
+
+  def test_lines_selector_interior_repeated_newlines_collapse_to_one
+    assert_edit_result "x\nb\nc", edit_lines("a\nb\nc", 0, 1, "x\n\n")
+  end
+
+  def test_lines_selector_eof_multiline_replacement_without_final_newline
+    assert_edit_result "a\ny\nz", edit_lines("a\nb\nc", 1, 3, "y\nz")
+    assert_edit_result "a\ny\nz\n", edit_lines("a\nb\nc\n", 1, 3, "y\nz")
+  end
+
+  def test_lines_selector_eof_more_lines_than_span
+    assert_edit_result "a\ny\nz\nw\nq", edit_lines("a\nb\nc", 1, 3, "y\nz\nw\nq")
+  end
+
+  def test_lines_selector_eof_fewer_lines_than_span
+    assert_edit_result "a\ny\nd", edit_lines("a\nb\nc\nd", 1, 3, "y")
+  end
+
+  def test_lines_selector_delete_final_line_at_eof
+    assert_edit_result "a\nb", edit_lines("a\nb\nc", 2, 3, "")
+    assert_edit_result "a\nb\n", edit_lines("a\nb\nc\n", 2, 3, "")
+  end
+
+  def test_lines_selector_delete_interior_line
+    assert_edit_result "a\nc", edit_lines("a\nb\nc", 1, 2, "")
+  end
+
+  def test_lines_selector_replace_entire_file
+    assert_edit_result "z", edit_lines("a\nb\nc", 0, 3, "z")
+    assert_edit_result "z\n", edit_lines("a\nb\nc\n", 0, 3, "z\n")
+    assert_edit_result "", edit_lines("a\nb\nc\n", 0, 3, "")
+  end
+
+  def test_lines_selector_one_line_file_with_and_without_final_newline
+    assert_edit_result "new", edit_lines("only", 0, 1, "new")
+    assert_edit_result "new\n", edit_lines("only\n", 0, 1, "new\n")
+  end
+
+  def test_lines_selector_multiline_replacement_spanning_two_lines
+    assert_edit_result "a\nx\ny\nz\nd\n", edit_lines("a\nb\nc\nd\n", 1, 3, "x\ny\nz")
+  end
+
+  def test_lines_selector_replacement_with_more_lines_than_span
+    assert_edit_result "a\np\nq\nr\nc\n", edit_lines("a\nb\nc\n", 1, 2, "p\nq\nr")
+  end
+
+  def test_lines_selector_replacement_with_fewer_lines_than_span
+    assert_edit_result "a\nsingle\nd\n", edit_lines("a\nb\nc\nd\n", 1, 3, "single")
+  end
+
+  def test_lines_selector_empty_replacement_deletes_span
+    assert_edit_result "a\nc\n", edit_lines("a\nb\nc\n", 1, 2, "")
+  end
+
+  def test_lines_selector_end_clamped_to_last_line
+    assert_edit_result "a\nb\nc\nappend\n", edit_lines("a\nb\nc\n", 3, 5, "append")
+  end
+
+  def test_lines_selector_rejects_start_beyond_last_line
+    register_text_kind
+    @agent.path_write(
+      "kind" => "text", "path" => "selector.txt", "content" => "a\nb\n"
+    )
+
+    error = assert_raise(ParameterException) do
+      @agent.path_edit(
+        "kind" => "text",
+        "path" => "selector.txt",
+        "selector" => {"type" => "lines", "start" => 5, "end" => 6},
+        "replacement" => "x"
+      )
+    end
+    assert_match(/is beyond the last index 2/, error.message)
+  end
+
+  def test_lines_selector_rejects_negative_start
+    error = assert_raise(ParameterException) do
+      @agent.path_apply_selector(
+        "a\nb\n", {"type" => "lines", "start" => -1, "end" => 1}, "x"
+      )
+    end
+    assert_match(/must be >= 0, got -1/, error.message)
+  end
+
+  def test_chars_selector_plain_offset_length
+    assert_edit_result "hello Scout", edit_chars("hello world", 6, 11, "Scout")
+  end
+
+  def test_chars_selector_to_end_of_content
+    assert_edit_result "hello", edit_chars("hello world", 5, 11, "")
+  end
+
+  def test_chars_selector_empty_replacement_deletes_exact_bytes
+    assert_edit_result "helo", edit_chars("hello", 3, 4, "")
+  end
+
+  def test_chars_selector_zero_length_inserts
+    assert_edit_result "aXbc", edit_chars("abc", 1, 1, "X")
+  end
+
+  def test_chars_selector_preserves_untouched_prefix_and_suffix
+    assert_edit_result "aaXYbb", edit_chars("aaaabb", 2, 4, "XY")
+    assert_edit_result "aaaab\nb\n", edit_chars("aaaab\nb\n", 0, 0, "")
+  end
+
+  def test_chars_selector_multibyte_character_boundaries
+    # String#[]= operates on characters, not bytes; boundaries are safe.
+    assert_edit_result "hÉllo", edit_chars("héllo", 1, 2, "É")
+  end
+
+  # ------------------------------------------------------------------
+  # Registry authority (single instance registry)
+  # ------------------------------------------------------------------
+
+  def test_registry_starts_empty_on_fresh_agent
+    agent = LLM.agent
+    assert_equal({}, agent.path_kind_registry)
+  end
+
+  def test_registry_registration_is_agent_local
+    first = LLM.agent
+    second = LLM.agent
+
+    first.register_path_kind(
+      "isolated",
+      "description" => "Registered only on one agent",
+      "locations" => ["project"],
+      "roots" => {"project" => @tmpdir}
+    )
+
+    assert first.path_kind_registry.key?("isolated")
+    refute second.path_kind_registry.key?("isolated")
+  end
+
+  def test_registry_has_no_class_level_surface_left
+    assert !LLM::Agent.respond_to?(:register_path_kind)
+    assert !LLM::Agent.const_defined?(:PATH_KINDS, false)
+  end
+
+  def test_registry_path_kinds_tool_reflects_instance_registrations
+    register_text_kind
+
+    kinds = @agent.path_kinds({})
+
+    assert kinds.key?("text")
+    assert_equal "Test text paths", kinds["text"]["description"]
+  end
+
+  # ------------------------------------------------------------------
+  # smoke operation surface
+  # ------------------------------------------------------------------
+
+  def test_smoke_tool_absent_when_no_kind_enables_smoke
+    register_text_kind
+
+    tools = @agent.instance_variable_get(:@other_options)[:tools]
+
+    assert !tools.key?("path_smoke")
+  end
+
+  def test_smoke_tool_present_when_kind_enables_smoke
+    register_text_kind("smoke", {"smoke" => true})
+
+    tools = @agent.instance_variable_get(:@other_options)[:tools]
+
+    assert tools.key?("path_smoke")
+    assert !tools.key?("path_test")
+  end
+
+  def test_smoke_operation_runs_kind_callback
+    seen = []
+    @agent.register_path_kind(
+      "view",
+      "description" => "Smoke views",
+      "locations" => ["project"],
+      "roots" => {"project" => @tmpdir},
+      "capabilities" => {"smoke" => true},
+      "smoke" => ->(agent, path, location, args) { seen << [path, location, args["kind"]] }
+    )
+
+    @agent.path_smoke("kind" => "view", "path" => "show.slim")
+
+    assert_equal [["show.slim", "project", "view"]], seen
+  end
+
+  def test_smoke_is_denied_outside_grants
+    called = false
+    outside = Dir.mktmpdir("path-outside")
+    @agent.register_path_kind(
+      "smoke", "locations" => ["tmp"], "default_location" => "tmp",
+      "roots" => {"tmp" => @tmpdir}, "capabilities" => {"smoke" => true},
+      "resolve" => ->(_agent, _path, _location) { outside },
+      "smoke" => ->(*) { called = true }
+    )
+
+    assert_raise(ParameterException) do
+      @agent.path_smoke("kind" => "smoke", "path" => "item")
+    end
+    assert_false called
+  ensure
+    FileUtils.remove_entry(outside) if outside && File.exist?(outside)
+  end
+
+  def test_smoke_and_test_are_independently_enabled
+    @agent.register_path_kind(
+      "both",
+      "description" => "Both smoke and test",
+      "locations" => ["project"],
+      "roots" => {"project" => @tmpdir},
+      "capabilities" => {"smoke" => true, "test" => true}
+    )
+
+    tools = @agent.instance_variable_get(:@other_options)[:tools]
+
+    assert tools.key?("path_smoke")
+    assert tools.key?("path_test")
+    assert !tools.key?("path_validate")
+  end
+  # ------------------------------------------------------------------
+
+  # ------------------------------------------------------------------
+  # Step 7 — edit-operation distinctness and compatibility
+  # ------------------------------------------------------------------
+
+  # Compare a built-in tool schema ignoring the kind property, which
+  # legitimately grows as kinds register (enum, supported-kinds
+  # description). Everything else must be identical.
+  def edit_schema_without_kind_enum(schema)
+    copy = Marshal.load(Marshal.dump(schema))
+    props = copy[:parameters][:properties]
+    props.delete("kind") if props["kind"]
+    props.delete(:kind) if props[:kind]
+    fn = copy[:function] and fn[:parameters][:properties].delete(:kind) rescue nil
+    copy
+  end
+
+  def test_edit_schema_unchanged_by_edit_override_registration
+    register_text_kind
+    before = edit_schema_without_kind_enum(
+      @agent.instance_variable_get(:@other_options)[:tools]["path_edit"][1]
+    )
+
+    @agent.register_path_kind(
+      "override_kind",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {},
+      "overrides" => {
+        "edit" => ->(content, args) { content }
+      }
+    )
+
+    after = edit_schema_without_kind_enum(
+      @agent.instance_variable_get(:@other_options)[:tools]["path_edit"][1]
+    )
+    assert_equal before, after
+  end
+
+  def test_edit_schema_unchanged_by_custom_operation_registration
+    register_text_kind
+    before = edit_schema_without_kind_enum(
+      @agent.instance_variable_get(:@other_options)[:tools]["path_edit"][1]
+    )
+
+    @agent.register_path_kind(
+      "specialized",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "precise_edit" => {
+          "description" => "Replace exact occurrences of old with new",
+          "parameters" => {
+            "properties" => {
+              "old_text" => {"type" => "string"},
+              "new_text" => {"type" => "string"},
+              "count" => {"type" => "integer"}
+            },
+            "required" => %w[old_text new_text]
+          },
+          "implementation" => ->(content, args) { content },
+          "authorization" => :write,
+          "type" => :content
+        }
+      }
+    )
+
+    after = edit_schema_without_kind_enum(
+      @agent.instance_variable_get(:@other_options)[:tools]["path_edit"][1]
+    )
+    assert_equal before, after
+  end
+
+  def test_edit_schema_matches_pre_architecture_reference
+    register_text_kind
+    # Reference recorded in tmp/path_recon.md (Phase-0 baseline and
+    # Step-7 source comparison): HEAD's edit schema block is byte
+    # identical to the live one (verified by diff); assert the exact
+    # public shape here so future drift fails loudly.
+    schema = edit_schema_without_kind_enum(
+      @agent.instance_variable_get(:@other_options)[:tools]["path_edit"][1]
+    )
+    props = schema[:parameters][:properties]
+    assert_equal %w[path location selector replacement], props.keys
+    assert_equal "string", props[:path][:type]
+    assert_equal "string", props[:location][:type]
+    assert_equal %w[lines chars regexp], props[:selector][:properties][:type][:enum]
+    assert_equal "integer", props[:selector][:properties][:start][:type]
+    assert_equal "integer", props[:selector][:properties][:end][:type]
+    assert_equal "string", props[:selector][:properties][:pattern][:type]
+    assert_equal "string", props[:replacement][:type]
+    assert_equal "Replacement text.", props[:replacement][:description]
+    assert_equal "Edit a textual Path using a line range, character range, or regular expression selector.",
+      schema[:description]
+  end
+
+  def test_precise_edit_custom_operation_full_path
+    register_text_kind
+    edits = []
+    @agent.register_path_kind(
+      "special",
+      "roots" => {"project" => @tmpdir},
+      "operations" => {
+        "precise_edit" => {
+          "description" => "Replace exact occurrences",
+          "parameters" => {
+            "properties" => {
+              "old_text" => {"type" => "string"},
+              "new_text" => {"type" => "string"},
+              "count" => {"type" => "integer"}
+            },
+            "required" => %w[old_text new_text]
+          },
+          "implementation" => ->(content, args) {
+            edits << args
+            content.gsub(args["old_text"], args["new_text"])
+          },
+          "type" => :content
+        }
+      }
+    )
+
+    tools = @agent.instance_variable_get(:@other_options)[:tools]
+    assert tools.key?("precise_edit")
+    assert_equal 1, tools.keys.count { |k| k == "precise_edit" }
+    params = tools["precise_edit"][1][:parameters][:properties]
+    assert_equal %w[kind path location old_text new_text count], params.keys
+
+    @agent.path_write(
+      "kind" => "special", "path" => "notes.txt", "content" => "one two one\n"
+    )
+    result = @agent.path_dispatch(
+      kind: "special", operation: "precise_edit",
+      "path" => "notes.txt", "old_text" => "one", "new_text" => "1"
+    )
+    assert_equal "1 two 1\n", File.read(File.join(@tmpdir, "notes.txt"))
+    assert edits.any?, "callback must run after authorization"
+
+    # Global edit schema untouched by the custom registration
+    edit_after = edit_schema_without_kind_enum(
+      @agent.instance_variable_get(:@other_options)[:tools]["path_edit"][1]
+    )
+    assert_equal %w[path location selector replacement],
+      edit_after[:parameters][:properties].keys
+  end
+
+  # Step 6: patch operation
+  # ------------------------------------------------------------------
+
+  def register_patchy_kind(name = "text", capabilities = {})
+    @agent.register_path_kind(
+      name,
+      "roots" => {
+        "project" => @tmpdir,
+        "tmp" => File.join(@tmpdir, "tmp")
+      },
+      "capabilities" => capabilities
+    )
+  end
+
+  def simple_patch(original_line, replacement_line, line = 1)
+    <<~PATCH
+      --- a/f.txt
+      +++ b/f.txt
+      @@ -#{line} +#{line} @@
+      -#{original_line}
+      +#{replacement_line}
+    PATCH
+  end
+
+  def test_patch_applies_simple_diff_and_preserves_untouched_bytes
+    register_patchy_kind("text", {"patch" => true})
+    @agent.path_write("kind" => "text", "path" => "f.txt",
+                      "content" => "one\ntwo\nthree\n")
+    result = @agent.path_patch(
+      "kind" => "text", "path" => "f.txt",
+      "patch" => simple_patch("two", "TWO", 2)
+    )
+    assert_equal "one\nTWO\nthree\n", result["content"]
+    assert_equal "one\nTWO\nthree\n", File.read(File.join(@tmpdir, "f.txt"))
+  end
+
+  def test_patch_context_mismatch_writes_nothing
+    register_patchy_kind("text", {"patch" => true})
+    @agent.path_write("kind" => "text", "path" => "f.txt", "content" => "aaa\nbbb\n")
+    assert_raise(ParameterException) do
+      @agent.path_patch("kind" => "text", "path" => "f.txt",
+                        "patch" => simple_patch("zzz", "y"))
+    end
+    assert_equal "aaa\nbbb\n", File.read(File.join(@tmpdir, "f.txt"))
+  end
+
+  def test_patch_malformed_text_rejected_before_mutation
+    register_patchy_kind("text", {"patch" => true})
+    @agent.path_write("kind" => "text", "path" => "f.txt", "content" => "a\n")
+    ["", "not a diff", "--- a/f.txt\n+++ b/f.txt\ngarbage\n"].each do |bad|
+      exception = assert_raise(ParameterException) do
+        @agent.path_patch("kind" => "text", "path" => "f.txt", "patch" => bad)
+      end
+      assert exception.message.length > 0
+    end
+    assert_equal "a\n", File.read(File.join(@tmpdir, "f.txt"))
+  end
+
+  def test_patch_multi_file_rejected_before_mutation
+    register_patchy_kind("text", {"patch" => true})
+    @agent.path_write("kind" => "text", "path" => "f.txt", "content" => "a\n")
+    multi = <<~PATCH
+      --- a/f.txt
+      +++ b/f.txt
+      @@ -1 +1 @@
+      -a
+      +b
+      --- a/other.txt
+      +++ b/other.txt
+      @@ -1 +1 @@
+      -x
+      +y
+    PATCH
+    exception = assert_raise(ParameterException) do
+      @agent.path_patch("kind" => "text", "path" => "f.txt", "patch" => multi)
+    end
+    assert exception.message.include?("multi-file"), exception.message
+    assert_equal "a\n", File.read(File.join(@tmpdir, "f.txt"))
+    refute File.exist?(File.join(@tmpdir, "other.txt"))
+  end
+
+  def test_patch_header_filename_cannot_redirect_target
+    register_patchy_kind("text", {"patch" => true})
+    @agent.path_write("kind" => "text", "path" => "real.txt", "content" => "a\n")
+    result = @agent.path_patch(
+      "kind" => "text", "path" => "real.txt",
+      "patch" => simple_patch("a", "b").gsub("f.txt", "evil.txt")
+    )
+    assert_equal "b\n", result["content"]
+    assert_equal "b\n", File.read(File.join(@tmpdir, "real.txt"))
+    refute File.exist?(File.join(@tmpdir, "evil.txt"))
+  end
+
+  def test_patch_multi_hunk_is_all_or_nothing
+    register_patchy_kind("text", {"patch" => true})
+    @agent.path_write("kind" => "text", "path" => "f.txt",
+                      "content" => "one\ntwo\nthree\nfour\nfive\n")
+    patch = <<~PATCH
+      --- a/f.txt
+      +++ b/f.txt
+      @@ -1 +1 @@
+      -one
+      +ONE
+      @@ -3 +3 @@
+      -NOPE
+      +X
+    PATCH
+    assert_raise(ParameterException) do
+      @agent.path_patch("kind" => "text", "path" => "f.txt", "patch" => patch)
+    end
+    assert_equal "one\ntwo\nthree\nfour\nfive\n",
+                 File.read(File.join(@tmpdir, "f.txt"))
+  end
+
+  def test_patch_final_newline_preserved_in_both_directions
+    register_patchy_kind("text", {"patch" => true})
+
+    @agent.path_write("kind" => "text", "path" => "plain.txt", "content" => "a\nb")
+    @agent.path_patch("kind" => "text", "path" => "plain.txt",
+                      "patch" => simple_patch("b", "x", 2))
+    assert_equal "a\nx", File.read(File.join(@tmpdir, "plain.txt"))
+
+    @agent.path_write("kind" => "text", "path" => "term.txt", "content" => "a\nb\n")
+    @agent.path_patch("kind" => "text", "path" => "term.txt",
+                      "patch" => simple_patch("b", "x", 2))
+    assert_equal "a\nx\n", File.read(File.join(@tmpdir, "term.txt"))
+  end
+
+  def test_patch_no_newline_marker_adds_and_removes_final_newline
+    register_patchy_kind("text", {"patch" => true})
+
+    @agent.path_write("kind" => "text", "path" => "gain.txt", "content" => "a\nb")
+    add_nl = <<~PATCH
+      --- a/gain.txt
+      +++ b/gain.txt
+      @@ -2 +2 @@
+      -b
+      \\ No newline at end of file
+      +b
+    PATCH
+    @agent.path_patch("kind" => "text", "path" => "gain.txt", "patch" => add_nl)
+    assert_equal "a\nb\n", File.read(File.join(@tmpdir, "gain.txt"))
+
+    @agent.path_write("kind" => "text", "path" => "drop.txt", "content" => "a\nb\n")
+    drop_nl = <<~PATCH
+      --- a/drop.txt
+      +++ b/drop.txt
+      @@ -2 +2 @@
+      -b
+      +b
+      \\ No newline at end of file
+    PATCH
+    @agent.path_patch("kind" => "text", "path" => "drop.txt", "patch" => drop_nl)
+    assert_equal "a\nb", File.read(File.join(@tmpdir, "drop.txt"))
+  end
+
+  def test_patch_default_off_and_capability_enables
+    register_patchy_kind("text")
+    @agent.path_write("kind" => "text", "path" => "f.txt", "content" => "a\n")
+    assert_equal false, @agent.path_operation_support?("text", "patch")
+    assert_raise(ParameterException) do
+      @agent.path_patch("kind" => "text", "path" => "f.txt",
+                        "patch" => simple_patch("a", "b"))
+    end
+
+    register_patchy_kind("patchy", {"patch" => true})
+    assert_equal true, @agent.path_operation_support?("patchy", "patch")
+    @agent.path_write("kind" => "patchy", "path" => "f.txt", "content" => "a\n")
+    @agent.path_patch("kind" => "patchy", "path" => "f.txt",
+                      "patch" => simple_patch("a", "b"))
+    assert_equal "b\n", File.read(File.join(@tmpdir, "f.txt"))
+  end
+
+  def test_patch_content_override_runs_with_authorization
+    register_patchy_kind("text", {"patch" => true})
+    @agent.register_path_kind(
+      "fancy",
+      "roots" => {"project" => @tmpdir},
+      "capabilities" => {"patch" => true},
+      "overrides" => {
+        "patch" => ->(content, args) { "OVERRIDDEN:#{content}" }
+      }
+    )
+    @agent.path_write("kind" => "fancy", "path" => "f.txt", "content" => "a\n")
+    result = @agent.path_patch(
+      "kind" => "fancy", "path" => "f.txt", "patch" => simple_patch("a", "b")
+    )
+    assert_equal "OVERRIDDEN:a\n", result["content"]
+    assert_equal "OVERRIDDEN:a\n", File.read(File.join(@tmpdir, "f.txt"))
+  end
+
+  def test_patch_on_unauthorized_target_writes_nothing
+    @agent.register_path_kind(
+      "locked",
+      "roots" => {"project" => "/nonexistent-root-xyz"},
+      "capabilities" => {"patch" => true}
+    )
+    assert_raise(ParameterException) do
+      @agent.path_patch("kind" => "locked", "path" => "f.txt",
+                        "patch" => simple_patch("a", "b"))
+    end
+    refute File.exist?("/nonexistent-root-xyz/f.txt")
+  end
+
+
 end

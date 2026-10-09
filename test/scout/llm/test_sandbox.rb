@@ -52,7 +52,7 @@ class TestSandbox < Test::Unit::TestCase
   end
 
   def test_relative_paths_require_an_explicit_base
-    assert_raise(ArgumentError) do
+    assert_raise(ParameterException) do
       LLM::Sandbox.authorize_path('root/nested', root: File.join(@root, 'root'), mode: :write)
     end
 
