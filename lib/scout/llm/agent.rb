@@ -118,16 +118,32 @@ module LLM
           end
         else
 
-          workflows = Chat.find_role(messages, :tool).collect{|m| m[:content].split(' ').first }.uniq.compact
+          # Whole-workflow `tool:` incorporation.  The tokenization mirrors
+          # Chat.tools (lib/scout/llm/chat/process/tools.rb): the first token
+          # names the workflow, the second a task.  Only lines without a task
+          # token incorporate the ENTIRE workflow, and only then may the
+          # workflow's PATH_KINDS path kinds be registered on this agent;
+          # `tool: Workflow task` lines never register.  Remote targets
+          # (Open.remote?) and unloadable names are skipped silently, exactly
+          # as the require loop itself tolerates failures.  Workflow
+          # resolution reuses Chat.load_workflow, the same resolver
+          # Chat.tools uses for `tool:` lines, so the namespace an agent
+          # incorporates is the namespace whose tools the backend exposes.
+          Chat.find_role(messages, :tool).each do |message|
+            workflow_name, task_name, *_inputs = Chat.content_tokens(message)
+            next if task_name
+            next if workflow_name.nil? || workflow_name.empty?
+            next if Open.remote? workflow_name
 
-          workflows.each do |workflow|
             begin
-              Workflow.require_workflow workflow
+              workflow = Chat.load_workflow workflow_name
             rescue
+              next
             end
+            integrate_workflow_path_kinds(workflow)
           end
 
-          %w(socialize attachments path).each do |capability|
+          %w(socialize attachments).each do |capability|
             if (list = messages.remove_role(capability)).any?
               status = list.last[:content]
               next if status.nil?

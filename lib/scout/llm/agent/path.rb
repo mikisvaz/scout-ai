@@ -20,9 +20,11 @@
 require "fileutils"
 require_relative "../sandbox"
 require_relative "path/patch"
+require_relative "path/edit"
 
 module LLM
   class Agent
+    include AgentPathEdit
     DEFAULT_CAPABILITIES = {
       "read" => true,
       "write" => true,
@@ -51,8 +53,7 @@ module LLM
     # replace an implementation via an override, never the schema.
     BUILT_IN_OPERATIONS = (GENERIC_OPERATIONS + SPECIAL_OPERATIONS).freeze
 
-    # Handler types a custom operation implementation may declare (Step 3
-    # stores them; dispatch semantics are Step 5):
+    # Handler types a custom operation implementation may declare:
     #   :content - content-transform handler: receives resolved content and
     #              args, returns transformed content; the ENGINE reads and
     #              writes the authorized target around it.
@@ -65,8 +66,129 @@ module LLM
     # existing sandbox mode vocabulary.  Fail-closed default is :write.
     PATH_AUTHORIZATION_MODES = %i[read write].freeze
 
-    def path(_options = {})
-      install_path_tools
+    # Authorization mode the ENGINE applies to its own built-in operations
+    # (read/list are read-only; every other built-in mutates).  Recorded
+    # into each kind's canonical operation table at registration.
+    BUILTIN_OPERATION_AUTHORIZATION = {
+      "read" => :read,
+      "list" => :read
+    }.freeze
+
+    # Whole-workflow PATH_KINDS incorporation.  Invoked from Agent#ask when a
+    # `tool: <workflow>` line (whole workflow, no task token) incorporates an
+    # entire workflow; task-level `tool: <workflow> <task>` lines never reach
+    # this.  `workflow` must be a loaded local workflow Module (not a
+    # RemoteWorkflow, not an agent-fallback) that defines a `PATH_KINDS`
+    # constant in its own namespace.
+    #
+    # A workflow without `PATH_KINDS` registers nothing and returns nil
+    # silently.  With it, every entry is registered through the regular
+    # `register_path_kind` (which dups the definition and reinstalls the tools
+    # atomically); the shared `PATH_KINDS` constant is never mutated.
+    #
+    # Provenance bookkeeping (`path_kind_sources`, kind name => workflow
+    # name) is kept beside the authoritative `path_kind_registry`: it records
+    # WHICH whole-workflow incorporation supplied a kind name, so a second
+    # DIFFERENT workflow reusing an existing kind name fails deterministically
+    # instead of letting import order decide.  It is not a second registry:
+    # kinds are always looked up in `path_kind_registry`; re-registering the
+    # same kind from the same workflow overwrites idempotently.
+    #
+    # Kind definitions supplied by other callers (plugins, direct Ruby) do not
+    # record a source; a later whole-workflow incorporation of the same kind
+    # name simply re-registers it (the new source then owns the name).
+    def integrate_workflow_path_kinds(workflow)
+      # Only a local workflow Module qualifies: RemoteWorkflow instances
+      # (remote `tool:` targets) and anything else without a resolvable
+      # constant name are skipped entirely.
+      return nil unless Module === workflow
+      return nil if (workflow < RemoteWorkflow rescue false)
+      return nil if workflow.name.nil?
+      return nil unless workflow.const_defined?(:PATH_KINDS, false)
+
+      kinds = workflow.const_get(:PATH_KINDS, false)
+      workflow_name = workflow.name
+
+      definitions = path_normalize_workflow_path_kinds(kinds, workflow_name)
+
+      definitions.each do |name, definition|
+        source = path_kind_sources[name]
+        if source && source != workflow_name
+          raise ParameterException,
+            "Path kind #{name.inspect} is already provided by workflow " \
+            "#{source.inspect}; workflow #{workflow_name.inspect} cannot " \
+            "redefine it. Two workflows must not supply the same path kind."
+        end
+
+        # Deep-dup at this boundary: register_path_kind dups only one level,
+        # and Hash#freeze is shallow, so a shared frozen PATH_KINDS constant
+        # could otherwise be mutated through the registry (for instance by a
+        # future definition mutation).  Copies are kept as plain unfrozen
+        # Hashes; callables are shared by reference as everywhere else.
+        register_path_kind(name, path_deep_copy(definition))
+        path_kind_sources[name] = workflow_name
+      end
+
+      definitions
+    end
+
+    # Accept either a Hash of kind name => definition or an Array of
+    # definition hashes (each carrying its own "name"), mirroring what
+    # `register_path_kind` accepts per entry.  Always returns a normalized
+    # Hash of kind name => definition.
+    def path_normalize_workflow_path_kinds(kinds, workflow_name)
+      if kinds.respond_to?(:each_pair)
+        entries = kinds.collect{|name, definition| [name, definition] }
+      elsif kinds.respond_to?(:each_with_index) && kinds.respond_to?(:first) && Hash === kinds.first
+        entries = kinds.collect{|definition|
+          [definition["name"] || definition[:name], definition]
+        }
+      else
+        raise ParameterException,
+          "Workflow #{workflow_name.inspect} declares PATH_KINDS as a " \
+          "#{kinds.class}; expected a Hash of kind name => definition " \
+          "(or an Array of definition Hashes with a \"name\" key)"
+      end
+
+      normalized = {}
+      entries.each do |name, definition|
+        name = name.to_s
+        if name.empty?
+          raise ParameterException,
+            "Workflow #{workflow_name.inspect} declares a PATH_KINDS entry " \
+            "with an empty kind name"
+        end
+        unless Hash === definition
+          raise ParameterException,
+            "Workflow #{workflow_name.inspect} PATH_KINDS entry " \
+            "#{name.inspect} is a #{definition.class}, expected a Hash"
+        end
+        normalized[name] = definition
+      end
+      normalized
+    end
+
+    # Recursive copy for Hash/Array/Primitive structures used by path-kind
+    # definitions.  Callables and other opaque values are shared by
+    # reference, matching the rest of the engine.
+    def path_deep_copy(value)
+      case value
+      when Hash
+        value.each_with_object({}){|(k, v), acc| acc[k] = path_deep_copy(v) }
+      when Array
+        value.collect{|v| path_deep_copy(v) }
+      when String, Symbol, Numeric, true, false, nil
+        value
+      else
+        value.respond_to?(:call) || !value.respond_to?(:dup) ? value : value.dup
+      end
+    end
+
+    # Per-agent provenance map recording which workflow supplied each
+    # whole-workflow-incorporated kind name.  Bookkeeping only; the
+    # authoritative registry remains `path_kind_registry`.
+    def path_kind_sources
+      @path_kind_sources ||= {}
     end
 
     # ------------------------------------------------------------------
@@ -81,6 +203,29 @@ module LLM
       @path_kinds ||= {}
     end
 
+    # CANONICAL REPRESENTATION.  `register_path_kind` normalizes a kind
+    # definition ONCE, at registration, into the form every later consumer
+    # reads directly.  The normalized definition carries:
+    #
+    #   "name", "description", "sandbox" (boolean, default true),
+    #   "locations" (Array, default ["project"]), "default_location",
+    #   "capabilities" (full DEFAULT_CAPABILITIES-shaped Hash),
+    #   "operations"  -> { op name -> normalized custom spec }  (a custom op
+    #                    registers support implicitly; no capability flag),
+    #   "overrides"   -> { built-in name -> {"implementation" => Callable} }
+    #                    (implementation replacement only; capability
+    #                    gating is never bypassed),
+    #   "operation_table" -> { op name -> {"implementation" => Callable or
+    #                    nil (engine default), "authorization" => :read/:write,
+    #                    "type" => :content/:full } } for every SUPPORTED
+    #                    operation of the kind: enabled built-ins, every
+    #                    override target, and every custom operation.  An
+    #                    override of a capability-disabled built-in IS in the
+    #                    table (support), but the ENGINE method still gates on
+    #                    capabilities, so the pair can never be executed.
+    #
+    # Callers keep authoring the declarative form (Hash of keys); the
+    # engine is the only place that interpretation happens.
     def register_path_kind(name, definition = nil, &block)
       definition = block.call if definition.nil? && block
       definition ||= {}
@@ -95,18 +240,17 @@ module LLM
         raise ParameterException, "Path kind sandbox setting must be boolean"
       end
       definition["description"] ||= "#{name} path"
-      definition["capabilities"] = DEFAULT_CAPABILITIES.merge(
-        begin
-          capabilities = definition.fetch("capabilities", {})
-          if Array === capabilities
-            hash = {}
-            capabilities.each{|c| hash[c] = true }
-            hash
-          else
-            capabilities
-          end
-        end
-      )
+
+      capabilities = definition.fetch("capabilities", {})
+      capabilities = if Array === capabilities
+                       hash = {}
+                       capabilities.each{|c| hash[c] = true }
+                       hash
+                     else
+                       capabilities
+                     end
+      definition["capabilities"] = DEFAULT_CAPABILITIES.merge(capabilities)
+
       definition["locations"] ||= ["project"]
       definition["default_location"] ||= definition["locations"].first
 
@@ -118,6 +262,11 @@ module LLM
           "Default location #{definition['default_location'].inspect} " \
           "is not included in locations for #{name}"
       end
+
+      definition["operation_table"] =
+        path_operation_table(definition["capabilities"],
+                             definition["operations"],
+                             definition["overrides"])
 
       path_kind_registry[name] = definition
       begin
@@ -132,10 +281,47 @@ module LLM
       definition
     end
 
-    def register_path_kinds(definitions)
-      definitions.each do |name, definition, block=nil|
-        register_path_kind(name, definition, &block)
+    # Build the per-kind operation table at registration time: one entry per
+    # SUPPORTED operation, ready for direct reads.  Entry shape:
+    #   {"implementation" => Callable or nil, "authorization" => :read/:write,
+    #    "type" => :content/:full}
+    # Precedence mirrors the engine contract: an override beats the engine
+    # default; a custom operation carries its own registered callable; the
+    # engine default for a built-in has implementation nil (dispatched to the
+    # engine method).  Disabled built-ins are absent - support is exactly
+    # `operation_table.key?(op)` after this point.
+    def path_operation_table(capabilities, operations, overrides)
+      table = {}
+
+      capabilities.each_pair do |operation, enabled|
+        next unless enabled
+        operation = operation.to_s
+        table[operation] = {
+          "implementation" => overrides.dig(operation, "implementation"),
+          "authorization" => BUILTIN_OPERATION_AUTHORIZATION.fetch(operation, :write),
+          "type" => :full
+        }
       end
+
+      overrides.each_pair do |operation, spec|
+        operation = operation.to_s
+        next if table.key?(operation)
+        table[operation] = {
+          "implementation" => spec["implementation"],
+          "authorization" => BUILTIN_OPERATION_AUTHORIZATION.fetch(operation, :write),
+          "type" => :full
+        }
+      end
+
+      operations.each_pair do |operation, spec|
+        table[operation.to_s] = {
+          "implementation" => spec["implementation"],
+          "authorization" => spec["authorization"],
+          "type" => spec["type"]
+        }
+      end
+
+      table
     end
 
     # Load a plugin file in the context of this Agent instance.
@@ -179,13 +365,13 @@ module LLM
       end
     end
 
+    # Direct read of the canonical representation: capability gating.
     def path_kind_capable?(kind, operation)
-      definition = path_kind_definition(kind)
-      !!definition.fetch("capabilities", {}).fetch(operation.to_s, false)
+      !!path_kind_definition(kind).fetch("capabilities", {}).fetch(operation.to_s, false)
     end
 
     # ------------------------------------------------------------------
-    # Operation registration contract (Step 3)
+    # Operation registration contract
     # ------------------------------------------------------------------
 
     # Normalize the optional "operations" key of a kind definition into
@@ -256,81 +442,27 @@ module LLM
     end
 
     # ------------------------------------------------------------------
-    # Operation registry queries (Step 3)
+    # Operation registry queries
     # ------------------------------------------------------------------
 
-    # Does this kind support the operation?  True for built-ins enabled by
-    # the kind's capabilities; true for custom operations registered on the
-    # kind (support is established by registration, no capability flag);
-    # false otherwise (including disabled validate/test/promote/smoke and
-    # unknown operations).
+    # One canonical table per kind ("operation_table") is built at
+    # registration (path_operation_table); the queries below are direct
+    # reads of it.  Support, authorization and implementation no longer
+    # re-derive anything at lookup time.
+
+    # Does this kind support the operation?  Support is established at
+    # registration: enabled built-ins, their overrides, and custom
+    # operations are all in the table; nothing else is.
     def path_operation_support?(kind, operation)
-      operation = operation.to_s
-      definition = path_kind_definition(kind)
-
-      return true if definition.fetch("overrides", {}).key?(operation)
-
-      if BUILT_IN_OPERATIONS.include?(operation)
-        !!definition.fetch("capabilities", {}).fetch(operation, false)
-      else
-        definition.fetch("operations", {}).key?(operation)
-      end
+      path_kind_definition(kind).fetch("operation_table", {}).key?(operation.to_s)
     end
 
-    # Does this kind OVERRIDE the built-in implementation of this operation?
-    # (Implementation replacement only: the public schema stays engine-owned
-    # and capability gating is not bypassed.)
-    def path_operation_override?(kind, operation)
-      path_kind_definition(kind).fetch("overrides", {}).key?(operation.to_s)
-    end
-
-    # Sorted names of custom operations registered anywhere in THIS agent's
-    # registry (agent-local by construction).
-    def path_custom_operations
-      path_kind_registry.values.flat_map { |definition| definition.fetch("operations", {}).keys }.uniq.sort
-    end
-
-    # The normalized custom-operation spec for kind/operation, or nil.
-    def path_custom_operation(kind, operation)
-      path_kind_definition(kind).fetch("operations", {}).fetch(operation.to_s, nil)
-    end
-
-    # Authorization mode that applies to an operation for a kind:
-    #   - custom operations: their registered mode (fail-closed :write
-    #     default when unspecified);
-    #   - built-ins: the engine's existing mode mapping (read/list => :read;
-    #     write/edit/move/rename/delete/promote => :write);
-    #   - nil for unsupported operations.
-    def path_operation_authorization(kind, operation)
-      operation = operation.to_s
-      return nil unless path_operation_support?(kind, operation)
-
-      custom = path_custom_operation(kind, operation)
-      return custom["authorization"] if custom
-
-      case operation
-      when "read", "list"
-        :read
-      else
-        :write
-      end
-    end
-
-    # Implementation selection: an override beats the engine default for
-    # built-ins; custom operations return their registered callable.  Nil
-    # when the operation is unsupported (custom with no engine default).
+    # Implementation selection: a direct read of the table entry - an
+    # override's callable, a custom operation's callable, or nil for the
+    # engine default.  Nil when the operation is unsupported.
     def path_operation_implementation(kind, operation)
-      operation = operation.to_s
-      definition = path_kind_definition(kind)
-      return nil unless path_operation_support?(kind, operation)
-
-      override = definition.fetch("overrides", {}).fetch(operation, nil)
-      return override["implementation"] if override
-
-      custom = definition.fetch("operations", {}).fetch(operation, nil)
-      return custom["implementation"] if custom
-
-      nil
+      entry = path_kind_definition(kind).fetch("operation_table", {})[operation.to_s]
+      entry && entry["implementation"]
     end
 
     # Normalize the optional "overrides" key: built-in name -> implementation
@@ -369,34 +501,54 @@ module LLM
     # Tool installation
     # ------------------------------------------------------------------
 
+    # One tool per operation name, derived from the canonical registry:
+    #
+    #   1. the `path_kinds` listing tool (kind enum live from the registry);
+    #   2. one engine-owned tool per BUILT-IN operation supported by at
+    #      least one registered kind (`path_tool_definition`);
+    #   3. one aggregated tool per CUSTOM operation name across all kinds
+    #      (`path_custom_tool_definition` contract-checks exact matches).
+    #
+    # `path_install_tool` is the single choke point every definition goes
+    # through, so re-running this routine replaces the whole surface.
     def install_path_tools
-      install = method(:path_install_tool)
-
       return if path_kind_registry.empty?
-      install.call("path_kinds", path_kinds_tool_definition)
-      GENERIC_OPERATIONS.each do |operation|
+
+      path_install_tool("path_kinds",
+                        "description" => <<~DESC.strip,
+                          List the virtual Path kinds currently available to this agent.
+                          Each kind identifies a namespace of textual objects and declares
+                          its supported locations and operations.
+                        DESC
+                        "parameters" => {
+                          "type" => "object",
+                          "properties" => {
+                            "kind" => {
+                              "type" => "string",
+                              "description" => "Registered Path kind to identify.",
+                              "enum" => path_kind_registry.keys
+                            }
+                          },
+                          "additionalProperties" => false
+                        })
+
+      BUILT_IN_OPERATIONS.each do |operation|
         next unless path_kind_registry.values.any? do |definition|
           definition.fetch("capabilities", {}).fetch(operation, false)
         end
 
-        install.call("path_#{operation}", path_tool_definition(operation))
+        path_install_tool("path_#{operation}", path_tool_definition(operation))
       end
 
-      SPECIAL_OPERATIONS.each do |operation|
-        next unless path_kind_registry.values.any? do |definition|
-          definition.fetch("capabilities", {}).fetch(operation, false)
-        end
-
-        install.call("path_#{operation}", path_tool_definition(operation))
-      end
-
-      path_custom_operations.each do |operation|
-        install.call(operation, path_custom_tool_definition(operation))
+      path_kind_registry.values
+        .flat_map { |definition| definition.fetch("operations", {}).keys }
+        .uniq.sort.each do |operation|
+        path_install_tool(operation, path_custom_tool_definition(operation))
       end
     end
 
     # ------------------------------------------------------------------
-    # Custom-operation tool aggregation (Step 4)
+    # Custom-operation tool aggregation
     # ------------------------------------------------------------------
 
     # ONE public tool per custom operation name.  Kinds registering the same
@@ -436,21 +588,8 @@ module LLM
         kinds << kind
       end
 
-      properties = {
-        "kind" => {
-          "type" => "string",
-          "description" => "Kind of path. Supported kinds: #{kinds.join(', ')}.",
-          "enum" => kinds
-        },
-        "path" => {
-          "type" => "string",
-          "description" => "Path within the selected kind."
-        },
-        "location" => {
-          "type" => "string",
-          "description" => "Storage location; defaults to the kind's default location."
-        }
-      }
+      properties = path_base_properties("Supported kinds: #{kinds.join(', ')}.")
+      properties["kind"]["enum"] = kinds
 
       parameters = spec.fetch("parameters", {})
       own_properties = parameters["properties"] || parameters.fetch(:properties, {})
@@ -478,7 +617,7 @@ module LLM
           "additionalProperties" => false
         },
         # The installed callable routes by the "kind" argument into the
-        # single engine dispatch entry point (implemented in Step 5).
+        # single engine dispatch entry point.
         "implementation" => lambda do |arguments|
           args = arguments.dup || {}
           kind = args.delete("kind")
@@ -503,8 +642,10 @@ module LLM
     def path_contract_differences(left, right, where = "parameters")
       differences = []
 
-      left_keys = path_contract_keys(left)
-      right_keys = path_contract_keys(right)
+      # Contract parameters may use String or Symbol keys interchangeably;
+      # normalization lives here so callers can pass hashes either way.
+      left_keys = (left.respond_to?(:keys) ? left.keys : []).map(&:to_s)
+      right_keys = (right.respond_to?(:keys) ? right.keys : []).map(&:to_s)
 
       (left_keys - right_keys).each do |key|
         differences << "#{where}.#{key} present only in the first contract"
@@ -514,8 +655,10 @@ module LLM
       end
 
       (left_keys & right_keys).each do |key|
-        l = path_contract_value(left, key)
-        r = path_contract_value(right, key)
+        # String/Symbol-agnostic fetch; the key always exists on both sides
+        # because it comes from the key intersection above.
+        l = left.each_pair { |k, v| break v if k.to_s == key }
+        r = right.each_pair { |k, v| break v if k.to_s == key }
 
         case key.to_s
         when "description"
@@ -539,12 +682,12 @@ module LLM
                 rv = r[i]
                 if lv.is_a?(Hash) && rv.is_a?(Hash)
                   differences.concat(path_contract_differences(lv, rv, "#{where}.#{key}[#{i}]"))
-                elsif !path_contract_equal?(lv, rv)
+                elsif lv != rv
                   differences << "#{where}.#{key}[#{i}] differs: #{lv.inspect} vs #{rv.inspect}"
                 end
               end
             end
-          elsif !path_contract_equal?(l, r)
+          elsif l != r
             differences << "#{where}.#{key} differs: #{l.inspect} vs #{r.inspect}"
           end
         end
@@ -553,27 +696,10 @@ module LLM
       differences
     end
 
-    def path_contract_keys(hash)
-      (hash.respond_to?(:keys) ? hash.keys : []).map(&:to_s)
-    end
-
-    def path_contract_value(hash, key)
-      hash.each_pair do |k, v|
-        return v if k.to_s == key.to_s
-      end
-      nil
-    end
-
-    # Scalar equality under contract rules: required/enum become sets.
-    def path_contract_equal?(left, right)
-      return true if left == right
-      false
-    end
-
     # Store tools in the same [callable, definition] format consumed by Agent#ask.
     # When +definition+ carries an "implementation" key, that callable is used
     # instead of public_send(name); custom-operation tools use this to route
-    # through the engine dispatch entry point (Step 5 fills the dispatch in).
+    # through the engine dispatch entry point.
     def path_install_tool(name, definition, implementation=nil)
       properties = definition.fetch("parameters").fetch("properties")
       required = definition.fetch("parameters").fetch("required", [])
@@ -600,24 +726,13 @@ module LLM
     end
 
     # ------------------------------------------------------------------
-    # Centralized dispatch entry point (stub in Step 4; Step 5 implements)
+    # Centralized dispatch entry point
     # ------------------------------------------------------------------
 
-    # Single engine entry point for CUSTOM operations.  Step 4 installs the
-    # aggregated tool callables that route here; Step 5 fills in the real
-    # dispatch: per-kind capability gate, authorization mode, :content vs
-    # :full handler semantics, override selection for built-ins.
-    #
-    # Contract (frozen here, implemented in Step 5):
-    #   kind       - String kind name; must be registered
-    #   operation  - String custom operation name
-    #   args       - the remaining tool arguments as a Hash (string keys)
-    # Raises ParameterException for unknown kind/operation, unsupported
-    # combination, or (until Step 5) any custom dispatch attempt.
-    # Central dispatcher (Step 5).  Every custom operation flows through
-    # here; built-in tools keep calling their engine methods directly, and
-    # those methods share the same funnel (resolve -> capability ->
-    # authorize -> implement) inside themselves.
+    # Single engine entry point for CUSTOM operations.  Every custom operation
+    # flows through here; built-in tools keep calling their engine methods
+    # directly, and those methods share the same funnel (resolve -> capability
+    # -> authorize -> implement) inside themselves.
     #
     # Custom-operation flow:
     #   1. kind known?          -> ParameterException otherwise
@@ -646,12 +761,14 @@ module LLM
           "Unknown Path kind: #{kind.inspect}"
       end
 
-      unless path_operation_support?(kind, operation)
+      definition = path_kind_definition(kind)
+      entry = definition.fetch("operation_table", {})[operation]
+      custom = definition.fetch("operations", {})[operation]
+
+      unless entry
         raise ParameterException,
           "Path kind #{kind.inspect} does not support operation #{operation.inspect}"
       end
-
-      custom = path_custom_operation(kind, operation)
 
       if custom
         authorization = custom.fetch("authorization", :write)
@@ -686,35 +803,9 @@ module LLM
       end
     end
 
-    def path_kinds_tool_definition
-      {
-        "description" => <<~DESC.strip,
-            List the virtual Path kinds currently available to this agent.
-            Each kind identifies a namespace of textual objects and declares
-            its supported locations and operations.
-        DESC
-        "parameters" => {
-          "type" => "object",
-          "properties" => {
-            "kind" => {
-              "type" => "string",
-              "description" => "Registered Path kind to identify.",
-              "enum" => path_kind_registry.keys
-            }
-          },
-          "additionalProperties" => false
-        }
-      }
-    end
-
-    def path_tool_definition(operation)
-      kinds = path_kind_registry.keys
-      kind_description = if kinds.empty?
-                           "No Path kinds are currently registered."
-                         else
-                           "Supported kinds: #{kinds.join(', ')}."
-                         end
-
+    # Shared kind/path(/location) property trio every Path tool starts
+    # from.  Insertion order is part of the serialized schema.
+    def path_base_properties(kind_description, with_location: true)
       properties = {
         "kind" => {
           "type" => "string",
@@ -726,12 +817,26 @@ module LLM
         }
       }
 
-      if operation != "list"
+      if with_location
         properties["location"] = {
           "type" => "string",
           "description" => "Storage location; defaults to the kind's default location."
         }
       end
+
+      properties
+    end
+
+    def path_tool_definition(operation)
+      kinds = path_kind_registry.keys
+      kind_description = if kinds.empty?
+                           "No Path kinds are currently registered."
+                         else
+                           "Supported kinds: #{kinds.join(', ')}."
+                         end
+
+      properties = path_base_properties(kind_description,
+                                        with_location: operation != "list")
 
       case operation
       when "write"
@@ -783,8 +888,24 @@ module LLM
         # optional `parameters` hash in the kind definition.
       end
 
+      operation_descriptions = {
+        "read" => "Read the textual content of a virtual Path.",
+        "write" => "Write complete textual content to a virtual Path.",
+        "edit" => "Edit a textual Path using a line range, character range, or regular expression selector.",
+        "list" => "List paths in a virtual Path kind, optionally below a prefix.",
+        "move" => "Move a virtual Path to another path in the same kind and location.",
+        "rename" => "Rename a virtual Path.",
+        "delete" => "Delete a virtual Path.",
+        "validate" => "Run the kind-specific syntax or validity check for a virtual Path.",
+        "test" => "Run the kind-specific integration test for a virtual Path.",
+        "smoke" => "Run the kind-specific lightweight smoke check for a virtual Path.",
+        "promote" => "Promote a virtual Path from its temporary location to its project location.",
+        "patch" => "Apply a single-file unified diff to a virtual Path in memory and " \
+                   "write it back atomically (no fuzz, no side files)."
+      }
+
       definition = {
-        "description" => path_operation_description(operation),
+        "description" => operation_descriptions.fetch(operation, "Operate on a virtual Path."),
         "parameters" => {
           "type" => "object",
           "properties" => properties,
@@ -803,38 +924,6 @@ module LLM
       definition
     end
 
-    def path_operation_description(operation)
-      case operation
-      when "read"
-        "Read the textual content of a virtual Path."
-      when "write"
-        "Write complete textual content to a virtual Path."
-      when "edit"
-        "Edit a textual Path using a line range, character range, or regular expression selector."
-      when "list"
-        "List paths in a virtual Path kind, optionally below a prefix."
-      when "move"
-        "Move a virtual Path to another path in the same kind and location."
-      when "rename"
-        "Rename a virtual Path."
-      when "delete"
-        "Delete a virtual Path."
-      when "validate"
-        "Run the kind-specific syntax or validity check for a virtual Path."
-      when "test"
-        "Run the kind-specific integration test for a virtual Path."
-      when "smoke"
-        "Run the kind-specific lightweight smoke check for a virtual Path."
-      when "promote"
-        "Promote a virtual Path from its temporary location to its project location."
-      when "patch"
-        "Apply a single-file unified diff to a virtual Path in memory and " \
-        "write it back atomically (no fuzz, no side files)."
-      else
-        "Operate on a virtual Path."
-      end
-    end
-
     # ------------------------------------------------------------------
     # Path resolution
     # ------------------------------------------------------------------
@@ -842,8 +931,9 @@ module LLM
     # Resolves a virtual path to the underlying Scout/File path.
     #
     # A kind can provide `resolve`, which receives `(agent, path, location)`
-    # and may return any object implementing the small textual interface used
-    # below. Otherwise `roots` are treated as filesystem roots.
+    # and returns the target object; the FS-boundary adapters use its String
+    # representation (see the FS-boundary comment above path_read_text).
+    # Otherwise `roots` are treated as filesystem roots.
     def resolve_path(kind, path, location = nil)
       definition = path_kind_definition(kind)
       location ||= definition["default_location"]
@@ -933,40 +1023,6 @@ module LLM
       end
     end
 
-    # Selector keys are validated the same way as tool arguments.
-    def path_selector_key(selector, key)
-      selector.fetch(key) do
-        raise ParameterException, "Invalid selector: missing key #{key.inspect}"
-      end
-    end
-
-    # Selector indexes (lines/chars start/end, regexp pattern) must be
-    # validated, not just presence-checked: a nil or string-valued index
-    # would otherwise raise NoMethodError/ArgumentError deep inside the
-    # comparison, escaping path_install_tool's ScoutException-only rescue
-    # so the agent never sees it.  Everything invalid surfaces as
-    # ParameterException at the point it occurs, BEFORE any mutation.
-    def path_selector_index(selector, key, length: nil, maximum: nil)
-      value = path_selector_key(selector, key)
-      unless value.is_a?(Integer)
-        raise ParameterException,
-              "Invalid selector: #{key.inspect} must be an integer, got #{value.inspect}"
-      end
-      raise ParameterException,
-            "Invalid selector: #{key.inspect} must be >= 0, got #{value}" if value.negative?
-
-      if length && key == "end" && value > length
-        # Exclusive-end clamping is deliberate and documented: an end
-        # beyond the document is the same as "to the end of the document".
-        value = length
-      elsif length && key == "start" && value > length
-        raise ParameterException,
-              "Invalid selector: #{key.inspect} #{value} is beyond the last index #{length}"
-      end
-
-      value
-    end
-
     # ------------------------------------------------------------------
     # Text adapter
     # ------------------------------------------------------------------
@@ -996,32 +1052,36 @@ module LLM
       end
     end
 
+    # FS boundary (shared by path_read_text / path_write_text /
+    # path_exists? / path_delete_target / path_move_target): resolve_path
+    # and path_authorize! have already produced and AUTHORIZED the exact
+    # target, so these adapters use plain File/FileUtils on target.to_s.
+    # Scout Path#find/Open resolution is deliberately not applied here: its
+    # fallback semantics (compressed .gz/.bgz/.zip alternatives, ~/.scout
+    # default for unlocated paths) could move the target AFTER
+    # authorization, and Open.read decompresses and fixes UTF-8 while
+    # Open.write writes raw bytes (read/write asymmetry), breaking the
+    # byte-exact contract.  A custom kind "resolve" may return any object;
+    # only its String representation is used here.
+
     def path_read_text(target)
-      if target.respond_to?(:read)
-        target.read.to_s
-      elsif File.file?(target.to_s)
-        File.read(target.to_s)
+      target = target.to_s
+      if File.file?(target)
+        File.read(target)
       else
         raise ParameterException, "Path does not exist or is not readable: #{target}"
       end
     end
 
     def path_write_text(target, content)
-      if target.respond_to?(:write)
-        target.write(content.to_s)
-      else
-        FileUtils.mkdir_p(File.dirname(target.to_s))
-        File.write(target.to_s, content.to_s)
-      end
+      target = target.to_s
+      FileUtils.mkdir_p(File.dirname(target))
+      File.write(target, content.to_s)
       content.to_s
     end
 
     def path_exists?(target)
-      if target.respond_to?(:exist?)
-        target.exist?
-      else
-        File.exist?(target.to_s)
-      end
+      File.exist?(target.to_s)
     end
 
     def path_delete_target(target)
@@ -1092,7 +1152,6 @@ module LLM
       path_authorize!(kind, target, location, mode: :write)
       path_write_text(target, content)
 
-
       {
         "doc_id" => path_doc_id(kind, path, args["version"]),
         "kind" => kind,
@@ -1102,41 +1161,10 @@ module LLM
       }
     end
 
-    def path_edit(args)
-      kind = path_argument(args, "kind")
-      path = path_argument(args, "path")
-      selector = path_argument(args, "selector")
-      replacement = path_argument(args, "replacement")
-      location = args["location"]
+    # path_edit lives in lib/scout/llm/agent/path/edit.rb
+    # (module AgentPathEdit, included above).
 
-      unless path_kind_capable?(kind, "edit")
-        raise ParameterException, "Path kind #{kind} does not support edit"
-      end
-
-      target = resolve_path(kind, path, location)
-      path_authorize!(kind, target, location, mode: :write)
-      original = path_read_text(target)
-
-      override = path_operation_implementation(kind, "edit")
-      if override
-        edited = path_apply_content_handler(
-          override, target, original, args, kind
-        )
-      else
-        edited = path_apply_selector(original, selector, replacement)
-      end
-      path_write_text(target, edited)
-
-      {
-        "doc_id" => path_doc_id(kind, path, args["version"]),
-        "kind" => kind,
-        "path" => path,
-        "changed" => original != edited,
-        "content" => edited
-      }
-    end
-
-    # Generic single-file patch (Step 6). Applies a unified diff in
+    # Generic single-file patch. Applies a unified diff in
     # memory with strict context verification and writes ONCE through
     # the authorized target: no subprocess, no .orig/.rej, no partial
     # writes, no fuzz. Default-off capability; overrides of :content
@@ -1177,11 +1205,11 @@ module LLM
 
     def path_list(args)
       kind = path_argument(args, "kind")
-      location = args["location"] || path_kind_definition(kind)["default_location"]
+      definition = path_kind_definition(kind)
+      location = args["location"] || definition["default_location"]
       prefix = args["path"].to_s
       target = resolve_path(kind, prefix, location)
 
-      definition = path_kind_definition(kind)
       path_authorize!(kind, target, location, mode: :read)
 
       if definition["list"]
@@ -1217,12 +1245,7 @@ module LLM
         raise ParameterException, "Path kind #{kind} does not support move"
       end
 
-      source = resolve_path(kind, source_path, location)
-      target = resolve_path(kind, destination, location)
-      path_authorize!(kind, source, location, mode: :write)
-      path_authorize!(kind, target, location, mode: :write)
-      path_move_target(source, target)
-
+      path_relocate(kind, source_path, destination, location)
 
       {"kind" => kind, "path" => source_path, "destination" => destination, "moved" => true}
     end
@@ -1237,14 +1260,21 @@ module LLM
         raise ParameterException, "Path kind #{kind} does not support rename"
       end
 
+      path_relocate(kind, source_path, name, location)
+
+      {"kind" => kind, "path" => source_path, "name" => name, "renamed" => true}
+    end
+
+    # Shared same-kind relocation mechanics for path_move and path_rename:
+    # resolve BOTH endpoints, authorize both for writing, perform the move.
+    # The public wrappers keep their own argument validation, capability
+    # errors and result keys.
+    private def path_relocate(kind, source_path, target_path, location)
       source = resolve_path(kind, source_path, location)
-      target = resolve_path(kind, name, location)
+      target = resolve_path(kind, target_path, location)
       path_authorize!(kind, source, location, mode: :write)
       path_authorize!(kind, target, location, mode: :write)
       path_move_target(source, target)
-
-
-      {"kind" => kind, "path" => source_path, "name" => name, "renamed" => true}
     end
 
     def path_delete(args)
@@ -1260,20 +1290,16 @@ module LLM
       path_authorize!(kind, target, location, mode: :write)
       path_delete_target(target)
 
-
       {"kind" => kind, "path" => path, "deleted" => true}
     end
 
-    def path_validate(args)
-      path_kind_operation(args, "validate")
-    end
-
-    def path_test(args)
-      path_kind_operation(args, "test")
-    end
-
-    def path_smoke(args)
-      path_kind_operation(args, "smoke")
+    # The three kind-specific wrapper operations share one body: they only
+    # differ in the operation name handed to path_kind_operation.  The
+    # generated methods keep the exact names the tools and tests use.
+    %w[validate test smoke].each do |operation|
+      define_method("path_#{operation}") do |args|
+        path_kind_operation(args, operation)
+      end
     end
 
     # ENGINE-CONTROLLED PROMOTION.  The engine resolves the destination from
@@ -1326,12 +1352,7 @@ module LLM
       # exclusive-create/link guard is attempted (none is available without
       # new machinery).  Within a single process the engine's serialized
       # authorize -> check -> move flow is the only writer.
-      destination_exists =
-        if destination_target.respond_to?(:exist?)
-          destination_target.exist?
-        else
-          File.exist?(destination_target.to_s)
-        end
+      destination_exists = path_exists?(destination_target)
       if destination_exists && !overwrite
         raise ParameterException,
               "Promotion destination already exists: #{destination_target} " \
@@ -1367,109 +1388,6 @@ module LLM
     end
 
     # ------------------------------------------------------------------
-    # Selectors
-    # ------------------------------------------------------------------
-
-    def path_apply_selector(content, selector, replacement)
-      unless selector.respond_to?(:fetch)
-        raise ParameterException,
-          "Invalid selector: expected a mapping with type lines, chars, or regexp"
-      end
-      type = path_selector_key(selector, "type").to_s
-
-      case type
-      when "regexp"
-        pattern_value = path_selector_key(selector, "pattern")
-        unless pattern_value.is_a?(String)
-          # A non-String pattern would raise TypeError inside Regexp.new,
-          # escaping path_install_tool's ScoutException-only rescue so the
-          # agent never sees it; invalid input surfaces as ParameterException.
-          raise ParameterException,
-                "Invalid selector: pattern must be a String, got #{pattern_value.inspect}"
-        end
-        pattern =
-          begin
-            Regexp.new(pattern_value)
-          rescue RegexpError => e
-            # NARROW rescue at the Regexp.new call site only: a malformed
-            # pattern is an invalid input, and must surface as
-            # ParameterException (ScoutException subclass) so the tool
-            # wrapper's rescue can serialize it to the agent.
-            raise ParameterException,
-                  "Invalid selector: malformed regexp pattern " \
-                  "#{path_selector_key(selector, "pattern").inspect}: #{e.message}"
-          end
-        content.sub(pattern, replacement.to_s)
-      when "chars"
-        start = path_selector_index(selector, "start")
-        finish = path_selector_index(selector, "end", length: content.length)
-        raise ParameterException, "Character range must satisfy start <= end" if start > finish
-
-        content.dup.tap do |text|
-          text[start...finish] = replacement.to_s
-        end
-      when "lines"
-        # Explicit line semantics (see "Selector semantics" in tmp/path_recon.md):
-        # - indexes are 0-based; "start".."end" is an EXCLUSIVE-end line range
-        # - a line includes its terminator; the final line may lack one
-        # - the replacement's content substitutes for the selected lines'
-        #   content; untouched lines are byte-identical
-        # - the final newline of the file is preserved IFF it existed before
-        # - DECISION: start == lines.length (insertion-at-end) is ALLOWED and
-        #   appends after the last line; start > lines.length raises
-        #   ParameterException.  An "end" beyond the document clamps to the
-        #   document end (so the append form is start=length, end>length).
-        lines = content.lines
-        start = path_selector_index(selector, "start", length: lines.length)
-        finish = path_selector_index(selector, "end", length: lines.length)
-        raise ParameterException, "Line range must satisfy start <= end" if start > finish
-
-        # Rebuild keeping untouched lines byte-identical: lines before the
-        # span, the replacement text, and lines after the span.
-        head = lines[0...start]
-        tail = lines[finish..] || []
-        body = replacement.to_s
-
-        # Terminal-newline normalization is BIDIRECTIONAL at the EOF
-        # boundary: when the replaced span reaches EOF the result's
-        # final-newline state must match the ORIGINAL document's, whatever
-        # the replacement's trailing newline looks like (a replacement
-        # ending in "\n" must NOT introduce a final newline the original
-        # lacked).  When a line follows the span (interior boundary) the
-        # replacement is terminated with exactly one newline.  tail is
-        # empty exactly when the span reaches EOF.
-        eof_span = finish >= lines.length
-        final_newline = content.end_with?("\n")
-        new_span =
-          if body.empty?
-            # Deleting the span leaves nothing; no stray terminator is
-            # reintroduced by the EOF normalization below.
-            ""
-          elsif !eof_span || final_newline
-            # Interior boundary, or EOF where the original ended with a
-            # newline: exactly one terminal newline (appended when
-            # missing, collapsed when repeated).
-            body.sub(/\n*\z/, "\n")
-          else
-            # EOF boundary and the original lacked a final newline: strip
-            # every trailing newline the replacement may carry.
-            body.sub(/\n+\z/, "")
-          end
-
-        joined = (head + [new_span] + tail).join
-        # The EOF boundary inherits the original document's final-newline
-        # state, including the empty-replacement case where only head
-        # lines remain (deleting the last line of a file that had no
-        # final newline must not add one).
-        joined = joined.sub(/\n+\z/, "") if eof_span && !final_newline
-        joined
-      else
-        raise ParameterException,
-          "Unknown selector type #{type.inspect}; expected lines, chars, or regexp"
-      end
-    end
-
-    # ------------------------------------------------------------------
     # Kind-specific operations
     # ------------------------------------------------------------------
 
@@ -1496,12 +1414,8 @@ module LLM
     end
 
     def path_move_target(source, destination)
-      if source.respond_to?(:move)
-        source.move(destination)
-      else
-        FileUtils.mkdir_p(File.dirname(destination.to_s))
-        FileUtils.mv(source.to_s, destination.to_s)
-      end
+      FileUtils.mkdir_p(File.dirname(destination.to_s))
+      FileUtils.mv(source.to_s, destination.to_s)
     end
   end
 end

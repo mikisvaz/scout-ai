@@ -103,9 +103,11 @@ introduce: MyWorkflow
 ```
 
 - `tool: MyWorkflow` exposes the whole workflow (its exports, or all its
-  tasks if it has none exported).
+  tasks if it has none exported). If the workflow declares a `PATH_KINDS`
+  constant, its path kinds are also registered on the agent (see the
+  [Path engine](../developer/PathEngine.md) developer document).
 - `tool: MyWorkflow task_name ...` exposes one task; `name=value` tokens
-  pre-fill and hide that input.
+  pre-fill and hide that input. This form never registers path kinds.
 - `introduce:` injects the workflow's documentation only; it generates no
   tools. Combine it with `tool:` when you want both.
 

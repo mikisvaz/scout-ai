@@ -38,7 +38,9 @@ agent = LLM.agent(endpoint: :openai)
 
 > Agents can also expose *path kinds* — typed, sandboxed filesystem
 > namespaces with read/write/edit/patch operations and per-kind custom
-> operations; see the
+> operations. A workflow declares the kinds it provides as a `PATH_KINDS`
+> constant; agents that incorporate the whole workflow through a
+> `tool: MyWorkflow` chat line receive them automatically. See the
 > [Path engine](../developer/PathEngine.md) developer document.
 
 The system prompt lives on `start_chat`:

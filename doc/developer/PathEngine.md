@@ -1,12 +1,15 @@
 # The Path engine
 
-This document explains how the Path engine (`lib/scout/llm/agent/path.rb`)
+This document explains how the Path engine (`lib/scout/llm/agent/path.rb`,
+with the editing implementation in `lib/scout/llm/agent/path/edit.rb` and
+the single-file diff applier in `lib/scout/llm/agent/path/patch.rb`)
 exposes filesystem operations to agents: how to register a path kind, how
-to override a built-in operation, how to introduce a custom operation, how
-tool aggregation resolves conflicts, what the callback contract and trust
-boundary are, and how the single-file patch operation behaves. It is
-intended for workflow and plugin authors; no Scout internals knowledge is
-assumed beyond `LLM.agent`.
+to declare the kinds a workflow provides (`PATH_KINDS`) so incorporating
+agents receive them, how to override a built-in operation, how to introduce
+a custom operation, how tool aggregation resolves conflicts, what the
+callback contract and trust boundary are, and how the single-file patch
+operation behaves. It is intended for workflow and plugin authors; no
+Scout internals knowledge is assumed beyond `LLM.agent`.
 
 ---
 
@@ -60,7 +63,97 @@ agent.register_path_kind(
   `"resolve"`). Registration is instance-local: kinds registered on one
   agent are invisible to other agents.
 
-## 3. Overriding a built-in without changing its schema
+## 3. Declaring kinds in a workflow: `PATH_KINDS`
+
+A workflow may declare the path kinds it provides as a `PATH_KINDS`
+constant in its own namespace. When an agent incorporates the **entire
+workflow** through a whole-workflow `tool: MyWorkflow` chat line, the
+kinds are discovered and registered on that agent. Task-level imports
+(`tool: MyWorkflow some_task`) register nothing.
+
+The declaration is part of the workflow's Ruby, and the grant happens
+at incorporation: merely loading a workflow's files registers nothing
+anywhere, and the constant alone grants nothing. The two supported
+shapes are a Hash of kind name to definition, or an Array of definition
+Hashes each carrying its own `"name"` key:
+
+```ruby
+module MyWorkflow
+  extend Workflow
+
+  PATH_KINDS = {
+    "notes" => {
+      "description" => "Agent-visible notes area",
+      "roots" => {"project" => File.expand_path("var/notes", __dir__)},
+      "capabilities" => {"read" => true, "edit" => true, "list" => true}
+    },
+    "scratch" => {
+      "description" => "Disposable scratch files",
+      "roots" => {"tmp" => File.expand_path("tmp/scratch", __dir__)}
+    }
+  }
+end
+```
+
+The same content as an Array:
+
+```ruby
+module MyWorkflow
+  PATH_KINDS = [
+    {
+      "name" => "notes",
+      "description" => "Agent-visible notes area",
+      "roots" => {"project" => File.expand_path("var/notes", __dir__)}
+    }
+  ]
+end
+```
+
+Each entry is exactly what `register_path_kind` accepts for a single
+kind (section 2), so `roots`, `locations`, `capabilities`, `overrides`
+and `operations` all mean the same thing here.
+
+Behavior at incorporation:
+
+- **Discovery is namespace-local.** The constant is looked up with
+  `const_defined?(:PATH_KINDS, false)` on the workflow's own namespace,
+  so a constant inherited from a parent module or superclass is not
+  discovered.
+- **Only whole-workflow lines grant.** `tool: MyWorkflow` registers the
+  kinds; `tool: MyWorkflow some_task` does not. Remote `tool:` targets
+  and workflow names that cannot be resolved are skipped silently, and
+  a workflow with no `PATH_KINDS` constant is a silent no-op.
+- **Definitions are deep-copied before registration.** `register_path_kind`
+  copies only one level and `Hash#freeze` is shallow, so the
+  incorporation path makes a full copy first; the shared frozen
+  `PATH_KINDS` constant is never mutated through the registry, and
+  mutating a registered definition never changes the workflow's
+  constant.
+- **Provenance is recorded per kind.** Each incorporated kind name is
+  mapped to its workflow in `agent.path_kind_sources` (bookkeeping
+  only; the authoritative registry is `agent.path_kind_registry`).
+- **A kind name belongs to one workflow.** If two different
+  incorporated workflows declare the same kind name, incorporation
+  raises `ParameterException` naming both workflows and the kind; the
+  order of the two `tool:` lines never decides. Incorporating the same
+  workflow again is idempotent: the kind is re-registered in place and
+  the aggregated tools are refreshed without duplicates.
+- **Malformed declarations fail loudly.** A `PATH_KINDS` that is not a
+  Hash (or Array of Hashes), or an entry that is not a Hash, raises
+  `ParameterException` naming the workflow, the kind and the actual
+  class, for example:
+  `Workflow "MyWorkflow" declares PATH_KINDS as a String; expected a
+  Hash of kind name => definition (or an Array of definition Hashes
+  with a "name" key)`.
+
+There is no chat-level Path role: enabling a kind is done either by
+registering it directly in Ruby (`register_path_kind`, iterated over a
+mapping of kinds when needed, `load_path_plugins`) or by incorporating a
+workflow that declares `PATH_KINDS`. Authorization is unchanged in both
+cases: every operation still goes through `LLM::Sandbox.authorize_path`,
+which fails closed.
+
+## 4. Overriding a built-in without changing its schema
 
 A kind may replace a built-in's implementation through the `"overrides"`
 key. The engine always owns the public tool schema: the agent still sees
@@ -89,9 +182,9 @@ Override call shapes follow the handler `type`:
   ORIGINAL file's termination, whatever the handler returned.
 - `:full`: `implementation.call(agent, target, args)` receives the
   resolved, authorized target and returns the operation result. This is
-  trusted plugin code (see §6).
+  trusted plugin code (see section 7).
 
-## 4. Introducing a custom operation
+## 5. Introducing a custom operation
 
 New operations are declared under `"operations"`:
 
@@ -123,12 +216,13 @@ agent.register_path_kind(
 
 The registered operation appears as one agent tool (`precise_edit`)
 whose arguments are `kind` + `path` + `location` + the declared
-parameters. Query methods answer everything deterministically from the
-registry: `path_operation_support?(kind, op)`,
-`path_operation_override?(kind, op)`, `path_custom_operations`,
-`path_custom_operation(kind, op)`,
-`path_operation_authorization(kind, op)` and
-`path_operation_implementation(kind, op)`.
+parameters. Support, authorization mode and implementation are all read
+from the canonical `operation_table` stored in the kind definition at
+registration time: `path_operation_support?(kind, op)` and
+`path_operation_implementation(kind, op)` wrap the table lookups
+(`operation_table[op]["authorization"]` is the mode;
+`path_kind_definition(kind)["operations"][op]` the custom spec;
+`["overrides"][op]` the override).
 
 Registration validation raises `ParameterException` for: an operation
 name colliding with a built-in, a non-callable implementation, an
@@ -136,7 +230,7 @@ unknown authorization mode or handler type, an override whose target is
 not a built-in, or a declared parameter colliding with the reserved
 `kind`/`path`/`location` arguments.
 
-## 5. Parameter collision policy
+## 6. Parameter collision policy
 
 When several kinds register the same operation name, exactly one tool
 is installed. Their parameter contracts must match exactly after
@@ -160,7 +254,7 @@ become available immediately and no previously installed tool is
 dropped. Registration is atomic — if tool installation fails, the
 half-registered kind is removed again.
 
-## 6. Callback contract and trust boundary
+## 7. Callback contract and trust boundary
 
 Callbacks run **only after** kind validation, path resolution,
 capability checks and authorization have all succeeded. An
@@ -182,7 +276,7 @@ The agent-facing tool callables serialize Scout exceptions as
 `{"exception": ..., "exception_line": ...}`; non-Scout exceptions are
 not caught there — handlers must normalize their own failures.
 
-## 7. Single-file patch; multi-file changes are not supported
+## 8. Single-file patch; multi-file changes are not supported
 
 `patch` is a built-in operation, default-off (`"patch" => true` in
 capabilities to enable). Its tool takes `kind`, `path`, optional
