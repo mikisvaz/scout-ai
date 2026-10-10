@@ -15,18 +15,22 @@ user: write a script that sorts files in a directory
     ppp LLM::OpenWebUI.ask prompt, model: 'qwen3-vl:30b', url: "https://gepeto.bsc.es/api"
   end
 
-  # Offline: stub RestClient.post so only request construction and response
-  # parsing are exercised. OpenWebUI is OpenAI-compatible, so the openai_chat
-  # fixture is replayed as the response body.
+  # Offline: stub RestClient::Request.execute so only request construction and
+  # response parsing are exercised. OpenWebUI is OpenAI-compatible, so the
+  # openai_chat fixture is replayed as the response body.
   def test_ask_request_construction
     fixture = TestFixtures.fixture('backends/openai_chat')
     expected_answer = fixture.dig('choices', 0, 'message', 'content')
 
     recorded = []
-    original = RestClient.method(:post)
+    original = RestClient::Request.method(:execute)
 
-    RestClient.define_singleton_method(:post) do |url, payload, headers|
-      recorded << {url: url, payload: JSON.parse(payload), headers: headers}
+    RestClient::Request.define_singleton_method(:execute) do |**request_options|
+      recorded << {
+        url: request_options[:url],
+        payload: JSON.parse(request_options[:payload]),
+        headers: request_options[:headers]
+      }
       body = Struct.new(:body).new(fixture.to_json)
       body
     end
@@ -36,7 +40,7 @@ user: write a script that sorts files in a directory
                                   model: 'qwen3-vl:30b', url: 'https://openwebui.example/api',
                                   key: 'test-key', persist: false
     ensure
-      RestClient.singleton_class.send(:define_method, :post, original)
+      RestClient::Request.singleton_class.send(:define_method, :execute, original)
     end
 
     assert_equal expected_answer, answer
