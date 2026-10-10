@@ -26,9 +26,9 @@ module LLM
 
           case file_type
           when 'image', 'png', 'jpeg'
-            self.image path, options
+            self.image path
           when 'pdf'
-            self.pdf path, options
+            self.pdf path
           else
             raise ScoutException, "Unkown file type: #{parameters[:file_type]}"
           end
