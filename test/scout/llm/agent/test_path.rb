@@ -91,6 +91,239 @@ class TestPathContracts < Test::Unit::TestCase
     end
   end
 
+  def registration_state
+    registry_present = @agent.instance_variable_defined?(:@path_kinds)
+    registry = @agent.instance_variable_get(:@path_kinds)
+    options_present = @agent.instance_variable_defined?(:@other_options)
+    options = @agent.instance_variable_get(:@other_options)
+    tools_present = options.is_a?(Hash) && options.key?(:tools)
+    tools = tools_present ? options[:tools] : nil
+    {
+      registry_present: registry_present,
+      registry_object: registry,
+      registry_entries: registry.is_a?(Hash) ? registry.dup : nil,
+      options_present: options_present,
+      options_object: options,
+      options_entries: options.is_a?(Hash) ? options.dup : nil,
+      tools_present: tools_present,
+      tools_object: tools,
+      tool_entries: tools.is_a?(Hash) ? tools.dup : nil
+    }
+  end
+
+  def assert_registration_state_unchanged(before)
+    after = registration_state
+    assert_equal before[:registry_present], after[:registry_present]
+    assert_same before[:registry_object], after[:registry_object]
+    assert_equal before[:registry_entries], after[:registry_entries]
+    assert_equal before[:options_present], after[:options_present]
+    assert_same before[:options_object], after[:options_object]
+    assert_equal before[:options_entries], after[:options_entries]
+    assert_equal before[:tools_present], after[:tools_present]
+    assert_same before[:tools_object], after[:tools_object]
+    assert_equal before[:tool_entries], after[:tool_entries]
+    if before[:tool_entries]
+      before[:tool_entries].each do |name, pair|
+        assert_same pair, after[:tool_entries][name], "tool entry #{name} should be unchanged"
+      end
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # Path-map configuration for kind roots
+  # ------------------------------------------------------------------
+
+  def test_relative_roots_are_pinned_against_the_default_current_map
+    @agent.register_path_kind("pinned_kind",
+      "locations" => ["tmp"],
+      "roots" => {"tmp" => "tmp/pathmap_pinned_default"})
+
+    pinned = @agent.path_kind_definition("pinned_kind")["roots"]["tmp"]
+    expected = File.join(Path.setup("tmp/pathmap_pinned_default").follow(:current).to_s)
+    assert_equal expected, pinned
+    assert_equal String, pinned.class
+    assert pinned.start_with?(File::SEPARATOR)
+
+    # Writes through the engine land under the checkout, not ~/.scout
+    target = @agent.resolve_path("pinned_kind", "draft.rb", "tmp")
+    assert_equal File.join(expected, "draft.rb"), target.to_s
+    @agent.path_write({"kind" => "pinned_kind", "path" => "draft.rb", "content" => "x"})
+    assert File.exist?(File.join(expected, "draft.rb"))
+  end
+
+  def test_per_kind_path_map_and_agent_level_option
+    Path.add_path :pathmap_probe_map, File.join(tmpdir.to_s, 'pathmap_probe', '{TOPLEVEL}/{SUBPATH}')
+
+    @agent.register_path_kind("map_kind",
+      "locations" => ["tmp"], "path_map" => :pathmap_probe_map,
+      "roots" => {"tmp" => "some/root"})
+    assert_equal File.join(tmpdir.to_s, 'pathmap_probe', 'some', 'root'),
+                 @agent.path_kind_definition("map_kind")["roots"]["tmp"]
+
+    other = LLM.agent(path_map: :pathmap_probe_map)
+    other.register_path_kind("agent_map_kind",
+      "locations" => ["tmp"],
+      "roots" => {"tmp" => "other/root"})
+    assert_equal File.join(tmpdir.to_s, 'pathmap_probe', 'other', 'root'),
+                 other.path_kind_definition("agent_map_kind")["roots"]["tmp"]
+
+    # The per-kind map wins over the agent-level default
+    third = LLM.agent(path_map: :pathmap_probe_map)
+    third.register_path_kind("explicit_wins",
+      "locations" => ["tmp"], "path_map" => :current,
+      "roots" => {"tmp" => "explicit/root"})
+    assert_equal Path.setup("explicit/root").follow(:current).to_s,
+                 third.path_kind_definition("explicit_wins")["roots"]["tmp"]
+  end
+
+  def test_absolute_roots_pass_through_untouched_even_with_a_map
+    absolute = File.join(tmpdir.to_s, 'abs_passthrough')
+    @agent.register_path_kind("abs_kind",
+      "locations" => ["tmp"], "path_map" => :user,
+      "roots" => {"tmp" => absolute})
+    assert_equal absolute, @agent.path_kind_definition("abs_kind")["roots"]["tmp"]
+
+    path_like = Path.setup(File.join(tmpdir.to_s, 'abs_path_like'))
+    @agent.register_path_kind("abs_path_kind",
+      "locations" => ["tmp"], "path_map" => :user,
+      "roots" => {"tmp" => path_like})
+    assert_equal path_like.to_s, @agent.path_kind_definition("abs_path_kind")["roots"]["tmp"].to_s
+  end
+
+  def test_path_map_validation_raises_parameter_exception
+    e = assert_raise(ParameterException) do
+      @agent.register_path_kind("bad_map_kind",
+        "locations" => ["tmp"], "path_map" => :no_such_map_here,
+        "roots" => {"tmp" => File.join(tmpdir.to_s, 'x')})
+    end
+    assert_match(/not a resolvable Scout path map/, e.message)
+
+    e2 = assert_raise(ParameterException) do
+      @agent.register_path_kind("bad_type_map_kind",
+        "locations" => ["tmp"], "path_map" => 42,
+        "roots" => {"tmp" => File.join(tmpdir.to_s, 'x')})
+    end
+    assert_match(/must be a String or Symbol/, e2.message)
+
+    bad_agent = LLM.agent(path_map: 7)
+    e3 = assert_raise(ParameterException) do
+      bad_agent.register_path_kind("agent_map_bad",
+        "locations" => ["tmp"],
+        "roots" => {"tmp" => File.join(tmpdir.to_s, 'x')})
+    end
+    assert_match(/must be a String or Symbol/, e3.message)
+  end
+
+  def test_implicit_project_root_honors_path_map
+    @agent.register_path_kind("project_map_kind",
+      "locations" => %w[tmp project],
+      "path_map" => :current,
+      "roots" => {"tmp" => File.join(tmpdir.to_s, 'project_map')})
+
+    target = @agent.resolve_path("project_map_kind", "x.rb", "project")
+    assert target.to_s.start_with?(File::SEPARATOR)
+    assert_equal Path.setup("x.rb").follow(:current).to_s, target.to_s
+  end
+
+  def test_invalid_location_root_and_default_declarations_are_atomic
+    invalid_definitions = {
+      "non-array locations" => {"locations" => "project"},
+      "empty locations" => {"locations" => []},
+      "duplicate locations" => {"locations" => %w[project project]},
+      "empty location name" => {"locations" => [""]},
+      "roots are not a mapping" => {"roots" => []},
+      # NOTE: a relative root is no longer invalid — it is pinned against
+      # the effective path map at registration (see
+      # test_relative_roots_are_pinned_against_the_path_map).
+      "missing declared root" => {"locations" => %w[project tmp],
+                                   "roots" => {"project" => @tmpdir}},
+      "unsupported default" => {"locations" => ["project"],
+                                 "default_location" => "tmp",
+                                 "roots" => {"project" => @tmpdir}},
+      "non-string default" => {"locations" => ["project"],
+                                "default_location" => :project,
+                                "roots" => {"project" => @tmpdir}}
+    }
+
+    invalid_definitions.each do |label, definition|
+      before = registration_state
+      assert_raise(ParameterException, label) do
+        @agent.register_path_kind("invalid_#{label.gsub(/\W+/, '_')}", definition)
+      end
+      assert_registration_state_unchanged(before)
+    end
+  end
+
+  def test_invalid_capability_and_custom_operation_values_are_atomic
+    valid_root = {"project" => @tmpdir}
+    invalid_definitions = {
+      "unknown capability" => {"capabilities" => {"teleport" => true}},
+      "non-boolean capability" => {"capabilities" => {"read" => "yes"}},
+      "capabilities wrong shape" => {"capabilities" => "read"},
+      "invalid custom authorization value" => {
+        "operations" => {"custom_op" => {"implementation" => ->(*) {}, "authorization" => 42}}
+      },
+      "invalid custom authorization mode" => {
+        "operations" => {"custom_op" => {"implementation" => ->(*) {}, "authorization" => :admin}}
+      },
+      "false operations mapping" => {"operations" => false},
+      "false overrides mapping" => {"overrides" => false},
+      "false custom authorization" => {
+        "operations" => {"custom_op" => {"implementation" => ->(*) {}, "authorization" => false}}
+      },
+      "invalid custom operation type value" => {
+        "operations" => {"custom_op" => {"implementation" => ->(*) {}, "type" => 42}}
+      },
+      "false custom operation type" => {
+        "operations" => {"custom_op" => {"implementation" => ->(*) {}, "type" => false}}
+      },
+      "false custom operation parameters" => {
+        "operations" => {"custom_op" => {"implementation" => ->(*) {}, "parameters" => false}}
+      },
+      "unknown custom operation type" => {
+        "operations" => {"custom_op" => {"implementation" => ->(*) {}, "type" => :mystery}}
+      }
+    }
+
+    invalid_definitions.each do |label, definition|
+      before = registration_state
+      assert_raise(ParameterException, label) do
+        @agent.register_path_kind("invalid_#{label.gsub(/\W+/, '_')}",
+                                  {"roots" => valid_root}.merge(definition))
+      end
+      assert_registration_state_unchanged(before)
+    end
+  end
+
+  def test_invalid_hook_and_promotion_destination_declarations_are_atomic
+    invalid_definitions = {
+      "non-callable hook" => {"resolve" => "not callable"},
+      "numeric promotion destination" => {"capabilities" => {"promote" => true},
+                                           "promotion_destination" => 42},
+      "callable promotion destination" => {"capabilities" => {"promote" => true},
+                                             "promotion_destination" => ->(*) { "project" }},
+      "undeclared promotion destination" => {"locations" => ["project"],
+                                               "capabilities" => {"promote" => true},
+                                               "promotion_destination" => "missing"},
+      "invalid promotion location" => {"locations" => ["project"],
+                                         "capabilities" => {"promote" => true},
+                                         "promotion_destination" => {"location" => 12}},
+      "promotion enabled without destination location" => {"locations" => ["tmp"],
+                                                             "default_location" => "tmp",
+                                                             "roots" => {"tmp" => @tmpdir},
+                                                             "capabilities" => {"promote" => true}}
+    }
+
+    invalid_definitions.each do |label, definition|
+      before = registration_state
+      assert_raise(ParameterException, label) do
+        @agent.register_path_kind("invalid_#{label.gsub(/\W+/, '_')}",
+                                  {"roots" => {"project" => @tmpdir}}.merge(definition))
+      end
+      assert_registration_state_unchanged(before)
+    end
+  end
+
   def test_registering_multiple_kinds_in_sequence
     {
       "text" => {
@@ -136,6 +369,7 @@ class TestPathContracts < Test::Unit::TestCase
     assert @agent.path_kind_capable?("text", "validate")
     assert @agent.path_kind_capable?("text", "test")
     assert @agent.path_kind_capable?("text", "promote")
+    assert_equal true, @agent.path_kind_capable?("text", "promote")
   end
 
   def test_path_rename_checks_rename_capability_independently
@@ -220,6 +454,8 @@ class TestPathContracts < Test::Unit::TestCase
     spec = @agent.path_kind_definition("plain")["operations"]["noop"]
     assert_equal :write, spec["authorization"]
     assert_equal :full, spec["type"]
+    assert_equal({}, spec["parameters"])
+    assert_equal({}, @agent.path_kind_definition("plain")["overrides"])
     assert_equal :write,
                  @agent.path_kind_definition("plain")["operation_table"]["noop"]["authorization"]
   end
@@ -306,7 +542,9 @@ class TestPathContracts < Test::Unit::TestCase
       }
     )
 
-    # type mismatch on the same parameter
+    # This failure occurs in tool aggregation after path_kinds and built-in
+    # tools have been replaced, so compare the full observable state first.
+    before = registration_state
     error = assert_raise(ParameterException) do
       @agent.register_path_kind(
         "beta",
@@ -327,8 +565,8 @@ class TestPathContracts < Test::Unit::TestCase
     assert error.message.include?("alpha")
     assert error.message.include?("beta")
     assert error.message.include?("replacement")
+    assert_registration_state_unchanged(before)
 
-    # required-set mismatch
     error2 = assert_raise(ParameterException) do
       @agent.register_path_kind(
         "gamma",
@@ -346,6 +584,7 @@ class TestPathContracts < Test::Unit::TestCase
       )
     end
     assert error2.message.include?("required")
+    assert_registration_state_unchanged(before)
   end
 
   def test_failed_kind_registration_rolls_back_registry_and_tool_surface_recovers
@@ -353,43 +592,85 @@ class TestPathContracts < Test::Unit::TestCase
       "alpha",
       "roots" => {"project" => @tmpdir},
       "operations" => {
+        "a_partial" => {
+          "description" => "Alpha partial operation",
+          "parameters" => {"properties" => {}, "required" => []},
+          "implementation" => ->(*) { "ok" }
+        },
         "precise_edit" => {
           "description" => "Alpha precise edit",
           "parameters" => {
             "properties" => {"replacement" => {"type" => "string"}},
             "required" => ["replacement"]
           },
-          "implementation" => ->(content, args) { content }
+          "implementation" => ->(*) { "ok" }
         }
       }
     )
+    before = registration_state
 
     assert_raise(ParameterException) do
       @agent.register_path_kind(
         "beta",
         "roots" => {"project" => @tmpdir},
         "operations" => {
+          "a_partial" => {
+            "description" => "Beta partial operation",
+            "parameters" => {"properties" => {}, "required" => []},
+            "implementation" => ->(*) { "ok" }
+          },
           "precise_edit" => {
-            "description" => "Beta precise edit",
+            "description" => "Conflicting precise edit",
             "parameters" => {
               "properties" => {"replacement" => {"type" => "integer"}},
               "required" => ["replacement"]
             },
-            "implementation" => ->(content, args) { content }
+            "implementation" => ->(*) { "ok" }
           }
         }
       )
     end
 
-    # Atomic rollback: the failed kind leaves no partial registration behind
+    # Installation processes a_partial before discovering the later conflict.
+    # The earlier tool update and candidate kind must both be rolled back.
+    assert_registration_state_unchanged(before)
     assert_equal %w[alpha], @agent.path_kind_registry.keys
+    assert_false step4_tools.key?("beta")
 
-    # The next successful registration re-syncs the aggregated tool surface
     @agent.register_path_kind("gamma", "roots" => {"project" => @tmpdir})
     assert_equal %w[alpha gamma], @agent.path_kind_registry.keys.sort
-
     enum = step4_tools["path_kinds"][1][:function][:parameters][:properties]["kind"][:enum]
     assert_equal %w[alpha gamma], enum.sort
+  end
+
+  def test_failed_replacement_restores_same_name_kind_and_tool_definitions
+    register_two_kinds_with_same_operation(
+      first_description: "Alpha precise edit",
+      second_description: "Beta precise edit"
+    )
+    old_alpha = @agent.path_kind_definition("alpha")
+    before = registration_state
+
+    error = assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "alpha",
+        "roots" => {"project" => @tmpdir},
+        "operations" => {
+          "precise_edit" => {
+            "description" => "Replacement with incompatible contract",
+            "parameters" => {
+              "properties" => {"replacement" => {"type" => "integer"}},
+              "required" => ["replacement"]
+            },
+            "implementation" => ->(*) { "replacement" }
+          }
+        }
+      )
+    end
+
+    assert_include error.message, "precise_edit"
+    assert_same old_alpha, @agent.path_kind_definition("alpha")
+    assert_registration_state_unchanged(before)
   end
 
   def test_description_resolves_by_registration_order

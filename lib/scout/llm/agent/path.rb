@@ -117,6 +117,9 @@ module LLM
 
       name = name.to_s
       raise ParameterException, "Path kind cannot be empty" if name.empty?
+      unless Hash === definition
+        raise ParameterException, "Path kind definition must be a mapping"
+      end
 
       definition = definition.dup
       definition["name"] = name
@@ -126,44 +129,301 @@ module LLM
       end
       definition["description"] ||= "#{name} path"
 
+      definition["locations"] ||= ["project"]
+      path_validate_locations!(definition)
+
+      # Scout path maps: normalize an optional per-kind "path_map" key, then
+      # pin NON-absolute roots against the effective map (the kind's map,
+      # else the agent-level path_map option, else :current) BEFORE the
+      # absolute-root validation. Absolute roots pass through untouched.
+      definition.delete("path_map") if definition["path_map"].nil?
+      unless definition["path_map"].nil?
+        definition["path_map"] =
+          path_map_validate!(definition["path_map"], "Path kind #{name.inspect} path_map")
+      end
+      effective_path_map = path_kind_effective_map(definition)
+      path_pin_roots!(definition, effective_path_map)
+
+      path_validate_roots!(definition)
+
       capabilities = definition.fetch("capabilities", {})
-      capabilities = if Array === capabilities
-                       hash = {}
-                       capabilities.each{|c| hash[c] = true }
-                       hash
-                     else
-                       capabilities
-                     end
+      if Array === capabilities
+        unless capabilities.all? { |operation| String === operation || Symbol === operation }
+          raise ParameterException, "Path kind capabilities must name built-in operations"
+        end
+        capabilities = capabilities.each_with_object({}) do |operation, hash|
+          hash[operation.to_s] = true
+        end
+      elsif Hash === capabilities
+        capabilities = capabilities.each_with_object({}) do |(operation, enabled), hash|
+          unless String === operation || Symbol === operation
+            raise ParameterException, "Path kind capability names must be strings or symbols"
+          end
+          operation = operation.to_s
+          unless BUILT_IN_OPERATIONS.include?(operation)
+            raise ParameterException, "Unknown Path kind capability #{operation.inspect}"
+          end
+          unless [true, false].include?(enabled)
+            raise ParameterException, "Path kind capability #{operation.inspect} must be boolean"
+          end
+          hash[operation] = enabled
+        end
+      else
+        raise ParameterException, "Path kind capabilities must be an Array or mapping"
+      end
+      capabilities.each_key do |operation|
+        unless BUILT_IN_OPERATIONS.include?(operation)
+          raise ParameterException, "Unknown Path kind capability #{operation.inspect}"
+        end
+      end
       definition["capabilities"] = DEFAULT_CAPABILITIES.merge(capabilities)
 
-      definition["locations"] ||= ["project"]
-      definition["default_location"] ||= definition["locations"].first
+      default_location = definition["default_location"]
+      default_location = definition["locations"].first if default_location.nil?
+      unless String === default_location && definition["locations"].include?(default_location)
+        raise ParameterException,
+          "Default location #{default_location.inspect} is not included in locations for #{name}"
+      end
+      definition["default_location"] = default_location
 
+      path_validate_kind_hooks!(definition)
+      path_validate_promotion_destination!(definition)
       definition["operations"] = path_normalize_custom_operations(definition)
       definition["overrides"] = path_normalize_operation_overrides(definition)
-
-      unless definition["locations"].include?(definition["default_location"])
-        raise ParameterException,
-          "Default location #{definition['default_location'].inspect} " \
-          "is not included in locations for #{name}"
-      end
 
       definition["operation_table"] =
         path_operation_table(definition["capabilities"],
                              definition["operations"],
                              definition["overrides"])
 
-      path_kind_registry[name] = definition
+      had_registry = instance_variable_defined?(:@path_kinds)
+      registry = path_kind_registry
+      had_previous_kind = registry.key?(name)
+      previous_kind = registry[name]
+      had_options = instance_variable_defined?(:@other_options)
+      previous_options = @other_options if had_options
+      previous_tools_present = previous_options.is_a?(Hash) && previous_options.key?(:tools)
+      previous_tools = previous_options[:tools] if previous_tools_present
+      previous_tool_entries = previous_tools.dup if previous_tools.is_a?(Hash)
+
+      registry[name] = definition
       begin
         install_path_tools
       rescue Exception
-        # Registration is atomic: a failed install (for example a custom
-        # operation contract conflict with an already-registered kind) must
-        # not leave the half-registered kind behind.
-        path_kind_registry.delete(name)
+        # Restore the exact prior registration and installed tool entries. The
+        # installation routine updates the tool Hash incrementally, so merely
+        # deleting the candidate kind would leave stale/partial tool schemas.
+        if had_previous_kind
+          registry[name] = previous_kind
+        else
+          registry.delete(name)
+        end
+        remove_instance_variable(:@path_kinds) unless had_registry
+
+        if had_options
+          @other_options = previous_options
+          if previous_options.is_a?(Hash)
+            if previous_tools_present
+              if previous_tools.is_a?(Hash) && previous_tool_entries
+                previous_tools.replace(previous_tool_entries)
+              end
+              previous_options[:tools] = previous_tools
+            else
+              previous_options.delete(:tools)
+            end
+          end
+        elsif instance_variable_defined?(:@other_options)
+          remove_instance_variable(:@other_options)
+        end
         raise
       end
       definition
+    end
+
+    # Validate declared location names before any registry or tool mutation.
+    def path_validate_locations!(definition)
+      locations = definition["locations"]
+      unless Array === locations && !locations.empty? &&
+             locations.all? { |location| String === location && !location.empty? } &&
+             locations.uniq.length == locations.length
+        raise ParameterException,
+          "Path kind locations must be a nonempty Array of unique, nonempty Strings"
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Scout path maps for kind roots
+    # ------------------------------------------------------------------
+    # A NON-absolute (relative/unlocated) root would otherwise be carried
+    # as a logical Scout path and re-resolved later (Path#find on a missing
+    # target falls back through Scout's map_order to :user, i.e. ~/.scout).
+    # The map declared here (per kind, else the agent-level :path_map
+    # option, else :current) is applied ONCE at registration and the result
+    # is pinned to an absolute String, so the filesystem boundary
+    # (plain File.* on target.to_s) can never re-resolve.
+    DEFAULT_PATH_MAP = :current
+
+    # The agent-level default map, an option on this Agent instance:
+    #   LLM.agent(path_map: :lib) { ... }
+    def path_map_option
+      raw = @other_options.key?(:path_map) ? @other_options[:path_map] : nil
+      raw = nil if raw.to_s.empty?
+      raw.nil? ? DEFAULT_PATH_MAP : path_map_validate!(raw, "Agent path_map option")
+    end
+
+    # Effective map for one kind: the kind's own "path_map" key wins, then
+    # the agent-level default. Returns a Symbol.
+    def path_kind_effective_map(definition)
+      map = definition["path_map"]
+      map = path_map_option if map.nil?
+      Symbol === map ? map : map.to_s.to_sym
+    end
+
+    # A map must be a String or Symbol naming a resolvable Scout path map.
+    # Instance maps (Path.add_path / per-PATH maps) and the global
+    # Path.path_maps table are both accepted; anything else raises the
+    # framework's parameter error.
+    def path_map_validate!(map, label)
+      unless String === map || Symbol === map
+        raise ParameterException,
+          "#{label} must be a String or Symbol naming a Scout path map"
+      end
+      name = map.to_s.to_sym
+      begin
+        Scout.root.follow(name)
+      rescue StandardError => error
+        raise ParameterException,
+          "#{label} is not a resolvable Scout path map: #{map.inspect} " \
+          "(#{error.class}: #{error.message.split("\n").first.strip[0, 120]})"
+      end
+      name
+    end
+
+    # Pin every NON-absolute root of the definition against the effective
+    # map and store it back as an absolute String. Absolute roots (Strings
+    # or Path-likes) pass through untouched, so kinds that already resolve
+    # to absolute roots keep their current placement (compatibility rule).
+    def path_pin_roots!(definition, effective_map)
+      roots = definition["roots"]
+      return unless Hash === roots
+
+      roots.each_pair do |location, root|
+        next if root.to_s.start_with?(File::SEPARATOR)
+
+        root = Path.setup(root.to_s)
+        begin
+          pinned = root.follow(effective_map)
+        rescue StandardError => error
+          raise ParameterException,
+            "Path kind #{definition['name'].inspect} root for location #{location.inspect} " \
+            "could not be resolved against path map #{effective_map.inspect}: " \
+            "#{error.class}: #{error.message.split("\n").first.strip[0, 120]}"
+        end
+        pinned = pinned.to_s
+        unless pinned.start_with?(File::SEPARATOR)
+          raise ParameterException,
+            "Path kind #{definition['name'].inspect} root for location #{location.inspect} " \
+            "did not resolve to an absolute path through map #{effective_map.inspect}"
+        end
+        roots[location] = pinned
+      end
+    end
+
+    # Roots are authorization grants. Every declared location needs a root,
+    # except the long-standing implicit project root used by resolve_path and
+    # path_authorize! when no explicit project root is supplied.
+    def path_validate_roots!(definition)
+      roots = definition.fetch("roots", {})
+      unless Hash === roots
+        raise ParameterException, "Path kind roots must be a mapping"
+      end
+      roots.each_pair do |location, root|
+        unless String === location && !location.empty?
+          raise ParameterException,
+            "Path kind root location names must be nonempty Strings"
+        end
+        path_validate_root!(location, root)
+      end
+
+      definition["locations"].each do |location|
+        next if roots.key?(location)
+        next if location == "project"
+
+        raise ParameterException,
+          "Path kind #{definition['name']} has no root configured for location #{location}"
+      end
+
+      if definition["locations"].include?("project") && !roots.key?("project")
+        begin
+          path_validate_root!("project", Scout.root.find(path_kind_effective_map(definition)))
+        rescue ParameterException
+          raise
+        rescue StandardError => error
+          raise ParameterException,
+            "Path kind implicit project root is unavailable: #{error.message}"
+        end
+      end
+    end
+
+    def path_validate_root!(location, root)
+      root_string = root.to_s
+      scout_path = root.respond_to?(:to_path) ||
+                   (defined?(Path) && Path === root)
+      unless !root_string.empty? && root_string.start_with?(File::SEPARATOR) &&
+             (String === root || scout_path)
+        raise ParameterException,
+          "Path kind root for location #{location.inspect} must be a nonempty absolute path " \
+          "or an absolute Scout Path-like object"
+      end
+    end
+
+    def path_validate_kind_hooks!(definition)
+      %w[resolve list validate test smoke promotion_post_move].each do |hook|
+        next unless definition.key?(hook)
+        unless definition[hook].respond_to?(:call)
+          raise ParameterException, "Path kind #{hook} hook must be Callable"
+        end
+      end
+    end
+
+    # Promotion destinations are resolved and authorized by the engine, so
+    # only the documented declarative forms may be stored in a kind.
+    def path_validate_promotion_destination!(definition)
+      destination = definition["promotion_destination"]
+      if destination.nil?
+        # The implicit project destination matters only when promotion is
+        # enabled; non-promotable kinds need not declare an unused location.
+        return unless definition["capabilities"].fetch("promote", false)
+        location = "project"
+        unless definition["locations"].include?(location)
+          raise ParameterException,
+            "Invalid promotion destination for path kind #{definition['name']}: default project location is not declared"
+        end
+        return
+      end
+
+      if String === destination
+        unless definition["locations"].include?(destination)
+          raise ParameterException,
+            "Invalid promotion destination for path kind #{definition['name']}: location #{destination.inspect} is not declared"
+        end
+        return
+      end
+
+      unless Hash === destination && destination.key?("location") &&
+             (destination.keys - %w[location path]).empty?
+        raise ParameterException,
+          "Invalid promotion destination for path kind #{definition['name']}: expected a location String or a Hash with location and optional path"
+      end
+      location = destination["location"]
+      unless String === location && definition["locations"].include?(location)
+        raise ParameterException,
+          "Invalid promotion destination for path kind #{definition['name']}: location #{location.inspect} is not declared"
+      end
+      if destination.key?("path") && !(String === destination["path"])
+        raise ParameterException,
+          "Invalid promotion destination for path kind #{definition['name']}: path must be a String"
+      end
     end
 
     # Build the per-kind operation table at registration time: one entry per
@@ -264,7 +524,8 @@ module LLM
     # ESTABLISHES support for it on that kind: no capability flag, no
     # second boolean.
     def path_normalize_custom_operations(definition)
-      operations = definition["operations"] || {}
+      operations = definition["operations"]
+      operations = {} if operations.nil?
       unless operations.respond_to?(:each_pair)
         raise ParameterException,
           "Path kind operations must be a mapping of operation name to spec"
@@ -282,7 +543,7 @@ module LLM
         end
 
         spec = {"implementation" => spec} if spec.respond_to?(:call)
-        unless spec.respond_to?(:[])
+        unless Hash === spec
           raise ParameterException,
             "Custom operation #{name.inspect} must be a Callable or a spec Hash"
         end
@@ -293,7 +554,13 @@ module LLM
             "Custom operation #{name.inspect} requires an implementation Callable"
         end
 
-        authorization = (spec["authorization"] || :write).to_sym
+        authorization = spec["authorization"]
+        authorization = :write if authorization.nil?
+        unless String === authorization || Symbol === authorization
+          raise ParameterException,
+            "Custom operation #{name.inspect} authorization must be a String or Symbol"
+        end
+        authorization = authorization.to_sym
         unless PATH_AUTHORIZATION_MODES.include?(authorization)
           raise ParameterException,
             "Custom operation #{name.inspect} authorization must be one of " \
@@ -301,15 +568,22 @@ module LLM
             "#{authorization.inspect}"
         end
 
-        handler = (spec["type"] || :full).to_sym
+        handler = spec["type"]
+        handler = :full if handler.nil?
+        unless String === handler || Symbol === handler
+          raise ParameterException,
+            "Custom operation #{name.inspect} type must be a String or Symbol"
+        end
+        handler = handler.to_sym
         unless PATH_HANDLER_TYPES.include?(handler)
           raise ParameterException,
             "Custom operation #{name.inspect} type must be one of " \
             "#{PATH_HANDLER_TYPES.map(&:inspect).join(', ')}; got #{handler.inspect}"
         end
 
-        parameters = spec["parameters"] || {}
-        unless parameters.respond_to?(:[])
+        parameters = spec["parameters"]
+        parameters = {} if parameters.nil?
+        unless Hash === parameters
           raise ParameterException,
             "Custom operation #{name.inspect} parameters must be a Hash"
         end
@@ -355,7 +629,8 @@ module LLM
     # replaces the implementation ONLY; the public tool schema stays
     # engine-owned, and capability gating is not bypassed.
     def path_normalize_operation_overrides(definition)
-      overrides = definition["overrides"] || {}
+      overrides = definition["overrides"]
+      overrides = {} if overrides.nil?
       unless overrides.respond_to?(:each_pair)
         raise ParameterException,
           "Path kind overrides must be a mapping of built-in name to implementation"
@@ -371,7 +646,7 @@ module LLM
         end
 
         spec = {"implementation" => spec} if spec.respond_to?(:call)
-        implementation = spec["implementation"] if spec.respond_to?(:[])
+        implementation = spec["implementation"] if Hash === spec
         unless implementation.respond_to?(:call)
           raise ParameterException,
             "Override #{name.inspect} requires an implementation Callable"
@@ -836,7 +1111,7 @@ module LLM
       roots = definition.fetch("roots", {})
       case location
       when nil, 'project', :project
-        root = roots.fetch(location.to_s) { Scout.root.find(:current) }
+        root = roots.fetch(location.to_s) { Scout.root.find(path_kind_effective_map(definition)) }
       else
         root = roots.fetch(location.to_s) do
           raise ParameterException,
@@ -870,7 +1145,7 @@ module LLM
 
       location = (location || definition["default_location"]).to_s
       root = if location == "project" && !definition.fetch("roots", {}).key?(location)
-               Scout.root.find(:current)
+               Scout.root.find(path_kind_effective_map(definition))
              else
                definition.fetch("roots", {}).fetch(location) do
                  raise ParameterException, "No sandbox root configured for #{kind} at #{location}"
@@ -1106,15 +1381,16 @@ module LLM
           raise ParameterException, "No root configured for #{kind} at location #{location}"
         end.to_s
       else
-        root = Scout.root.find(:current)
+        root = Scout.root.find(path_kind_effective_map(definition))
       end
-      entries = if target.respond_to?(:glob)
-                  target.glob("**/*")
-                else
-                  base = prefix.empty? ? root : target.to_s
-                  Dir.glob(File.join(base, "**", "*"), File::FNM_DOTMATCH)
-                    .reject { |entry| File.directory?(entry) }
-                end
+      # H4 hardening: the target is always a plain absolute String here
+      # (resolve_path returns root[path] and every registered root is pinned
+      # absolute at registration), so go straight to Dir.glob on the pinned
+      # String. Path#glob on an unlocated logical path would resolve through
+      # Scout's map_order and could reach :user; Dir.glob never re-resolves.
+      base = prefix.empty? ? root : target.to_s
+      entries = Dir.glob(File.join(base, "**", "*"), File::FNM_DOTMATCH)
+                     .reject { |entry| File.directory?(entry) }
       # Listing has always returned paths relative to the configured kind root,
       # even when the prefix supplied by the caller is absolute.
       entries.map { |entry| entry.to_s.sub(%r{\A#{Regexp.escape(root)}/?}, "") }.sort

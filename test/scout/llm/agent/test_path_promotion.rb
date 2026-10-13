@@ -215,20 +215,16 @@ class TestPathPromotion < Test::Unit::TestCase
     assert !File.exist?(File.join(definition["roots"]["project"], "rogue.txt"))
   end
 
-  def test_promotion_denies_destination_location_without_configured_root
-    definition = register_promotable_kind(
-      "locations" => %w[tmp elsewhere],
-      "promotion_destination" => {"location" => "elsewhere"}
-    )
-    File.write(File.join(definition["roots"]["tmp"], "show.slim"), "content")
-
+  def test_promotion_destination_location_without_configured_root_is_rejected_at_registration
     error = assert_raise(ParameterException) do
-      @agent.path_promote("kind" => "view", "path" => "show.slim")
+      register_promotable_kind(
+        "locations" => %w[tmp elsewhere],
+        "promotion_destination" => {"location" => "elsewhere"}
+      )
     end
-    assert_match(/No root configured for view at location elsewhere/, error.message)
-
-    assert File.exist?(File.join(definition["roots"]["tmp"], "show.slim"))
-    assert !File.exist?(File.join(@tmpdir, "elsewhere", "show.slim"))
+    assert_match(/no root configured for location elsewhere/i, error.message)
+    assert_false @agent.path_kind_registry.key?("view")
+    assert_equal({}, @agent.instance_variable_get(:@other_options))
   end
 
   def test_promotion_denies_destination_traversal
@@ -316,40 +312,29 @@ class TestPathPromotion < Test::Unit::TestCase
     assert !File.exist?(source)
   end
 
-  def test_promotion_rejects_invalid_destination_specification
-    definition = register_promotable_kind("promotion_destination" => 42)
-    File.write(File.join(definition["roots"]["tmp"], "show.slim"), "content")
-
+  def test_promotion_numeric_destination_specification_is_rejected_at_registration
     error = assert_raise(ParameterException) do
-      @agent.path_promote("kind" => "view", "path" => "show.slim")
+      register_promotable_kind("promotion_destination" => 42)
     end
     assert_match(/Invalid promotion destination for path kind view/, error.message)
-
-    assert File.exist?(File.join(definition["roots"]["tmp"], "show.slim"))
-    assert !File.exist?(File.join(definition["roots"]["project"], "show.slim"))
+    assert_false @agent.path_kind_registry.key?("view")
+    assert_equal({}, @agent.instance_variable_get(:@other_options))
   end
 
-  def test_promotion_callable_destination_spec_is_rejected
-    # A Callable promotion destination would have to run BEFORE the
-    # destination is authorized; a side-effecting callable could mutate
-    # anywhere.  The declarative-only contract rejects it up front.
+  def test_promotion_callable_destination_spec_is_rejected_at_registration
     called = false
-    definition = register_promotable_kind(
-      "promotion_destination" => lambda do |_agent, _path, _location, _args|
-        called = true
-        {"location" => "project"}
-      end
-    )
-    File.write(File.join(definition["roots"]["tmp"], "show.slim"), "content")
-
     error = assert_raise(ParameterException) do
-      @agent.path_promote("kind" => "view", "path" => "show.slim")
+      register_promotable_kind(
+        "promotion_destination" => lambda do |_agent, _path, _location, _args|
+          called = true
+          {"location" => "project"}
+        end
+      )
     end
     assert_match(/Invalid promotion destination for path kind view/, error.message)
-    assert !called
-
-    assert File.exist?(File.join(definition["roots"]["tmp"], "show.slim"))
-    assert !File.exist?(File.join(definition["roots"]["project"], "show.slim"))
+    assert_false called
+    assert_false @agent.path_kind_registry.key?("view")
+    assert_equal({}, @agent.instance_variable_get(:@other_options))
   end
 
   def test_promotion_string_destination_spec_selects_location

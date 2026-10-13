@@ -99,17 +99,16 @@ class TestPathErrors < Test::Unit::TestCase
     assert_match(/Location "missing" is not supported by path kind text/, error.message)
   end
 
-  def test_error_matrix_location_without_configured_root
-    @agent.register_path_kind(
-      "orphan", "locations" => ["tmp", "custom"], "default_location" => "tmp",
-      "roots" => {"tmp" => @tmpdir}
-    )
-
+  def test_error_matrix_location_without_configured_root_is_rejected_at_registration
     error = assert_raise(ParameterException) do
-      @agent.path_read("kind" => "orphan", "path" => "hello.txt",
-                       "location" => "custom")
+      @agent.register_path_kind(
+        "orphan", "locations" => ["tmp", "custom"], "default_location" => "tmp",
+        "roots" => {"tmp" => @tmpdir}
+      )
     end
-    assert_match(/No root configured for orphan at location custom/, error.message)
+    assert_match(/no root configured for location custom/i, error.message)
+    assert_false @agent.path_kind_registry.key?("orphan")
+    assert_equal({}, @agent.instance_variable_get(:@other_options))
   end
 
   def test_error_matrix_missing_required_argument

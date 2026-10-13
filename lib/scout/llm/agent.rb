@@ -32,6 +32,10 @@ module LLM
                         m.name = 'ScoutAgent'
                         m.tasks = {}
                         m.libdir = nil
+                        # Pin the anonymous agent workflow's job directory to
+                        # the checkout var/jobs (path-map leak fix, H2); see
+                        # AgentWorkflow.pin_workflow_job_directory!.
+                        AgentWorkflow.pin_workflow_job_directory!(m) if AgentWorkflow.respond_to?(:pin_workflow_job_directory!)
                         m
                       end
       end
@@ -234,7 +238,7 @@ module LLM
       agent_name = agent_name.to_s if Symbol === agent_name
       if agent_name && ::Path.is_filename?(agent_name) 
         if File.directory?(agent_name)
-          dir = Path.setup(agent_name) unless Path === agent_name
+          dir = Path.setup(agent_name)
           if dir.agent.find_with_extension("rb").exists?
             return load dir.agent.find_with_extension("rb")
           end

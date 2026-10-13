@@ -29,13 +29,98 @@ agent.register_path_kind(
 )
 ```
 
-Relative roots are rejected at authorization time: `path_authorize!`
-forwards absolute target and root strings to `LLM::Sandbox.authorize_path`,
-which fails closed on anything it cannot compare exactly (symlinks are
-resolved before comparison). There is no fallback interpretation, so a
-relative root never widens access by accident.
+Relative roots are pinned against the effective path map at registration
+time (see section 2), so by the time authorization runs every root is an
+absolute path string. `path_authorize!` forwards absolute target and root
+strings to `LLM::Sandbox.authorize_path`, which fails closed on anything
+it cannot compare exactly (symlinks are resolved before comparison). There
+is no fallback interpretation, so a relative root never widens access by
+accident.
 
-## 2. Registering a kind
+## 2. Path maps
+
+Kinds may be declared with roots that are convenient relative spellings
+(`"share/tasks"`, `"tmp/scratch"`) instead of pre-expanded absolute paths.
+The engine resolves those spellings once, at registration, against a Scout
+path map and stores the result as a pinned absolute `String`. The
+filesystem boundary then never re-resolves: `resolve_path` joins
+`root[path]` on the pinned string, and the read/write/edit boundary does
+plain `File.*` on the result. Nothing downstream can fall back through
+Scout's map order again.
+
+Why pinning exists: Scout's `Path#find` walks `map_order` for a path that
+is unlocated and missing, and the final map in that order is
+`:default => :user` (`~/.scout`). A relative root held as an unlocated
+Scout `Path` therefore targeted `~/.scout` exactly in the "write a NEW
+draft" case, where the checkout copy does not exist yet. Pinning removes
+the fallback entirely.
+
+Two configuration points govern resolution:
+
+- **Agent-level default**: `LLM.agent(path_map: :current)`. The name is
+  `path_map`; it applies whenever a kind does not set its own map and also
+  governs the implicit project root used by `resolve_path`/`path_authorize!`
+  when no explicit `"project"` root is configured. The default is
+  `:current` (the checkout; identical semantics to `Scout.root.find(:current)`).
+- **Per-kind override**: the `"path_map"` definition key
+  (`"path_map" => :lib`), which takes precedence over the agent default.
+
+Resolution is `Scout.root.find(path_map)`; for `:current` this is a plain
+`String` pinned to the checkout root.
+
+Compatibility rule: a root that is already absolute today keeps its
+placement unchanged. Whether it was declared absolute or produced by
+libdir/workflow-root logic in `workflow_kinds.rb`, it passes through
+verbatim — pinning is only applied to relative spellings, and it only
+applies even when an agent-level `path_map` is configured. Live kinds with
+absolute roots therefore keep their current placement; the new default
+only changes behavior for roots that would otherwise be relative
+(the leak case).
+
+Validation at registration raises `ParameterException` for:
+
+- a `"path_map"` (or agent `path_map:`) value that is not a `String` or
+  `Symbol`;
+- a map name Scout cannot resolve (`Path#find` raises `RuntimeError:
+  Map not found ...`), which is wrapped into the same `ParameterException`
+  envelope with the offending name.
+
+Any `StandardError` raised while resolving the map or the root is wrapped
+the same way, so an invalid configuration can never surface as a raw Ruby
+exception.
+
+### Job-directory pinning (H2)
+
+Separately from kind roots, chat-task workflows built by
+`lib/scout/llm/agent/workflow.rb` (`AgentWorkflow` and the
+`LLM::Agent#workflow` anonymous module) previously resolved their job
+directory through `Workflow.directory`, whose default is the *unlocated*
+`Path.setup("var/jobs")`; the first `.find` on a job path then fell back
+to `~/.scout/var/jobs`. The module now pins its directory to the
+checkout's `var/jobs` (`:current`) the first time a `chat_task` or the
+module is used, unless the workflow already declares an explicit
+directory (`directory =` beats pinning, so tests and deployments that set
+`Workflow.directory` keep their configured location).
+
+### Dormant limitation (H4)
+
+`path_list` used to call `Path#glob` on the resolved target when it looked
+Path-like. With roots pinned absolute, targets are always plain `String`s,
+so the branch has been hardened to always use `Dir.glob` on the pinned
+absolute string (never re-resolving through map order). No known caller
+supplies a `Path`-like target today.
+
+### Out-of-repo leaks (H3, recorded as follow-ups)
+
+The tool-layer `TmpFile`/`Open.write` scratch traffic that lands in
+`~/.scout/tmp` for relative tool paths originates in the
+Workspace/ComputerUse tool layer (gem `scout-gear` `TmpFile.tmpdir`
+override), not in this engine. No code in this repository resolves those
+paths; the fix belongs in the tool layer. See
+`tmp/pathmap_fix_report.md` for the recorded follow-up list.
+
+
+## 3. Registering a kind
 
 The full entry shape:
 
@@ -46,6 +131,7 @@ agent.register_path_kind(
   "roots"           => {"project" => "/abs/root"},
   "locations"       => ["project"],          # optional; defaults to root keys
   "default_location" => "project",            # optional
+  "path_map"        => :current,              # optional; see section 2
   "capabilities"    => {"edit" => true, "patch" => true},
   "sandbox"         => true,                  # true/false, or a responder
   "resolve"         => ->(agent, path, location) { ... }
@@ -63,7 +149,7 @@ agent.register_path_kind(
   `"resolve"`). Registration is instance-local: kinds registered on one
   agent are invisible to other agents.
 
-## 3. Declaring kinds in a workflow: `PATH_KINDS`
+## 4. Declaring kinds in a workflow: `PATH_KINDS`
 
 A workflow may declare the path kinds it provides as a `PATH_KINDS`
 constant in its own namespace. When an agent incorporates the **entire
@@ -110,7 +196,7 @@ end
 ```
 
 Each entry is exactly what `register_path_kind` accepts for a single
-kind (section 2), so `roots`, `locations`, `capabilities`, `overrides`
+kind (section 3), so `roots`, `locations`, `capabilities`, `overrides`
 and `operations` all mean the same thing here.
 
 Behavior at incorporation:
@@ -153,7 +239,7 @@ workflow that declares `PATH_KINDS`. Authorization is unchanged in both
 cases: every operation still goes through `LLM::Sandbox.authorize_path`,
 which fails closed.
 
-## 4. Overriding a built-in without changing its schema
+## 5. Overriding a built-in without changing its schema
 
 A kind may replace a built-in's implementation through the `"overrides"`
 key. The engine always owns the public tool schema: the agent still sees
@@ -182,9 +268,9 @@ Override call shapes follow the handler `type`:
   ORIGINAL file's termination, whatever the handler returned.
 - `:full`: `implementation.call(agent, target, args)` receives the
   resolved, authorized target and returns the operation result. This is
-  trusted plugin code (see section 7).
+  trusted plugin code (see section 8).
 
-## 5. Introducing a custom operation
+## 6. Introducing a custom operation
 
 New operations are declared under `"operations"`:
 
@@ -230,7 +316,7 @@ unknown authorization mode or handler type, an override whose target is
 not a built-in, or a declared parameter colliding with the reserved
 `kind`/`path`/`location` arguments.
 
-## 6. Parameter collision policy
+## 7. Parameter collision policy
 
 When several kinds register the same operation name, exactly one tool
 is installed. Their parameter contracts must match exactly after
@@ -254,7 +340,7 @@ become available immediately and no previously installed tool is
 dropped. Registration is atomic — if tool installation fails, the
 half-registered kind is removed again.
 
-## 7. Callback contract and trust boundary
+## 8. Callback contract and trust boundary
 
 Callbacks run **only after** kind validation, path resolution,
 capability checks and authorization have all succeeded. An
@@ -276,7 +362,7 @@ The agent-facing tool callables serialize Scout exceptions as
 `{"exception": ..., "exception_line": ...}`; non-Scout exceptions are
 not caught there — handlers must normalize their own failures.
 
-## 8. Single-file patch; multi-file changes are not supported
+## 9. Single-file patch; multi-file changes are not supported
 
 `patch` is a built-in operation, default-off (`"patch" => true` in
 capabilities to enable). Its tool takes `kind`, `path`, optional

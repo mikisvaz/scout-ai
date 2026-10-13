@@ -3,6 +3,36 @@ require 'scout/workflow'
 module AgentWorkflow
   extend Workflow
 
+  # Job-directory pinning (path-map leak fix, hypothesis H2).
+  #
+  # Workflow.directory defaults to Path.setup('var/jobs') — a RELATIVE,
+  # unlocated Scout path. Task directories derived from it
+  # (lib/scout/workflow/definition.rb: `directory: directory[name]`) and any
+  # later Path#find on the resulting job path resolve lazily through Scout's
+  # map_order, which ends at :user (~/.scout) whenever the target does not
+  # exist under :current first. That sent agent-run workflow jobs to
+  # ~/.scout/var/jobs while the checkout var/jobs stayed empty.
+  #
+  # chat_task is scout-ai's own task-declaration DSL and the single point
+  # where this library derives a job directory for agent-run tasks, so the
+  # pin happens here, once per workflow module, before `directory[name]`
+  # is evaluated. Only the unlocated default is upgraded in place; any
+  # caller that already set Workflow.directory (tests, CLI, other repos)
+  # keeps its setting untouched.
+  def self.pin_workflow_job_directory!(workflow)
+    dir = workflow.directory rescue nil
+    return dir if dir.nil? || dir.to_s.start_with?(File::SEPARATOR)
+
+    global = Workflow.directory
+    if global.nil? || global.to_s.empty?
+      Workflow.directory = global = Path.setup(Scout.root.find(:current))['var']['jobs']
+    elsif !global.to_s.start_with?(File::SEPARATOR)
+      Workflow.directory = global = Path.setup(Scout.root.find(:current))[global.to_s]
+    end
+    workflow.directory = global[workflow.name]
+    workflow.directory
+  end
+
   helper :chat do |chat=nil|
     @chat ||= begin
                 chat = recursive_inputs[:chat]
@@ -137,6 +167,9 @@ end
 
 module Workflow
   def chat_task(task_name, &block)
+    # Pin the job directory of this workflow module before `directory[name]`
+    # is evaluated inside `task` (see AgentWorkflow.pin_workflow_job_directory!).
+    AgentWorkflow.pin_workflow_job_directory!(self) if AgentWorkflow.respond_to?(:pin_workflow_job_directory!)
     input :chat, :text, 'Chat in Scout-AI chat-file format'
     task task_name => :chat do |chat|
       begin
