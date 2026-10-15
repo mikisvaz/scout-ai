@@ -73,7 +73,7 @@ module LLM
     # physical target. Relative inputs require base_path: relative to Dir.pwd
     # would make decisions depend on ambient process state. Missing targets are
     # checked against their resolved existing ancestor plus remaining components.
-    def authorize_path(path, root:, writable_paths: [], read_paths: [], mode: :read, base_path: nil)
+    def authorize_path(path, root: Dir.pwd, writable_paths: [], read_paths: [], mode: :read, base_path: nil)
       raise ParameterException, "unsupported path access mode: #{mode.inspect}" unless [:read, :write].include?(mode.to_sym)
 
       target = resolve_path(path, base_path: base_path)

@@ -934,7 +934,8 @@ module LLM
         authorization = custom.fetch("authorization", :write)
         path = path_argument(args, "path")
         location = args["location"]
-        target = resolve_path(kind, path, location)
+        path_map = args["path_map"] || DEFAULT_PATH_MAP
+        target = resolve_path(kind, path, location, path_map)
         path_authorize!(kind, target, location, mode: authorization)
 
         implementation = custom.fetch("implementation")
@@ -999,6 +1000,8 @@ module LLM
                                         with_location: operation != "list")
 
       case operation
+      when "list"
+        properties.delete "path"
       when "write"
         properties["content"] = {
           "type" => "string",
@@ -1094,7 +1097,7 @@ module LLM
     # and returns the target object; the FS-boundary adapters use its String
     # representation (see the FS-boundary comment above path_read_text).
     # Otherwise `roots` are treated as filesystem roots.
-    def resolve_path(kind, path, location = nil)
+    def resolve_path(kind, path, location = nil, path_map = DEFAULT_PATH_MAP)
       definition = path_kind_definition(kind)
       location ||= definition["default_location"]
 
@@ -1119,17 +1122,25 @@ module LLM
         end
       end
 
+      root = root.sub('BASEDIR', File.basename(Dir.pwd))
+
       # A Scout Path-like root may implement [] for child paths. Otherwise
       # use ordinary filesystem paths.
       # Absolute filesystem paths address their exact target. Authorization
       # below still limits them to the configured location root.
       return path.to_s if root.is_a?(String) && path.to_s.start_with?(File::SEPARATOR)
 
-      if root.respond_to?(:[]) && !root.is_a?(String)
-        root[path.to_s]
-      else
-        File.join(root.to_s, path.to_s)
+      final_path = if Path === root
+                     root[path.to_s]
+                   else
+                     File.join(root.to_s, path.to_s)
+                   end
+
+      if definition["extension"]
+        final_path = final_path.set_extension(definition["extension"])
       end
+
+      final_path.find(path_map)
     end
 
     # Authorize the resolved primary target. Custom resolvers are sandboxed
@@ -1157,8 +1168,8 @@ module LLM
         raise ParameterException, "Path sandbox requires absolute filesystem paths"
       end
 
-      decision = sandbox.authorize_path(path_string, root: root_string, mode: mode)
-      raise ParameterException, "Path access denied by sandbox (#{decision.reason || 'unknown'})" unless decision.allowed
+      decision = sandbox.authorize_path(path_string, mode: mode)
+      raise ParameterException, "Path #{path_string} access denied by sandbox (#{decision.reason || 'unknown'})" unless decision.allowed
       true
     rescue NameError, NoMethodError => error
       raise ParameterException, "Path sandbox authorization is unavailable: #{error.message}"
@@ -1317,6 +1328,7 @@ module LLM
         "kind" => kind,
         "path" => path,
         "location" => location || path_kind_definition(kind)["default_location"],
+        "target_file" => target,
         "written" => true
       }
     end
