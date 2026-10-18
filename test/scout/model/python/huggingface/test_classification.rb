@@ -13,10 +13,12 @@ class TestSequenceClassification < Test::Unit::TestCase
   end
 
   # Conditional omission: the probe only checks the local huggingface cache
-  # (never downloads) and that transformers/datasets are importable, so this
-  # runs whenever the environment can actually serve it.
+  # (never downloads) and that torch/transformers/datasets are importable, so
+  # this runs whenever the environment can actually serve it. torch comes from
+  # TorchModel.init_python (model.init), transformers from
+  # scout_ai.huggingface.model, datasets from the training path.
   def test_train_sequence_classification
-    reason = Availability.python_modules_reason('transformers', 'datasets')
+    reason = Availability.python_modules_reason('torch', 'transformers', 'datasets', route: :embedded)
     omit "python infrastructure missing: #{reason}" if reason
     omit "huggingface model #{MODEL}: #{Availability.hf_model_reason(MODEL)}" unless Availability.hf_model_cached?(MODEL)
 

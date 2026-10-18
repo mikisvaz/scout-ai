@@ -5,12 +5,15 @@ MODEL = 'distilgpt2'
 
 require 'scout-ai'
 class TestClass < Test::Unit::TestCase
-  # Conditional omission: the local-cache probe never downloads; training
-  # 1000 epochs also needs torch, which is probed the same bounded way.
+  # Conditional omission: modules first then local-cache probe (never
+  # downloads). model.init needs torch (TorchModel.init_python) and
+  # transformers (scout_ai.huggingface.model); training goes through
+  # scout_ai.huggingface.data and scout_ai.huggingface.train.next_token,
+  # which also import datasets.
   def test_main
-    omit "huggingface model #{MODEL}: #{Availability.hf_model_reason(MODEL)}" unless Availability.hf_model_cached?(MODEL)
-    reason = Availability.python_modules_reason('transformers')
+    reason = Availability.python_modules_reason('torch', 'transformers', 'datasets', route: :embedded)
     omit "python infrastructure missing: #{reason}" if reason
+    omit "huggingface model #{MODEL}: #{Availability.hf_model_reason(MODEL)}" unless Availability.hf_model_cached?(MODEL)
 
     model = NextTokenModel.new
     train_texts = [
@@ -22,12 +25,10 @@ class TestClass < Test::Unit::TestCase
     ]
 
     TmpFile.with_path do |tmp_dir|
-      iii tmp_dir
 
       sss 0
       model = NextTokenModel.new MODEL, tmp_dir, training_num_train_epochs: 1000, training_learning_rate: 0.1
 
-      iii :new
       chat = Chat.setup []
       chat.user "say hi"
       ppp model.eval chat
@@ -35,18 +36,15 @@ class TestClass < Test::Unit::TestCase
       model.save
       model = PythonModel.new tmp_dir
 
-      iii :load
       chat = Chat.setup []
       chat.user "say hi"
       ppp model.eval chat
 
-      iii :training
       state, tokenizer = model.init
       tokenizer.pad_token = tokenizer.eos_token
       model.add_list train_texts.shuffle
       model.train
 
-      iii :trained
       chat = Chat.setup []
       chat.user "say hi"
       ppp model.eval chat
@@ -54,7 +52,6 @@ class TestClass < Test::Unit::TestCase
       model.save
       model = PythonModel.new tmp_dir
 
-      iii :load_again
       chat = Chat.setup []
       chat.user "say hi"
       ppp model.eval chat
