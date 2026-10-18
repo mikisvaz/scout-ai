@@ -52,6 +52,16 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   paths
   paths.test
 
+  rake_tests
+  rake_tests2
+
+  testing_refactor
+
+  registration_validation
+
+  registration_templates
+
+  
   test=test{
    task
    clean
@@ -60,6 +70,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    cortex
    socialize
    path
+   baking
   }
  }
  lib=lib {
@@ -133,6 +144,11 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      conversation.rb
      delegate.rb
      path.rb
+     path=path{
+      edit.rb
+      patch.rb
+      workflow_kinds.rb
+     }
      iterate.rb
      save.rb
      workflow.rb
