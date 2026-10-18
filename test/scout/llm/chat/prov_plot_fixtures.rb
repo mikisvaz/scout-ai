@@ -40,8 +40,9 @@ module ProvPlotFixtures
     society_mgr: 50, smoke: [60, 95, 110], unknown: [130, 140], bad: 150
   }.freeze
 
-  # Returns [root_chat, {echo:, smoke: [turn1, turn2, turn3], unknown:,
-  # bad:}, society_chats, schedule].  `schedule` maps every stamped node
+  # Returns a named Hash: {root: root_chat, jobs: {echo:, smoke:
+  # [turn1, turn2, turn3], unknown:, bad:}, society: society_chats,
+  # schedule: schedule}.  `schedule` maps every stamped node
   # path to its [start, end] Time pair; the timeline tests recompute the
   # event sequence, the cluster outcome and the overlap flags from it
   # instead of trusting the spec's ASSUMED order.
@@ -122,6 +123,9 @@ module ProvPlotFixtures
     stamp.call(bad, base + TIMELINE_OFFSETS[:bad], base + TIMELINE_OFFSETS[:bad])
     society_times.each { |path, time| stamp.call(path, time, time) }
 
-    [root, {echo: echo, smoke: smoke, unknown: unknown, bad: bad}, society_chats, schedule]
+    {root: root,
+     jobs: {echo: echo, smoke: smoke, unknown: unknown, bad: bad},
+     society: society_chats,
+     schedule: schedule}
   end
 end

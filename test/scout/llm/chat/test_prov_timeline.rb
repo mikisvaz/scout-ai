@@ -108,7 +108,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T1 rank separation: one event per rank, no rank=same' do
     TmpFile.with_dir do |dir|
-      root, jobs, society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]; society = fx[:society]
       dot, = timeline_for(root)
       assert_not_include dot, '{rank=same', dot
       assert_include dot, 'rankdir=TB', dot
@@ -118,7 +118,7 @@ class TestProvTimeline < Test::Unit::TestCase
       root_id = id_for_path(parse_dot(dot)[0], root)
       assert dot.include?("{rank=source; #{root_id};}"), dot
       # and the root must be the earliest event
-      _r2, _j2, _s2, schedule2 = explanatory_fixture(dir)
+      fx2 = explanatory_fixture(dir); schedule2 = fx2[:schedule]
       ordered, = expected_sequence(root, jobs, society, schedule2)
       assert_equal root, ordered.first, dot
     end
@@ -126,7 +126,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T2/T3 spine: consecutive time neighbours, reused segments' do
     TmpFile.with_dir do |dir|
-      root, jobs, society, schedule = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]; society = fx[:society]; schedule = fx[:schedule]
       dot, = timeline_for(root)
       nodes, edges = parse_dot(dot)
       ordered, = expected_sequence(root, jobs, society, schedule)
@@ -146,7 +146,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T4 chain integrity: chain arcs follow the time order' do
     TmpFile.with_dir do |dir|
-      root, jobs, society, schedule = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]; society = fx[:society]; schedule = fx[:schedule]
       dot, = timeline_for(root)
       nodes, = parse_dot(dot)
       turns = jobs[:smoke]
@@ -163,7 +163,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T5 ports: delegates headport=w, continues tailport=e headport=w' do
     TmpFile.with_dir do |dir|
-      root, jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]
       dot, = timeline_for(root)
       assert dot.scan(/class="delegated_result"[^\]]*headport=w/).length +
              dot.scan(/headport=w[^\]]*class="delegated_result"/).length >= 6, dot
@@ -175,7 +175,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T6 error job: time line present, token line absent' do
     TmpFile.with_dir do |dir|
-      root, jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]
       dot, = timeline_for(root)
       bad = dot.lines.find { |l| l.include?("tooltip=#{jobs[:bad].inspect}") }
       assert bad, dot
@@ -188,7 +188,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T7 cluster rule: chain cluster iff contiguous, no society cluster' do
     TmpFile.with_dir do |dir|
-      root, jobs, society, schedule = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]; society = fx[:society]; schedule = fx[:schedule]
       dot, = timeline_for(root)
       nodes, = parse_dot(dot)
       assert_not_include dot, 'cluster_society', dot
@@ -213,7 +213,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T9 y-monotonic order via dot -Tplain' do
     TmpFile.with_dir do |dir|
-      root, jobs, society, schedule = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]; society = fx[:society]; schedule = fx[:schedule]
       dot_file = File.join(dir, 'timeline.dot')
       prov('--timeline', dot_file, root)
       dot = File.read(dot_file)
@@ -236,7 +236,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T10 badges and time lines match the computed order' do
     TmpFile.with_dir do |dir|
-      root, jobs, society, schedule = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]; society = fx[:society]; schedule = fx[:schedule]
       dot, = timeline_for(root)
       nodes, = parse_dot(dot)
       # root: mtime fallback => point badge `t=` without arrow
@@ -262,7 +262,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T11 tooltips carry full paths, labels carry none' do
     TmpFile.with_dir do |dir|
-      root, jobs, society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]; society = fx[:society]
       dot, = timeline_for(root)
       nodes, = parse_dot(dot)
       assert_equal 15, nodes.length, dot
@@ -286,7 +286,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T12 render: --timeline svg produces a renderable document' do
     TmpFile.with_dir do |dir|
-      root, _jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]
       svg_file = File.join(dir, 'timeline.svg')
       out, err, status = prov('--timeline', svg_file, root)
       assert status.success?, err
@@ -299,7 +299,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T13 budgets: no rank=same, bounded natural width' do
     TmpFile.with_dir do |dir|
-      root, _jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]
       svg_file = File.join(dir, 'timeline.svg')
       prov('--timeline', svg_file, root)
       skip 'graphviz dot not installed' unless Open.exists?('/usr/bin/dot')
@@ -313,7 +313,7 @@ class TestProvTimeline < Test::Unit::TestCase
 
   test 'T14 census: exact node/edge class census' do
     TmpFile.with_dir do |dir|
-      root, jobs, society, schedule = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]; society = fx[:society]; schedule = fx[:schedule]
       dot, = timeline_for(root)
       nodes, edges = parse_dot(dot)
       # node class census, counted by parsing the class attribute rather

@@ -11,6 +11,11 @@ require File.join(File.dirname(__FILE__), 'support', 'fixtures')
 require File.join(File.dirname(__FILE__), 'support', 'mock_backend')
 require File.join(File.dirname(__FILE__), 'support', 'fake_clients')
 require File.join(File.dirname(__FILE__), 'support', 'availability')
+# Opt-in scout-essentials shared test helpers (Assertions module). The
+# availability support above pulls only 'scout/testing/availability'
+# (the generic primitives) through scout-rig; 'scout/testing' itself is
+# required here for Scout::Testing::Assertions.
+require 'scout/testing'
 
 # ScoutCoder: Scout.etc.AI['name'] resolves through the Scout path maps, and
 # the first map in Scout.map_order wins. Scout.prepend_path(:name, map) adds
@@ -35,12 +40,16 @@ Scout::Config.set({backend: :mock}, :embed, :llm)
 
 class Test::Unit::TestCase
 
-  def assert_equal_path(path1, path2)
-    assert_equal File.expand_path(path1), File.expand_path(path2)
-  end
+  # Scout::Testing::Assertions (scout-essentials, opt-in via the require
+  # above) provides assert_equal_path - replacing the former hand-rolled,
+  # byte-equivalent copy that lived here - plus assert_path_exists.
+  # The tmpdir / fixture_path / with_isolated_state helpers are NOT adopted:
+  # they would restructure this bootstrap rather than replace duplication
+  # (see tmp/notes/availability-workstream.md).
+  include Scout::Testing::Assertions
 
   def self.tmpdir
-    @@tmpdir ||= Path.setup('tmp/test_tmpdir').find
+    @@tmpdir ||= Path.setup('tmp/test_tmpdir_scout_ai').find
   end
 
   def tmpdir

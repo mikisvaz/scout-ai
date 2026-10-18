@@ -55,7 +55,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'labels carry names, paths only in tooltips' do
     TmpFile.with_dir do |dir|
-      root, _jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]
       dot, = dot_for(root)
       node_lines = dot.lines.grep(/^\s+n\d+ \[/)
       labels = node_lines.flat_map { |l| l.scan(/label=("(?:[^"\\]|\\.)*")/) }
@@ -84,7 +84,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'root tooltip is the chat, root label names the kind' do
     TmpFile.with_dir do |dir|
-      root, _jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]
       dot, = dot_for(root)
       root_line = dot.lines.find { |l| l.include?("tooltip=#{root.inspect}") }
       assert root_line, dot
@@ -99,7 +99,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'worker chat tooltips show the files dir' do
     TmpFile.with_dir do |dir|
-      root, jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]
       dot, = dot_for(root)
       first_turn = jobs[:smoke][0]
       worker = File.join(first_turn + '.files', 'Worker.chat')
@@ -109,7 +109,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'semantic edge labels replace machine relations' do
     TmpFile.with_dir do |dir|
-      root, _jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]
       dot, = dot_for(root)
       assert_equal 6, dot.scan(/label="delegates"/).length, dot
       assert_equal 5, dot.scan(/label="produces"/).length, dot
@@ -124,7 +124,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'continuation chain arcs follow mtime order' do
     TmpFile.with_dir do |dir|
-      root, jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]
       dot, = dot_for(root)
       id_of = {}
       dot.lines.each do |line|
@@ -144,7 +144,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'error outcome replaces token line' do
     TmpFile.with_dir do |dir|
-      root, jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; jobs = fx[:jobs]
       dot, = dot_for(root)
       bad_line = dot.lines.find { |l| l.include?("tooltip=#{jobs[:bad].inspect}") }
       assert bad_line, dot
@@ -157,7 +157,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'society chats keep pair labels with dashed unlabeled edges' do
     TmpFile.with_dir do |dir|
-      root, _jobs, society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]; society = fx[:society]
       dot, = dot_for(root)
       society.each do |chat|
         line = dot.lines.find { |l| l.include?("tooltip=#{chat.inspect}") }
@@ -173,7 +173,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'legacy shape contract and jobname labels survive' do
     TmpFile.with_dir do |dir|
-      root, _jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]
       dot, = dot_for(root)
       shapes = dot.scan(/^\s+n\d+ \[shape=(\w+)/).flatten
       assert shapes.all? { |shape| %w[box note].include?(shape) }, dot
@@ -185,7 +185,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'graphviz renders the dot without error' do
     TmpFile.with_dir do |dir|
-      root, _jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]
       dot_file = File.join(dir, 'prov.dot')
       prov('--dot', dot_file, root)
       skip 'graphviz dot not installed' unless Open.exists?('/usr/bin/dot')
@@ -199,7 +199,7 @@ class TestProvExplanatoryPlot < Test::Unit::TestCase
 
   test 'plot writes an svg of bounded natural width' do
     TmpFile.with_dir do |dir|
-      root, _jobs, _society = explanatory_fixture(dir)
+      fx = explanatory_fixture(dir); root = fx[:root]
       plot_file = File.join(dir, 'prov.svg')
       out, err, status = prov('--plot', plot_file, root)
       assert status.success?, err
