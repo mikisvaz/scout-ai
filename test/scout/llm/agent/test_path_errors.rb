@@ -218,7 +218,7 @@ class TestPathErrors < Test::Unit::TestCase
   end
 
   def test_error_matrix_unsupported_operation
-    register_text_kind("text", "validate" => false, "test" => false,
+    register_text_kind("text", "validate" => false,
                        "promote" => false, "rename" => false)
 
     error = assert_raise(ParameterException) do

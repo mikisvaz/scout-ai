@@ -65,7 +65,6 @@ class TestPathContracts < Test::Unit::TestCase
     assert_equal true, definition["capabilities"]["rename"]
     assert_equal true, definition["capabilities"]["delete"]
     assert_equal false, definition["capabilities"]["validate"]
-    assert_equal false, definition["capabilities"]["test"]
     assert_equal false, definition["capabilities"]["promote"]
   end
 
@@ -360,14 +359,12 @@ class TestPathContracts < Test::Unit::TestCase
     register_text_kind(
       "text",
       "validate" => true,
-      "test" => true,
       "promote" => true
     )
 
     assert @agent.path_kind_capable?("text", "read")
     assert @agent.path_kind_capable?("text", "write")
     assert @agent.path_kind_capable?("text", "validate")
-    assert @agent.path_kind_capable?("text", "test")
     assert @agent.path_kind_capable?("text", "promote")
     assert_equal true, @agent.path_kind_capable?("text", "promote")
   end
@@ -782,7 +779,7 @@ class TestPathContracts < Test::Unit::TestCase
       after[name] = pair[1][:function]
     end
 
-    %w[path_kinds path_read path_write path_edit path_list path_move path_rename path_delete path_validate path_test path_promote path_smoke].each do |builtin|
+    %w[path_kinds path_read path_write path_edit path_list path_move path_rename path_delete path_validate path_promote path_smoke].each do |builtin|
       next unless before.key?(builtin)
       assert_equal before[builtin][:name], after[builtin][:name], builtin
       assert_equal before[builtin][:description], after[builtin][:description], builtin
@@ -1174,7 +1171,6 @@ class TestPathContracts < Test::Unit::TestCase
     assert @agent.path_operation_support?("text", "rename")
     assert @agent.path_operation_support?("text", "delete")
     assert !@agent.path_operation_support?("text", "validate")
-    assert !@agent.path_operation_support?("text", "test")
     assert !@agent.path_operation_support?("text", "promote")
     assert !@agent.path_operation_support?("text", "smoke")
     assert !@agent.path_operation_support?("text", "precise_edit")
@@ -1324,18 +1320,16 @@ class TestPathContracts < Test::Unit::TestCase
       "roots" => {"project" => @tmpdir},
       "capabilities" => {
         "validate" => true,
-        "test" => true,
         "promote" => true
       },
       "validate" => ->(*args) { true },
-      "test" => ->(*args) { true },
       "promote" => ->(*args) { true }
     )
 
     tools = @agent.instance_variable_get(:@other_options)[:tools]
 
     assert tools.key?("path_validate")
-    assert tools.key?("path_test")
+    assert !tools.key?("path_test")
     assert tools.key?("path_promote")
   end
 
@@ -1346,6 +1340,17 @@ class TestPathContracts < Test::Unit::TestCase
 
     assert_equal ["text"],
                  definition["parameters"]["properties"]["kind"]["enum"]
+  end
+
+  def test_path_tool_definition_list_path_is_optional
+    register_text_kind
+
+    definition = @agent.path_tool_definition("list")
+
+    assert_equal ["kind"], definition["parameters"]["required"]
+    assert definition["parameters"]["properties"].key?("path")
+    assert_match(/Optional subdirectory/,
+                 definition["parameters"]["properties"]["path"]["description"])
   end
 
   def test_path_tool_definition_does_not_add_location_to_list
@@ -1456,7 +1461,6 @@ class TestPathContracts < Test::Unit::TestCase
     tools = @agent.instance_variable_get(:@other_options)[:tools]
 
     assert tools.key?("path_smoke")
-    assert !tools.key?("path_test")
   end
 
   def test_smoke_operation_runs_kind_callback
@@ -1493,20 +1497,25 @@ class TestPathContracts < Test::Unit::TestCase
     FileUtils.remove_entry(outside) if outside && File.exist?(outside)
   end
 
-  def test_smoke_and_test_are_independently_enabled
-    @agent.register_path_kind(
-      "both",
-      "description" => "Both smoke and test",
-      "locations" => ["project"],
-      "roots" => {"project" => @tmpdir},
-      "capabilities" => {"smoke" => true, "test" => true}
-    )
+  def test_test_capability_is_rejected_after_test_removal
+    # `test` is no longer a built-in operation: the registration-time
+    # capability validation (BUILT_IN_OPERATIONS membership) rejects it
+    # with ParameterException, and no path_test wrapper method exists.
+    error = assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "both",
+        "description" => "Smoke kind",
+        "locations" => ["project"],
+        "roots" => {"project" => @tmpdir},
+        "capabilities" => {"smoke" => true, "test" => true}
+      )
+    end
+    assert_match(/Unknown Path kind capability "test"/, error.message)
 
-    tools = @agent.instance_variable_get(:@other_options)[:tools]
-
-    assert tools.key?("path_smoke")
-    assert tools.key?("path_test")
-    assert !tools.key?("path_validate")
+    assert !@agent.respond_to?(:path_test)
+    assert_raise(NoMethodError) do
+      @agent.path_test("kind" => "text", "path" => "show.slim")
+    end
   end
   # ------------------------------------------------------------------
 

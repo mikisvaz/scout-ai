@@ -353,6 +353,116 @@ class TestPathFilesystem < Test::Unit::TestCase
     assert_equal ["nested/one.txt", "nested/two.txt"], result
   end
 
+  # ------------------------------------------------------------------
+  # path_list subdirectory contract: `path` is OPTIONAL.  Omitted, it lists
+  # the kind root exactly as before; a relative subdirectory lists that
+  # subtree, still expressed root-relative, and still resolved/authorized
+  # through the engine's normal resolve/authorize machinery (never a
+  # parallel mechanism).
+  # ------------------------------------------------------------------
+
+  def test_path_list_omitted_path_lists_kind_root
+    register_text_kind
+
+    @agent.path_write("kind" => "text", "path" => "top.txt", "content" => "top")
+    @agent.path_write("kind" => "text", "path" => "a/one.txt", "content" => "one")
+    @agent.path_write("kind" => "text", "path" => "a/b/two.txt", "content" => "two")
+
+    assert_equal ["a/b/two.txt", "a/one.txt", "top.txt"],
+                 @agent.path_list("kind" => "text")
+  end
+
+  def test_path_list_relative_subdirectory_lists_only_that_subtree
+    register_text_kind
+
+    @agent.path_write("kind" => "text", "path" => "top.txt", "content" => "top")
+    @agent.path_write("kind" => "text", "path" => "a/one.txt", "content" => "one")
+    @agent.path_write("kind" => "text", "path" => "a/b/two.txt", "content" => "two")
+    @agent.path_write("kind" => "text", "path" => "other/three.txt", "content" => "three")
+
+    result = @agent.path_list("kind" => "text", "path" => "a")
+
+    assert_equal ["a/b/two.txt", "a/one.txt"], result
+    assert_not_equal @agent.path_list("kind" => "text"), result
+    assert_false result.include?("other/three.txt")
+  end
+
+  def test_path_list_nested_relative_path
+    register_text_kind
+
+    @agent.path_write("kind" => "text", "path" => "a/one.txt", "content" => "one")
+    @agent.path_write("kind" => "text", "path" => "a/b/two.txt", "content" => "two")
+    @agent.path_write("kind" => "text", "path" => "a/b/c/three.txt", "content" => "three")
+
+    assert_equal ["a/b/c/three.txt", "a/b/two.txt"],
+                 @agent.path_list("kind" => "text", "path" => "a/b")
+  end
+
+  def test_path_list_rejects_traversal_outside_root
+    register_text_kind
+    # See the note in the symlink test: the class-level setup block wipes the
+    # shared tmpdir after instance setup, so the root is recreated here.
+    FileUtils.mkdir_p(@tmpdir)
+
+    error = assert_raise(ParameterException) do
+      @agent.path_list("kind" => "text", "path" => "../outside")
+    end
+    assert_equal "Path access denied by sandbox (outside_grants)", error.message
+  end
+
+  def test_path_list_rejects_absolute_path_outside_grants
+    register_text_kind
+    outside = Dir.mktmpdir("path-list-outside")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_list("kind" => "text", "path" => File.join(outside, "sub"))
+    end
+    assert_equal "Path access denied by sandbox (outside_grants)", error.message
+  ensure
+    FileUtils.remove_entry(outside) if outside && File.exist?(outside)
+  end
+
+  def test_path_list_denies_symlinked_subdirectory_outside_grants
+    register_text_kind
+    # The class-level teardown (Open.rm_rf on the shared TestCase tmpdir) can
+    # wipe Scout.tmp.agent_path_test after setup in this suite's process, so
+    # the root is (re)created defensively inside the test.
+    FileUtils.mkdir_p(@tmpdir)
+    outside = Dir.mktmpdir("path-list-symlink")
+    File.symlink(outside, File.join(@tmpdir, "link"))
+
+    error = assert_raise(ParameterException) do
+      @agent.path_list("kind" => "text", "path" => "link")
+    end
+    assert_equal "Path access denied by sandbox (outside_grants)", error.message
+  ensure
+    FileUtils.remove_entry(outside) if outside && File.exist?(outside)
+  end
+
+  def test_path_list_non_directory_target_returns_empty_listing
+    # Established engine behavior, kept as-is (no new error class): a file or
+    # missing prefix has no descendants, so the listing is empty, while the
+    # target was still resolved and authorized like any other list target.
+    register_text_kind
+
+    @agent.path_write("kind" => "text", "path" => "plain.txt", "content" => "p")
+    @agent.path_write("kind" => "text", "path" => "a/one.txt", "content" => "one")
+
+    assert_equal [], @agent.path_list("kind" => "text", "path" => "plain.txt")
+    assert_equal [], @agent.path_list("kind" => "text", "path" => "missing_dir")
+  end
+
+  def test_path_list_tool_callable_without_path_lists_root
+    register_text_kind
+
+    @agent.path_write("kind" => "text", "path" => "one.txt", "content" => "one")
+
+    tools = @agent.instance_variable_get(:@other_options)[:tools]
+    result = tools["path_list"].first.call("path_list", {"kind" => "text"})
+
+    assert_equal ["one.txt"], result
+  end
+
   def test_path_move
     register_text_kind
 
