@@ -10,7 +10,7 @@
 #
 # Kinds are deliberately represented as hashes.  A kind describes the
 # namespace, where objects live, which generic operations are available, and
-# optionally supplies kind-specific operations such as validation, testing,
+# optionally supplies kind-specific operations such as validation, smoke,
 # or promotion.
 #
 # Path plugins are loaded in the context of an Agent instance, so a plugin
@@ -36,7 +36,6 @@ module LLM
       "rename" => true,
       "delete" => true,
       "validate" => false,
-      "test" => false,
       "promote" => false,
       "smoke" => false,
       "patch" => false
@@ -47,7 +46,7 @@ module LLM
     ].freeze
 
     SPECIAL_OPERATIONS = %w[
-        validate test promote smoke patch
+        validate promote smoke patch
     ].freeze
 
     # All engine-owned built-in operations, in stable order.  Public tool
@@ -378,7 +377,7 @@ module LLM
     end
 
     def path_validate_kind_hooks!(definition)
-      %w[resolve list validate test smoke promotion_post_move].each do |hook|
+      %w[resolve list validate smoke promotion_post_move].each do |hook|
         next unless definition.key?(hook)
         unless definition[hook].respond_to?(:call)
           raise ParameterException, "Path kind #{hook} hook must be Callable"
@@ -1001,7 +1000,11 @@ module LLM
 
       case operation
       when "list"
-        properties.delete "path"
+        # `path` is optional for list: an omitted path lists the kind root,
+        # a relative subdirectory lists that subtree.  The parameter keeps
+        # the base spelling; only its description is specialized here.
+        properties["path"]["description"] =
+          "Optional subdirectory within the selected kind; omit to list the kind root."
       when "write"
         properties["content"] = {
           "type" => "string",
@@ -1046,7 +1049,7 @@ module LLM
           "description" => "Allow replacing an existing promotion destination. " \
                            "Default false: an existing destination aborts the promotion."
         }
-      when "validate", "test"
+      when "validate"
         # Kind-specific operations may extend this schema through the
         # optional `parameters` hash in the kind definition.
       end
@@ -1060,7 +1063,6 @@ module LLM
         "rename" => "Rename a virtual Path.",
         "delete" => "Delete a virtual Path.",
         "validate" => "Run the kind-specific syntax or validity check for a virtual Path.",
-        "test" => "Run the kind-specific integration test for a virtual Path.",
         "smoke" => "Run the kind-specific lightweight smoke check for a virtual Path.",
         "promote" => "Promote a virtual Path from its temporary location to its project location.",
         "patch" => "Apply a single-file unified diff to a virtual Path in memory and " \
@@ -1133,7 +1135,7 @@ module LLM
       final_path = if Path === root
                      root[path.to_s]
                    else
-                     File.join(root.to_s, path.to_s)
+                     Path.setup(File.join(root.to_s, path.to_s))
                    end
 
       if definition["extension"]
@@ -1168,8 +1170,8 @@ module LLM
         raise ParameterException, "Path sandbox requires absolute filesystem paths"
       end
 
-      decision = sandbox.authorize_path(path_string, mode: mode)
-      raise ParameterException, "Path #{path_string} access denied by sandbox (#{decision.reason || 'unknown'})" unless decision.allowed
+      decision = sandbox.authorize_path(path_string, root: root_string, mode: mode)
+      raise ParameterException, "Path access denied by sandbox (#{decision.reason || 'unknown'})" unless decision.allowed
       true
     rescue NameError, NoMethodError => error
       raise ParameterException, "Path sandbox authorization is unavailable: #{error.message}"
@@ -1466,10 +1468,10 @@ module LLM
       {"kind" => kind, "path" => path, "deleted" => true}
     end
 
-    # The three kind-specific wrapper operations share one body: they only
+    # The kind-specific wrapper operations share one body: they only
     # differ in the operation name handed to path_kind_operation.  The
     # generated methods keep the exact names the tools and tests use.
-    %w[validate test smoke].each do |operation|
+    %w[validate smoke].each do |operation|
       define_method("path_#{operation}") do |args|
         path_kind_operation(args, operation)
       end
