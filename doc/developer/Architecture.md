@@ -125,6 +125,8 @@ A single inference request flows through the layers as follows:
 - [DelegationInternals.md](DelegationInternals.md) — Multi-agent mechanics.
 - [Provenance.md](Provenance.md) — Provenance data model and traversal.
 - [DesignPrinciples.md](DesignPrinciples.md) — Coding philosophy and idioms.
+- [Sandbox.md](Sandbox.md) — Which tools are sandboxed, the two-layer
+  allowlist model, and the path-visibility recovery procedure.
 
 > For detailed code investigations of each subsystem, browse the
 > [research/](../../research/) directory.

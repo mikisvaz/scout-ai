@@ -157,6 +157,88 @@ class TestSandbox < Test::Unit::TestCase
     assert_equal :unresolvable, decision.reason
   end
 
+  # The grant-source layer composes the same lists the Workspace workflow
+  # composes today. Pinned with raw thread/config manipulation so the
+  # assertion holds regardless of the ambient environment.
+  def test_grant_sources_compose_defaults_thread_and_config
+    saved_allowed = Thread.current['allowed_paths']
+    saved_read = Thread.current['allowed_read_paths']
+    Thread.current['allowed_paths'] = ['/thread/grant']
+    Thread.current['allowed_read_paths'] = ['/thread/read']
+
+    writable = LLM::Sandbox.writable_grants(scope: 'Workspace')
+    readable = LLM::Sandbox.readable_grants(scope: 'Workspace')
+
+    assert_include writable, '/thread/grant'
+    assert_include writable, '/tmp'
+    assert_include readable, '/thread/read'
+    assert_include readable, '/bin'
+    assert_not_include writable, '/thread/read'
+    assert_not_include readable, '/thread/grant'
+
+    # Defaults resolve unlocated Scout spellings through the path maps. The
+    # :home expansion is computed live as the oracle: when an earlier test
+    # file in the same process has required 'rbbt' (test_chat.rb,
+    # test_tools.rb), Scout's PKGDIR switches and the expansion spelling
+    # changes with it. The grant composition follows the live maps either
+    # way, which is the property under test.
+    assert_include writable.map(&:to_s), Path.setup('tmp').find(:home).to_s
+  ensure
+    Thread.current['allowed_paths'] = saved_allowed
+    Thread.current['allowed_read_paths'] = saved_read
+  end
+
+  def test_grant_scope_tokens_and_expand
+    assert_equal ['Workspace', 'workspace', 'sandbox'], LLM::Sandbox.grant_scope_tokens('Workspace')
+    assert_equal ['sandbox'], LLM::Sandbox.grant_scope_tokens(nil)
+
+    located = LLM::Sandbox.expand_grant_path('/tmp')
+    assert_true Path === located || String === located
+    assert_equal '/tmp', located.to_s
+
+    expanded = LLM::Sandbox.expand_grant_path('/tmp')
+    assert_kind_of Array, LLM::Sandbox.expand_grant_path('etc')
+  end
+
+  def test_grant_paths_reads_config_and_env_overrides
+    Scout::Config.with_config do
+      Scout::Config.set({'dirs' => '/plain/dirs'})
+      Scout::Config.set({'dirs' => '/workspace/dirs'}, 'workspace')
+      assert_equal ['/workspace/dirs'], LLM::Sandbox.grant_paths('dirs', scope: 'Workspace')
+    end
+
+    Scout::Config.with_config do
+      ENV['DIRS'] = '/env/dirs'
+      assert_equal ['/env/dirs'], LLM::Sandbox.grant_paths('dirs', scope: 'Workspace')
+    end
+  ensure
+    ENV.delete('DIRS')
+  end
+
+  def test_grant_origin_reports_the_first_source_listing_a_path
+    saved = Thread.current['allowed_paths']
+    Thread.current['allowed_paths'] = nil
+    LLM::Sandbox.allow_path('/tmp/grant-origin-job')
+
+    assert_equal :thread, LLM::Sandbox.grant_origin('/tmp/grant-origin-job', scope: 'Workspace')
+    assert_equal :exec_paths, LLM::Sandbox.grant_origin('/bin', scope: 'Workspace')
+    assert_nil LLM::Sandbox.grant_origin('/definitely/not/a/grant', scope: 'Workspace')
+  ensure
+    Thread.current['allowed_paths'] = saved
+  end
+
+  def test_describe_grants_annotates_and_includes_hint
+    text = LLM::Sandbox.describe_grants(scope: 'Workspace', root: '/some/root',
+                                        hint: "Run task 'sandbox_paths' for details")
+    assert_include text, '/some/root (read-write)'
+    assert_include text, '/tmp (read-write)'
+    assert_include text, '/bin (read-only)'
+    assert_include text, "Run task 'sandbox_paths' for details"
+    # read-only lines come after writable ones, and root heads the list
+    assert_true text.index('/bin (read-only)') > text.index('/tmp (read-write)')
+    assert_equal 0, text.index('/some/root (read-write)')
+  end
+
   private
 
   def assert_allowed(path, root:)

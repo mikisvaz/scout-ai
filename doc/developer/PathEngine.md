@@ -148,6 +148,11 @@ agent.register_path_kind(
   `"promotion_destination"`, `"promotion_post_move"` (besides
   `"resolve"`). Registration is instance-local: kinds registered on one
   agent are invisible to other agents.
+- `"sandbox"` gates path authorization per kind: when true (the default),
+  every operation is authorized against the kind roots through
+  `LLM::Sandbox.authorize_path` before any callback runs. The shared
+  sandbox model and its two layers are documented in
+  [Sandbox.md](Sandbox.md).
 
 ## 4. Declaring kinds in a workflow: `PATH_KINDS`
 

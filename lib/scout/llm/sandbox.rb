@@ -104,6 +104,127 @@ module LLM
       path == root || path.start_with?(root.end_with?(File::SEPARATOR) ? root : root + File::SEPARATOR)
     end
 
+    # -------------------------------------------------------------------------
+    # Grant sources
+    #
+    # The containment policy above takes grants as explicit inputs and never
+    # reads configuration. This section is the shared layer that COMPOSES
+    # those inputs from Scout::Config, the environment, and the thread-local
+    # registrar below, so sandboxed workflows share one grant vocabulary
+    # instead of each growing its own copy of a get_allowed_paths method.
+    # -------------------------------------------------------------------------
+
+    # Config key -> default grant list. The keys double as the environment
+    # variable names (ALLOWED_PATHS, DIRS, ...). The 'thread' sources read
+    # the live thread keys, the same keys the allow_path/allow_read_path
+    # registrar writes, so registered job paths and configured grants meet
+    # in one list.
+    def self.grant_type_defaults
+      {
+        'exec_paths'         => '/bin:/usr:/lib:/lib64:/etc',
+        'allowed_paths'      => (Path.setup('tmp').find_all + ['/tmp', '~/tmp']).join(':'),
+        'allowed_read_paths' => '',
+        'dirs'               => '',
+        'read_paths'         => '',
+        'thread'             => Thread.current['allowed_paths'],
+        'thread_read'        => Thread.current['allowed_read_paths']
+      }
+    end
+
+    # Token chain for one workflow scope: ['Workspace', 'workspace',
+    # 'sandbox']. Scout::Config gives untyped tokens a better priority than
+    # the plain key, so an entry tokened with the workflow or 'sandbox'
+    # overrides an untokened entry for the same key.
+    def self.grant_scope_tokens(scope)
+      return ['sandbox'] if scope.nil?
+      scope = scope.to_s
+      [scope, Misc.snake_case(scope), 'sandbox']
+    end
+
+    # ScoutCoder: Scout::Config.get requires at least one token when called
+    # with a symbol key (an empty-token call builds "key:" + key and raises
+    # TypeError on symbols); the :env option only replaces the DEFAULT, so a
+    # config entry beats the environment variable; tokened entries beat
+    # untokened key entries because untyped tokens carry priority 10 against
+    # the implicit key token's 20.
+    def self.grant_paths(type, scope: nil)
+      type = type.to_s
+      value = Scout::Config.get(type, *grant_scope_tokens(scope),
+                                default: grant_type_defaults[type],
+                                env: type.upcase)
+      return [] if value.nil?
+      dirs = String === value ? value.split(/[,:]/) : value
+      Array(dirs).collect { |dir| expand_grant_path(dir) }.flatten
+    end
+
+    # Located spellings (absolute or '~/...') expand as-is; unlocated Scout
+    # path spellings (e.g. 'tmp') resolve through the Scout path maps with
+    # find_all instead of being anchored to the process working directory.
+    def self.expand_grant_path(dir)
+      path = Path.setup(dir.to_s)
+      return Path.setup(File.expand_path(path)) if path.located?
+      path.find_all
+    end
+
+    def self.writable_grants(scope: nil)
+      grant_paths('allowed_paths', scope: scope) +
+        grant_paths('dirs', scope: scope) +
+        grant_paths('thread', scope: scope)
+    end
+
+    def self.readable_grants(scope: nil)
+      grant_paths('allowed_read_paths', scope: scope) +
+        grant_paths('exec_paths', scope: scope) +
+        grant_paths('read_paths', scope: scope) +
+        grant_paths('thread_read', scope: scope)
+    end
+
+    # Which grant source first lists +path+ (expanded-spelling equality,
+    # not containment). Mirrors the origin vocabulary of the sandbox
+    # introspection tasks: root, dirs, allowed_paths, thread, exec_paths,
+    # read_paths, allowed_read_paths, thread_read, bwrap_paths,
+    # bwrap_read_paths.
+    def self.grant_origin(path, scope: nil, root: nil)
+      expanded = File.expand_path(path.to_s)
+      sources = {
+        root: root ? [root.to_s] : [],
+        dirs: grant_paths('dirs', scope: scope),
+        allowed_paths: grant_paths('allowed_paths', scope: scope),
+        thread: grant_paths('thread', scope: scope),
+        exec_paths: grant_paths('exec_paths', scope: scope),
+        read_paths: grant_paths('read_paths', scope: scope),
+        allowed_read_paths: grant_paths('allowed_read_paths', scope: scope),
+        thread_read: grant_paths('thread_read', scope: scope),
+        bwrap_paths: grant_paths('bwrap_paths', scope: scope),
+        bwrap_read_paths: grant_paths('bwrap_read_paths', scope: scope)
+      }
+      sources.each do |origin, paths|
+        next if paths.nil?
+        candidates = Array(paths).collect do |p|
+          begin
+            File.expand_path(p.to_s)
+          rescue
+            p.to_s
+          end
+        end
+        return origin if candidates.include?(expanded)
+      end
+      nil
+    end
+
+    # One line per grant, annotated read-write or read-only, for denial
+    # messages and introspection output. +hint+ is appended verbatim as the
+    # last line (callers name their own introspection task).
+    def self.describe_grants(scope: nil, root: nil, hint: nil)
+      writable = [root, writable_grants(scope: scope)].flatten.compact.uniq.collect { |p| File.expand_path(p.to_s) }
+      readable = readable_grants(scope: scope).flatten.compact.uniq.collect { |p| File.expand_path(p.to_s) }
+      lines = writable.collect { |p| "#{p} (read-write)" }
+      lines.concat((readable - writable).collect { |p| "#{p} (read-only)" })
+      text = (lines * "\n    ")
+      text += "\n  #{hint}" if hint
+      text
+    end
+
     # These registrations intentionally preserve the existing Chat thread keys
     # and raw path spellings for callers that inspect or serialize the grants.
     def allow_path(path)

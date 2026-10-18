@@ -96,6 +96,10 @@ directory or via the `agent` helper) to skip this routing and use plain
 `LLM.ask` — a verification-only agent such as a critic usually wants this.
 `SCOUT_NO_ASK_CACHE=true` cleans the cached job before reuse (`recursive` for a
 recursive clean).
+The job whitelist above is one corner of the shared sandbox model: which
+tools are confined, which paths each layer can reach, and what to do when a
+path exists but a tool cannot see it are documented in the
+[Sandbox](../developer/Sandbox.md) developer document.
 
 A plain agent with no workflow (or a workflow without an `:ask` task) always
 takes the `LLM.ask` branch, with `save_file: self.save_file` and `agent: false`
