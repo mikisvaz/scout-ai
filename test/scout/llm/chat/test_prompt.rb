@@ -397,7 +397,7 @@ class TestPrompt < Test::Unit::TestCase
     probe_calls = []
     Chat::REGISTERED_STRATEGIES['probe_strategy'] = ->(messages) { probe_calls << messages.dup; messages }
 
-    client = TestFixtures.anthropic_client('backends/anthropic_tool_use', 'backends/anthropic')
+    client = TestClients.anthropic_client('backends/anthropic_tool_use', 'backends/anthropic')
     assert_equal 2, client.responses.length
 
     LLM::Anthropic.ask 'user: call the tool', tools: [{ type: 'custom', name: 'get_current_temperature', description: 'w', input_schema: { type: 'object' } }],

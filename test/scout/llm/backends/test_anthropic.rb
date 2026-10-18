@@ -17,7 +17,7 @@ user: say hi
   end
 
   def test_ask
-    client = TestFixtures.anthropic_client('backends/anthropic')
+    client = TestClients.anthropic_client('backends/anthropic')
     res = LLM::Anthropic.ask 'user: write a script that sorts files in a directory',
                              client: client, model: 'claude-sonnet-4-5', persist: false
 
@@ -42,7 +42,7 @@ user:
 
 should i take an umbrella?
     EOF
-    client = TestFixtures.anthropic_client('backends/anthropic')
+    client = TestClients.anthropic_client('backends/anthropic')
     res = LLM::Anthropic.ask prompt, client: client, persist: false
 
     assert_equal 'Mock answer from Anthropic messages', res
@@ -83,7 +83,7 @@ What is the weather in London. Should I take my umbrella?
       },
     ]
 
-    client = TestFixtures.anthropic_client('backends/anthropic_tool_use', 'backends/anthropic')
+    client = TestClients.anthropic_client('backends/anthropic_tool_use', 'backends/anthropic')
     respose = LLM::Anthropic.ask prompt, tools: tools,
                                  client: client, log_errors: true, persist: false do |name,arguments|
       "It's 15 degrees and raining."
@@ -101,7 +101,7 @@ What is the weather in London. Should I take my umbrella?
   end
 
   def test_json_output
-    client = TestFixtures.anthropic_client('backends/anthropic')
+    client = TestClients.anthropic_client('backends/anthropic')
     res = LLM::Anthropic.ask 'user: What other movies have the protagonists of the original gost busters played on, just the top.',
                              format: :json, client: client, persist: false
 

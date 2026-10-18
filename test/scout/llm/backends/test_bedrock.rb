@@ -14,7 +14,7 @@ class TestLLMBedrock < Test::Unit::TestCase
   # dispatching to the :bedrock backend).
   def test_ask
     require 'scout/llm/backends/bedrock'
-    client = TestFixtures.bedrock_client('backends/bedrock')
+    client = TestClients.bedrock_client('backends/bedrock')
 
     response = LLM::Bedrock.ask 'user: say hi to bedrock',
                                 client: client,
@@ -36,7 +36,7 @@ class TestLLMBedrock < Test::Unit::TestCase
 
   def test_ask_prompt_type
     require 'scout/llm/backends/bedrock'
-    client = TestFixtures.bedrock_client('backends/bedrock')
+    client = TestClients.bedrock_client('backends/bedrock')
 
     response = LLM::Bedrock.ask 'user: say hi through the prompt endpoint',
                                 client: client, type: :prompt,
@@ -52,7 +52,7 @@ class TestLLMBedrock < Test::Unit::TestCase
 
   def test_embeddings
     require 'scout/llm/backends/bedrock'
-    client = TestFixtures.bedrock_client('backends/bedrock_embedding')
+    client = TestClients.bedrock_client('backends/bedrock_embedding')
 
     emb = LLM::Bedrock.embed 'Some text', client: client,
                              model: 'amazon.titan-embed-text-v1'
@@ -90,7 +90,7 @@ class TestLLMBedrock < Test::Unit::TestCase
       }
     ]
 
-    client = TestFixtures.bedrock_client('backends/bedrock_tool_use', 'backends/bedrock')
+    client = TestClients.bedrock_client('backends/bedrock_tool_use', 'backends/bedrock')
 
     calls_seen = []
     response = LLM::Bedrock.ask 'user: What is the weather in London? Should I take an umbrella? Use the tool.',

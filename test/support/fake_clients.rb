@@ -3,6 +3,12 @@
 # Not named test_*.rb on purpose: the Rakefile test pattern
 # ('test/**/test_*.rb') must not collect this file.
 #
+# Fake-client FACTORIES live in TestClients; the static recorded payloads
+# and their loader live in TestFixtures (support/fixtures.rb). All factory
+# helpers keep their historical names and signatures, moved verbatim from
+# the TestFixtures module they used to live in, so call sites only change
+# the receiver.
+#
 # Each fake wraps one provider SDK client class. They all share:
 #   * a response list replayed in order (last entry repeats when exhausted)
 #   * `.calls` recording every parameters hash for assertions
@@ -110,29 +116,32 @@ class FakeBedrockClient
   end
 end
 
-module TestFixtures
+# Factory module: builds a fake client pre-loaded with the named fixtures.
+# The helpers keep their historical names, e.g.
+#   TestClients.anthropic_client('backends/anthropic_tool_use',
+#                               'backends/anthropic')
+# loads each fixture through TestFixtures.fixture and scripts the fake with
+# them in order.
+module TestClients
   class << self
-    # Build a fake client pre-loaded with the named fixtures, e.g.
-    # TestFixtures.openai_client('backends/openai_chat_tool_call',
-    #                            'backends/openai_chat')
     def openai_client(*names)
-      FakeOpenAIChatClient.new(*names.collect { |n| fixture(n) })
+      FakeOpenAIChatClient.new(*names.collect { |n| TestFixtures.fixture(n) })
     end
 
     def responses_client(*names)
-      FakeResponsesClient.new(*names.collect { |n| fixture(n) })
+      FakeResponsesClient.new(*names.collect { |n| TestFixtures.fixture(n) })
     end
 
     def anthropic_client(*names)
-      FakeAnthropicClient.new(*names.collect { |n| fixture(n) })
+      FakeAnthropicClient.new(*names.collect { |n| TestFixtures.fixture(n) })
     end
 
     def ollama_client(*names)
-      FakeOllamaClient.new(*names.collect { |n| fixture(n) })
+      FakeOllamaClient.new(*names.collect { |n| TestFixtures.fixture(n) })
     end
 
     def bedrock_client(*names)
-      FakeBedrockClient.new(*names.collect { |n| fixture(n) })
+      FakeBedrockClient.new(*names.collect { |n| TestFixtures.fixture(n) })
     end
   end
 end

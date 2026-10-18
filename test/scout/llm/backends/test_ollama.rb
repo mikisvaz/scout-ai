@@ -4,7 +4,7 @@ require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1
 class TestLLMOllama < Test::Unit::TestCase
 
   def test_ask
-    client = TestFixtures.ollama_client('backends/ollama')
+    client = TestClients.ollama_client('backends/ollama')
     res = LLM::OLlama.ask 'user: write a script that sorts files in a directory',
                           client: client, model: 'mistral', mode: 'chat', persist: false
 
@@ -44,7 +44,7 @@ What is the weather in London. Should I take an umbrella?
       },
     ]
 
-    client = TestFixtures.ollama_client('backends/ollama_tool_call', 'backends/ollama')
+    client = TestClients.ollama_client('backends/ollama_tool_call', 'backends/ollama')
     respose = LLM::OLlama.ask prompt, model: 'gpt-oss',
                               client: client, tool_choice: 'required',
                               tools: tools, persist: false do |name,arguments|
