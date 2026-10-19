@@ -15,10 +15,17 @@ spelling exposed inside the sandbox, and retry through the tool you actually
 need. Never infer a tool's permissions from another tool's success or
 failure.
 
-The evidence base for every claim here is
-[research/sandbox-docs-facts.md](../../research/sandbox-docs-facts.md), which
-labels each fact as `[code file:line]` or `[probe ...]`; line references
-below re-verified 2026-10-17.
+The original evidence base for this document was a labeled-claims facts
+sheet (`research/sandbox-docs-facts.md`, built 2026-10-08..2026-10-17: 63+
+labeled claims tagged `[code file:line]` or `[probe ...]`, with three dated
+correction rounds). That sheet was retired 2026-10-19 once its verified
+content was fully absorbed into this document and Layer-1 was re-verified
+against the grant-source refactor; a copy survives at
+`tmp/notes/cleanup/retired-sandbox-docs-facts.md` (tmp/ is gitignored
+scratch — a pointer for anyone holding that checkout, not a durable
+reference). The one still-unresolved item from the sheet is tracked in
+[Improvements.md](../Improvements.md) R14. Line references below
+re-verified 2026-10-17.
 
 ## 1. Is this tool sandboxed?
 
@@ -107,6 +114,19 @@ or an env var such as `ALLOWED_PATHS`
 (the key name upper-cased); a scoped config entry beats the env var, which
 in turn beats the default.
 
+Two introspection helpers round out the layer: `grant_origin(path, scope:,
+root:)` (sandbox.rb:187-216) reports which source category an expanded path
+came from, by expanded-spelling equality over the full origin vocabulary
+(`root`, `dirs`, `allowed_paths`, `thread`, `exec_paths`, `read_paths`,
+`allowed_read_paths`, `thread_read`, `bwrap_paths`, `bwrap_read_paths`),
+returning `nil` for unlisted paths; and `describe_grants(scope:, root:,
+hint:)` (:218-229) renders one annotated line per grant — writable entries
+marked `(read-write)`, remaining readable entries `(read-only)`, with the
+caller's `hint` appended verbatim as the last line. `scope: nil` degrades
+the token chain to `['sandbox']` (sandbox.rb:145-148); `expand_grant_path`
+(:163-167) expands located spellings in place and resolves unlocated Scout
+spellings (such as `tmp`) through `Path#find_all`.
+
 `Workspace.root` is **not** part of that composition: it is supplied as the
 separate `root:` boundary of `authorize_path`, which is why it appears
 separately in the diagnostics.
@@ -186,15 +206,17 @@ explicitly out of scope.
 
 ## Sources / verification
 
-Every factual claim above traces to
-[research/sandbox-docs-facts.md](../../research/sandbox-docs-facts.md) (72
-labeled claims: 42 `[code file:line]`, 25 `[probe]`, 5 `[unverified]`), whose
-line anchors were spot-checked against the live checkouts on 2026-10-16; two
-drifts were appended as dated corrections there before this document was
-written. Further dated corrections (2026-10-17) record the grant-source
-refactor's moved anchors and the ChatAnalyst positive check. The
-`[unverified]` items in the sheet concern the Workspace `test_tsv.rb`
-failure's history and tool-capability claims not asserted here; the
-`test_tsv.rb` failure's pre-existence (identical failure with the grant
-refactor reverted) was established on 2026-10-17 and is recorded in the
-Cortex artifact `reports/scout-ai-sandbox-grant-sources.md`.
+Every factual claim above originally traced to the retired
+`research/sandbox-docs-facts.md` (final count 63 labeled claims: 37
+`[code file:line]`, 22 `[probe]`, 4 `[unverified]`), whose line anchors
+were spot-checked against the live checkouts on 2026-10-16; two drifts
+were appended as dated corrections there before this document was
+written, and further dated corrections (2026-10-17) record the
+grant-source refactor's moved anchors and the ChatAnalyst positive check
+— both already folded into the line references above. The durable facts
+live in this document; the sheet itself was retired 2026-10-19 (copy at
+`tmp/notes/cleanup/retired-sandbox-docs-facts.md`, gitignored scratch).
+Its `[unverified]` items were label recounts plus the Workspace
+`test_tsv.rb` failure's history; that failure's pre-existence (identical
+failure with the grant refactor reverted) was established 2026-10-17 and
+is recorded in Improvements.md R14 and R17.

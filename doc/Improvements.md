@@ -3,7 +3,7 @@
 This document catalogs known code issues, documentation gaps, architectural
 suggestions, and anti-patterns to avoid when contributing to Scout-AI. It is
 derived from the research artifacts in [../research/](../research/) and from
-the Cortex subsystem studies under `scout-ai/subsys/` (probed 2026-09-10/11),
+the Cortex subsystem studies under `research/subsys/` (probed 2026-09-10/11),
 and is intended as a living reference for maintainers and contributors.
 
 Each entry includes a priority to help triage effort:
@@ -49,7 +49,7 @@ Each entry includes a priority to help triage effort:
 
 **Priority:** Medium
 
-> **Finding: F6** (`scout-ai/subsys/model-ml.md`).
+> **Finding: F6** (`research/subsys/model-ml.md`).
 
 **Problem:**
 `ScoutModel#load_options` merges the persisted `options.json` **over** the
@@ -74,7 +74,7 @@ back only on `save`.
 
 **Priority:** Low
 
-> **Finding: F11** (`scout-ai/subsys/embed-image.md`, `backends.md` §1).
+> **Finding: F11** (`research/subsys/embed-image.md`, `backends.md` §1).
 
 **Problem:**
 - `LLM.embed`'s `case` accepts `:relay` and `:openwebui` branches that fail
@@ -100,7 +100,7 @@ implement or delete the unreachable branches rather than carrying both.
 
 **Priority:** Low
 
-> **Finding: F15** (`scout-ai/subsys/tools.md` §2.4).
+> **Finding: F15** (`research/subsys/tools.md` §2.4).
 
 **Problem:**
 `KnowledgeBase#register(:name, ...)` + `save` round-trips the registry YAML
@@ -122,7 +122,7 @@ String-keyed registries.
 
 **Priority:** Low
 
-> **Finding: F16** (`scout-ai/subsys/agent-society.md`, `tools.md` §2.8).
+> **Finding: F16** (`research/subsys/agent-society.md`, `tools.md` §2.8).
 
 **Problem:**
 Two divergent lookup roots for agent resources:
@@ -150,7 +150,7 @@ by a chat message", used by both paths.
 
 **Priority:** Medium
 
-> **Finding: F19** (`scout-ai/subsys/agent-society.md`).
+> **Finding: F19** (`research/subsys/agent-society.md`).
 
 **Problem:**
 Two related behaviors surprise anyone building agent societies:
@@ -178,7 +178,7 @@ file's mtime/digest.
 
 **Priority:** Low
 
-> **Finding: F21** (`scout-ai/subsys/backends.md` §7.8).
+> **Finding: F21** (`research/subsys/backends.md` §7.8).
 
 **Problem:**
 `openai.rb` deletes `:defaults` at the wrapper level, where `:parameters` is
@@ -247,7 +247,7 @@ workflow). Low priority since the current guide covers the essentials.
 **Priority:** Medium
 
 **Problem:**
-The Cortex subsystem studies (`scout-ai/subsys/`, probed 2026-09-10/11) found
+The Cortex subsystem studies (`research/subsys/`, probed 2026-09-10/11) found
 eleven places where maintained docs described behavior that does not exist or
 has since changed: the nonexistent `scout-ai config set` (F3), `introduce:`
 generating tools (F4), backend retry/backoff and streaming (F8/F9), dynamic
@@ -257,8 +257,8 @@ table, the `inherit: 'tools'` scope (F17), Anthropic image blocks (F18), the
 MultiAgentWorkflows first snippet (F20), and the `agent.rb` require tree /
 `start_chat.chat` seed handling (F19).
 
-**Status: Resolved (uncommitted).** `doc/` has been corrected against the
-owning artifacts (`scout-ai/subsys/README.md` is the F1–F22 index); each fix
+**Status: Resolved (committed in 838586a).** `doc/` has been corrected against the
+owning artifacts (`research/subsys/README.md` is the F1–F22 index); each fix
 is described in the corresponding page. The code half lives in issues 3–8
 above, tagged with their finding numbers; R9–R13 in the Refactor Log record
 the fixes that landed in the same sweep.
@@ -354,7 +354,7 @@ Review both documents to ensure the endpoint YAML examples, key names, and
 configuration precedence are identical. Cross-link them so readers can find
 the canonical reference.
 
-**Status: Resolved (uncommitted).** [user/RunningInference.md](user/RunningInference.md)
+**Status: Resolved (committed in 838586a).** [user/RunningInference.md](user/RunningInference.md)
 is now the single canonical endpoint reference (hand-written
 `~/.scout/etc/AI/<name>.yaml`, recognized keys, `-ck key=value`, provider
 table, `Endpoint not found` semantics); GettingStarted and Backends
@@ -477,12 +477,13 @@ behaviour of the command is untouched.
 
 ---
 
-### R9–R13. The 2026-09-11 fix sweep (uncommitted)
+### R9–R13. The 2026-09-11 fix sweep (committed in 838586a)
 
 R9–R13 below record the 2026-09-11 fix sweep verified by the Cortex subsystem
-studies (`scout-ai/subsys/`). All changes sit uncommitted in the working tree
-together with their tests; findings F1, F2, F5, F7 and the `ask.rb`
-`persist:false` fix are resolved by them.
+studies (`research/subsys/`). All changes landed in commit `838586a`
+(2026-09-11, "Fix sweep (F1/F2/F5/F7 + R13) with regression tests; F1-F22
+doc corrections; D4 promotion") together with their tests; findings F1, F2,
+F5, F7 and the `ask.rb` `persist:false` fix are resolved by them.
 
 The findings identified by the same studies but **not** covered by the sweep
 (F6, F11, F15, F16, F19, F21) correspond to code issues 3, 4, 5, 6, 7 and 8
@@ -496,7 +497,7 @@ and the dispatcher's bare `case` matched its first branch unconditionally, so
 `Agent#image(path)`. Fixed by matching on the subject form and normalizing
 only on `auto`; the `ATACH_TYPES` typo and the schema/code default divergence
 (auto vs image) went with it. `lib/scout/llm/agent/attach.rb` +
-`test/scout/llm/agent/test_attach.rb` (8 tests, 0 failures). Uncommitted.
+`test/scout/llm/agent/test_attach.rb` (8 tests, 0 failures). Committed in 838586a.
 
 ### R10. MCP serving works against the `mcp` gem
 
@@ -507,7 +508,7 @@ every served tool call failed with `Internal error`. The block now takes
 `|server_context: nil, **parameters|`, captures the workflow module in a
 local, returns a real `MCP::Tool::Response`, and registers tools under the
 String name the JSON-RPC lookup expects. `lib/scout/llm/mcp.rb` +
-`test/scout/llm/tools/test_mcp.rb` (3 tests, 0 failures). Uncommitted; the
+`test/scout/llm/tools/test_mcp.rb` (3 tests, 0 failures). Committed in 838586a; the
 supported `mcp` gem version range is still undecided.
 
 ### R11. `LLM.embed` reads endpoint YAML
@@ -516,7 +517,7 @@ supported `mcp` gem version range is still undecided.
 `ask`/image which use `find_with_extension(:yaml)`, so `<endpoint>.yaml`
 could not configure embeddings and a missing endpoint failed silently
 instead of raising. `lib/scout/llm/embed.rb` +
-`test/scout/llm/test_embed.rb` (6 tests, 0 failures). Uncommitted.
+`test/scout/llm/test_embed.rb` (6 tests, 0 failures). Committed in 838586a.
 
 ### R12. TorchModel trains with a real criterion by default
 
@@ -525,7 +526,7 @@ the criterion slot (copy-paste), so default training computed the loss on an
 optimizer object unless the user set `model.criterion` manually — which the
 documented example did, masking the bug. Now builds a proper default
 criterion. `lib/scout/model/python/torch.rb`; covered by
-`test/scout/model/python/test_torch.rb` (torch-gated). Uncommitted.
+`test/scout/model/python/test_torch.rb` (torch-gated). Committed in 838586a.
 
 ### R13. `ask` honors an explicit `persist: false`
 
@@ -534,7 +535,89 @@ criterion. `lib/scout/model/python/torch.rb`; covered by
 anyway into the shared `Scout.var.cache.ask` store. The config lookup now
 runs only when the caller said nothing (`persist.nil?`), so `persist: false`
 genuinely bypasses the cache. `lib/scout/llm/ask.rb`; covered by
-`test/scout/llm/test_ask.rb`. Uncommitted.
+`test/scout/llm/test_ask.rb`. Committed in 838586a.
+`test/scout/llm/test_ask.rb`. Committed in 838586a.
+
+### R14 (open). Workspace `test_tsv` harness assertion failure
+
+`Workspace` suite: `test_read_returns_scout_tsv_text_and_supports_csv_empty_header_hash`
+fails at `test/Workspace/tasks/test_tsv.rb:97`. Root cause is a harness
+mismatch (the test compares `return_path` bytes while the task returns
+`job.path`-shaped TSV text), not a tsv logic regression; the failure
+predates the sandbox refactor (present on the parent commit too — the
+facts sheet labeled it `[unverified: would require checking out the parent
+commit]`, and the artifacts `reports/scout-ai-sandbox-docs-outcome.md` /
+`research/sandbox-docs-facts.md` record the same reading; the
+facts-sheet residue itself was retired on 2026-10-19 — its durable facts
+live in `doc/developer/Sandbox.md` and this ledger). Open decision:
+whether `tsv.rb` should adopt the sandbox-path check or the harness
+assertion should be re-targeted. Evidence pointer (retired 2026-10-19; copy
+at `tmp/notes/cleanup/retired-sandbox-docs-facts.md`): the facts sheet's
+§5 Workspace-suite table.
+
+### R15 (open, review gap). sandbox-grant-sources round lacks independent review
+
+The grant-source layer move from `Workspace` into `LLM::Sandbox`
+(commit c5cc5cb) was validated by tests and equivalence probes
+(`writable identical: true`, `readable identical: true` across working
+directories) but **independent review was never performed** — recorded in
+the closing line of the producing artifact
+(`reports/scout-ai-sandbox-grant-sources.md`). The verified content itself
+is already promoted into [developer/Sandbox.md](developer/Sandbox.md)
+Layer-1; the residual gap is the review, not the content. Note: the
+equivalence probes depended on `RUBYOPT` checkout overrides; see
+`research/scout-ai-runtime-availability.md` for the clean-environment
+caveat.
+
+### R16 (open). ScoutException recoverability semantics not documented in doc/
+
+`doc/` documents `ParameterException` as the error contract (e.g.
+[developer/PathEngine.md](developer/PathEngine.md) §8) but nowhere states
+the recoverability semantics of Scout exceptions. The durable statement
+lives in the scout-gear Cortex store as
+`claims/scout-exception-recoverability-contract.md` (map `scout_gear_lib`):
+ScoutException subclasses are for non-recoverable, reproducible input
+failures; scout-ai's engine usage matches it. That claim is outside this
+repository's purge scope and survives it; the open item is whether to
+surface a short contract statement in scout-ai's own developer docs.
+repository's purge scope and survives it; the open item is whether to
+surface a short contract statement in scout-ai's own developer docs.
+
+### R17 (open). Test-suite residuals from the 2026-10 finalize round
+
+Small leftovers recorded by the finalize/test-repair outcome artifacts,
+none blocking, all still present in the tree: (a) unused `expanded`
+variable at `test/scout/llm/test_sandbox.rb:199` (assigned, never read);
+(b) `test/scout/llm/chat/agent_meta_fixtures.rb` still returns positional
+arrays from its helper tuples (explicitly deferred in the repair round —
+convert to named Hashes when next touched); (c) tooling anomaly observed
+twice (not a product defect): the agent `Workspace write` tool once
+reported success for checkout paths while bash saw no files — worth a
+sandbox/path-map diagnosis by the runtime owner; (d) a transient
+graphviz-tmpdir race in `TestProvTimeline` T12 that never reproduced.
+Evidence: the finalize outcome record (Cortex, 2026-10-18) and
+`research/sandbox-docs-facts.md` §5 — the facts sheet itself was retired
+2026-10-19 with its four `[unverified]` residues recorded here and in
+`doc/developer/Sandbox.md`. The settle-with-author question on
+commit `4680bd9`'s `path_list` `path` parameter was resolved in favor of
+retention and is pinned by nine tests in
+`test/scout/llm/agent/test_path_filesystem.rb` (commit `eaa55db`) —
+closed, recorded here so the history survives the Cortex purge.
+
+### R18 (closed, provenance record). Suite baseline history 656 → 679 → 688
+
+For anyone chasing count drift later: the ordinary suite baseline moved
+656 tests/3178 assertions (after availability integration) → 679/3238
+(test-repair round, three identical runs + Critic confirmation) →
+688/3255 (finalize round, +9 `path_list` tests) → current 688/3255 at
+HEAD `a2e3f6f` (disposition §7). All runs used `cd <checkout> &&
+BWRAP_PATH=false rake test` — the env var placement matters (a leading
+token is intercepted by the bash wrapper and silently dropped).
+Omissions throughout: 3 HF-cache, 1 transformers/datasets, 2 torch, 1
+CUDA — all genuinely optional prerequisites. Source: the finalize and
+test-repair outcome records (Cortex, 2026-10-17/18), restated here
+because those artifacts are scheduled for removal.
+
 
 ---
 

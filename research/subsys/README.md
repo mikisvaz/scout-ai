@@ -36,11 +36,23 @@ layers.
 
 ## Findings index
 
+Cross-subsystem findings, numbered as in the source studies. Only## Findings index
+
+> **Status (2026-10-19, re-verified at HEAD a2e3f6f):** the four fixed rows
+> below landed in commit 838586a (tests green then and in the 2026-10-18
+> 688/3255 suite baseline). The open table was spot-checked this date: F10
+> (tools/call.rb:67 `function_arguments.merge(defaults)` still overrides
+> model arguments), F13 (registry-only backend resolution), F16
+> (`Scout.var.Agent` fallback vs `Chat.load_workflow`'s `Scout.chats.Agent`
+> only, agent.rb:252-256 / chat/process/tools.rb:27), and F17
+> (`inherit: 'tools'` still copies the whole current chat's tooling,
+> agent/conversation.rb:246-249) all remain open as described.
+
 Cross-subsystem findings, numbered as in the source studies. Only
 **still-open** items are described here; fixed ones are listed in one line
 each.
 
-### Fixed in the working tree (2026-09-11, uncommitted)
+### Fixed (2026-09-11 fix sweep, committed in 838586a)
 
 | # | finding | where |
 |---|---|---|

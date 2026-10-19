@@ -522,7 +522,9 @@ module LLM
         messages = self.messages question, options
         
         if String === save_file
-          main_chat_file, agent_chat_file = save_file.split(/\.files\//)
+          parts = save_file.split(/\.files\//)
+          agent_chat_file = parts.pop
+          main_chat_file = parts * '.files/'
           if Open.exists?(main_chat_file+'.info')
             main_chat_job = Step.load(main_chat_file)
             job_name = main_chat_job.clean_name == 'Default' ? main_chat_file.split('_').last[0..5] : main_chat_job.clean_name

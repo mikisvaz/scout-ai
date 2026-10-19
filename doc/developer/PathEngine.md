@@ -48,6 +48,13 @@ filesystem boundary then never re-resolves: `resolve_path` joins
 plain `File.*` on the result. Nothing downstream can fall back through
 Scout's map order again.
 
+**Never re-resolve a target through `Path#find` after authorization.**
+Authorization compares the resolved absolute target against the pinned
+root exactly; `Path#find` on a missing/unlocated path can fall back
+through `map_order` to `:user` (`~/.scout`) or compressed alternatives
+(`.gz`/`.bgz`/`.zip`), so a `find`-re-resolved target could point outside
+the root that was just authorized. Handlers and overrides receive the
+authorized absolute `String` and must treat it as final.
 Why pinning exists: Scout's `Path#find` walks `map_order` for a path that
 is unlocated and missing, and the final map in that order is
 `:default => :user` (`~/.scout`). A relative root held as an unlocated
@@ -345,6 +352,12 @@ become available immediately and no previously installed tool is
 dropped. Registration is atomic — if tool installation fails, the
 half-registered kind is removed again.
 
+The installed surface is `path_kinds` plus one tool per built-in
+operation that at least one registered kind enables: the seven generic
+operations (`read write edit list move rename delete`), the four special
+operations (`validate promote smoke patch`), plus `path_kinds` itself —
+at most 12 engine tools, before any kind-specific custom operations.
+
 ## 8. Callback contract and trust boundary
 
 Callbacks run **only after** kind validation, path resolution,
@@ -399,3 +412,30 @@ capabilities to enable). Its tool takes `kind`, `path`, optional
 Multi-file patching is **not** part of the Path engine: coordinated
 changes across several targets belong to the sandboxed terminal
 mechanism (`bash` etc.), not to a Path operation.
+
+## 10. `edit` selector semantics are byte-exact (pinned by tests)
+
+`path_edit` never normalizes whitespace. Untouched content is copied
+byte-identically; only the selected span changes. The contracts below are
+pinned by the newline test matrix in
+`test/scout/llm/agent/test_path_edit.rb` (the original 12-case matrix has
+grown; any change to these behaviors must update those tests deliberately,
+never by deleting them):
+
+- `lines` selectors are 0-based with an **exclusive** `end`; each line
+  includes its terminator and the final line may lack one.
+- `start == lines.length` (insertion-at-end) is allowed and appends;
+  `start > lines.length` raises. `end` beyond the document clamps to the
+  end (clamping is deliberate, not leniency).
+- At an **interior** boundary (a line follows the span) the replacement is
+  terminated with exactly one newline: a missing one is added, repeated
+  ones collapse.
+- At an **EOF-spanning** boundary the result's final-newline state is
+  inherited from the ORIGINAL document, bidirectionally: a replacement
+  ending in `\n` must not introduce a final newline the original lacked,
+  and deleting the last line of a file without a final newline must not
+  add one. A replacement's trailing newlines are stripped in that case.
+- `regexp` selectors use `Regexp.new` with a narrow `RegexpError` rescue
+  (invalid patterns surface as `ParameterException`, never a raw Ruby
+  exception); `chars` selectors use byte/character-index splice with
+  `start <= end` enforced.

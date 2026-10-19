@@ -16,7 +16,17 @@ typed, inspectable workflow jobs.
 
 The user documentation explains how to use Scout-AI to build agents, define
 tools, configure inference, and orchestrate multi-agent workflows. It is
+organized around concepts and tasks, not internal classes.### I want to build applications with Scout-AI
+
+→ Go to **[user/](user/)** documentation.
+
+The user documentation explains how to use Scout-AI to build agents, define
+tools, configure inference, and orchestrate multi-agent workflows. It is
 organized around concepts and tasks, not internal classes.
+
+The ML model subsystem (`ScoutModel`, `TorchModel`, Hugging Face wrappers)
+is documented separately in [Model.md](Model.md); it is intentionally
+outside the agent/LLM layer.
 
 **Start here:**
 1. [user/GettingStarted.md](user/GettingStarted.md) — install, configure, first conversation.
@@ -60,6 +70,8 @@ retained — `provenance-navigation-design.md`, the rationale tracked by
 | **Add tool support** | user/ToolCalling → (user/Python if needed) |
 | **Configure inference** | user/RunningInference → user/ManagingContext |
 | **Understand the internals** | developer/Architecture → developer/ChatLifecycle → developer/Backends |
+| **Extend the agent Path engine** | developer/PathEngine |
+| **Understand the sandbox / execution boundaries** | developer/Sandbox |
 | **Track and inspect provenance** | developer/Provenance |
 | **Write idiomatic code** | developer/DesignPrinciples |
 | **Use the CLI** | user/Cookbook (CLI quick reference) |
@@ -92,9 +104,12 @@ doc/
 │   ├── PromptProcessing.md
 │   ├── Backends.md
 │   ├── DelegationInternals.md
-│   └── Provenance.md
+│   ├── Provenance.md
+│   ├── PathEngine.md
+│   └── Sandbox.md
 └── ../research/          ← probe-verified subsystem studies
     ├── subsys/           ← one study per subsystem
+    ├── scout-ai-runtime-availability.md
     └── provenance-navigation-design.md   ← retained for Improvements.md A1
 ```
 
@@ -103,3 +118,23 @@ Each layer becomes progressively more detailed and less stable:
 ```
 Code → Investigation (research/) → Developer docs (doc/developer/) → User docs (doc/user/)
 ```
+
+---
+
+## The three layers and their authority
+
+- **`doc/` is authoritative.** If a page here states a contract, behavior,
+  or limit, that statement is the current truth for Scout-AI. When code
+  changes, the page changes with it; docs lagging code is a defect, not a
+  preference.
+- **`research/` holds investigation records, not authority.** A research
+  file documents the rationale, evidence, and open questions behind a
+  decision at the time it was made. It may state sharp edges and
+  uncertainty, but it never silently overrides `doc/`: on conflict,
+  `doc/` wins, and the research file should be updated or retired.
+- **`var/cortex/` is mutable working state.** The agent workspace —
+  conversations, briefs, artifacts — is scratch space for active
+  investigation. Anything durable that came out of it must be promoted
+  into `doc/` or `research/`; nothing under `var/` is citable as
+  authoritative.
+

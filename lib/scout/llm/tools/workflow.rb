@@ -34,7 +34,8 @@ module LLM
     end
 
 
-    properties = task_info[:inputs].inject({}) do |acc,input|
+    inputs = task_info[:inputs]
+    properties = inputs.inject({}) do |acc,input|
       next acc if names and not names.include?(input)
       type = task_info[:input_types][input]
       description = task_info[:input_descriptions][input]
