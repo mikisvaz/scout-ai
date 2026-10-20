@@ -53,10 +53,8 @@ module LLM
 
                      request_options[:timeout] = timeout.to_i if timeout
                      request_options[:open_timeout] = timeout.to_i if timeout
+                     request_options[:read_timeout] = timeout.to_i if timeout
                      request_options[:verify_ssl] = false
-
-                     request_options[:timeout] = timeout
-                     request_options[:read_timeout] = timeout
                      RestClient::Request.execute(**request_options)
                    else
                      raise 'Get not supported'
