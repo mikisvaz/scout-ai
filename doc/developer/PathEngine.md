@@ -96,7 +96,7 @@ Any `StandardError` raised while resolving the map or the root is wrapped
 the same way, so an invalid configuration can never surface as a raw Ruby
 exception.
 
-### Job-directory pinning (H2)
+### Job-directory pinning
 
 Separately from kind roots, chat-task workflows built by
 `lib/scout/llm/agent/workflow.rb` (`AgentWorkflow` and the
@@ -109,7 +109,7 @@ module is used, unless the workflow already declares an explicit
 directory (`directory =` beats pinning, so tests and deployments that set
 `Workflow.directory` keep their configured location).
 
-### Dormant limitation (H4)
+### Dormant limitation
 
 `path_list` used to call `Path#glob` on the resolved target when it looked
 Path-like. With roots pinned absolute, targets are always plain `String`s,
@@ -123,8 +123,10 @@ The tool-layer `TmpFile`/`Open.write` scratch traffic that lands in
 `~/.scout/tmp` for relative tool paths originates in the
 Workspace/ComputerUse tool layer (gem `scout-gear` `TmpFile.tmpdir`
 override), not in this engine. No code in this repository resolves those
-paths; the fix belongs in the tool layer. See
-`tmp/pathmap_fix_report.md` for the recorded follow-up list.
+paths; the fix belongs in the tool layer and is recorded as a follow-up
+there. The durable record of the engine-side behavior is
+`test/scout/llm/agent/test_path.rb` (absolute roots pass through
+untouched even with an agent-level map configured).
 
 
 ## 3. Registering a kind
@@ -242,7 +244,26 @@ Behavior at incorporation:
   class, for example:
   `Workflow "MyWorkflow" declares PATH_KINDS as a String; expected a
   Hash of kind name => definition (or an Array of definition Hashes
+  with a "name" key)`.- **Malformed declarations fail loudly.** A `PATH_KINDS` that is not a
+  Hash (or Array of Hashes), or an entry that is not a Hash, raises
+  `ParameterException` naming the workflow, the kind and the actual
+  class, for example:
+  `Workflow "MyWorkflow" declares PATH_KINDS as a String; expected a
+  Hash of kind name => definition (or an Array of definition Hashes
   with a "name" key)`.
+
+Incorporation behavior is pinned by
+`test/scout/llm/agent/test_path_workflow_integration.rb`
+(`test_whole_workflow_tool_line_registers_kinds_and_installs_tools`,
+`test_task_level_tool_line_registers_nothing`,
+`test_conflict_between_two_workflows_raises_naming_both`,
+`test_frozen_path_kinds_constant_is_never_mutated`,
+`test_path_role_no_longer_installs_path_tools`); registration and
+registry rollback by `test/scout/llm/agent/test_path.rb`
+(`test_register_path_kind`,
+`test_invalid_location_root_and_default_declarations_are_atomic`,
+`test_failed_kind_registration_rolls_back_registry_and_tool_surface_recovers`,
+`test_conflicting_contracts_are_rejected_at_installation`).
 
 There is no chat-level Path role: enabling a kind is done either by
 registering it directly in Ruby (`register_path_kind`, iterated over a
@@ -378,7 +399,27 @@ Errors follow the engine contract: invalid arguments, missing files and
 failed authorization raise `ParameterException` (a Scout exception).
 The agent-facing tool callables serialize Scout exceptions as
 `{"exception": ..., "exception_line": ...}`; non-Scout exceptions are
+not caught there — handlers must normalize their own failures.Errors follow the engine contract: invalid arguments, missing files and
+failed authorization raise `ParameterException` (a Scout exception).
+The agent-facing tool callables serialize Scout exceptions as
+`{"exception": ..., "exception_line": ...}`; non-Scout exceptions are
 not caught there — handlers must normalize their own failures.
+
+The trust boundary is pinned by
+`test/scout/llm/agent/test_path_filesystem.rb`
+(`test_sandbox_denies_custom_operation_before_callback`,
+`test_sandbox_fails_closed_when_authorizer_is_unavailable`,
+`test_path_write_success_is_at_the_authorized_target`,
+`test_path_write_denies_resolver_target_outside_root`,
+`test_path_write_filesystem_failure_does_not_return_success`) and
+`test/scout/llm/agent/test_path.rb`
+(`test_dispatch_authorization_failure_runs_no_callback_and_mutates_nothing`,
+`test_dispatch_content_op_cannot_redirect_write_to_other_file`,
+`test_dispatch_edit_override_authorization_failure_runs_no_override`).
+The error surface per failure class is pinned by
+`test/scout/llm/agent/test_path_errors.rb` (its `test_error_matrix_*`
+cases: unknown kind/location, missing argument, invalid or malformed
+selector, path outside grant, unsupported operation).
 
 ## 9. Single-file patch; multi-file changes are not supported
 
@@ -412,6 +453,15 @@ capabilities to enable). Its tool takes `kind`, `path`, optional
 Multi-file patching is **not** part of the Path engine: coordinated
 changes across several targets belong to the sandboxed terminal
 mechanism (`bash` etc.), not to a Path operation.
+
+The patch contract is pinned by `test/scout/llm/agent/test_path_patch.rb`
+(`test_patch_applies_simple_diff_and_preserves_untouched_bytes`,
+`test_patch_multi_file_rejected_before_mutation`,
+`test_patch_header_filename_cannot_redirect_target`,
+`test_patch_multi_hunk_is_all_or_nothing`,
+`test_patch_no_newline_marker_adds_and_removes_final_newline`,
+`test_patch_default_off_and_capability_enables`,
+`test_patch_on_unauthorized_target_writes_nothing`).
 
 ## 10. `edit` selector semantics are byte-exact (pinned by tests)
 

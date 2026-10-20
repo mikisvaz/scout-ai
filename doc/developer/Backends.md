@@ -110,27 +110,43 @@ not a request round limit — there is no `MAX_TOOL_CALLS` in the loop.
 
 ## Error handling and retries
 
-Backends do not retry. A `query` raise propagates out of `ask` unchanged
-(no backoff, no retry). The shared loop does tag it with
-`Backend::BackendException` and give it a `.chat` accessor pointing at a
-saved debug copy of the failing messages/options/meta before re-raising:
+The shared loop never retries a failed `query`: a raise propagates out of
+`ask` unchanged (no backoff, no retry). Before re-raising it is tagged with
+`Backend::BackendException` and given a `.chat` accessor pointing at a saved
+debug copy of the failing messages/options/meta (`Backend::ClassMethods.ask`,
+`lib/scout/llm/backends/default.rb`).
 
-- The only retry construct inside a backend is OpenWebUI's `query`, which
-  wraps its HTTP POST in `Misc.insist` (about four attempts with sub-second
-  sleeps).
-- **Agent-level exception handling** — `Agent#chat` rescues a backend raise
-  and calls the user-supplied `process_exception` Proc (an accessor on the
-  agent); returning truthy triggers a `retry`, anything else re-raises.
+Two retry constructs exist in this repository, and neither lives in the
+shared `query` loop:
+
+- **OpenWebUI `query`** wraps its HTTP POST in `Misc.insist` — by default
+  **4 attempts** (`times = 4`) with sub-second sleeps drawn from
+  `[0] + [0.001, 0.01, 0.1, 0.5]` (scout-essentials `Misc.insist`), so the
+  total backoff is well under a second.
+- **Relay polling** loops `sleep 1; retry` while a reply file has not landed
+  (`LLM::Relay.gather` in `backends/relay.rb`; the shared-loop path uses
+  `Backend::ClassMethods.gather_response` in `backends/default.rb`).
+  This is a transport-level wait, not an error retry.
+
+- **Agent-level exception handling** — `LLM::Agent#chat`
+  (`lib/scout/llm/agent.rb`) rescues a backend raise and calls the
+  user-supplied `process_exception` Proc (an accessor on the agent);
+  returning truthy triggers a `retry`, anything else re-raises. Without the
+  Proc the agent saves its chat (non-fatally) and re-raises.
 
 ### Parallel agent fan-out
 
-`LLM.process_calls` is the shared tool executor, so it also collects tool
-results that are `LLM::Agent` objects and runs their `agent.chat
-(return_messages: true)` rounds concurrently through `Open.traverse`. The
-concurrency is
+`LLM.process_calls` (`lib/scout/llm/tools/call.rb`) is the shared tool
+executor, so it also collects tool results that are `LLM::Agent` objects and
+runs their `agent.chat (return_messages: true)` rounds concurrently through
+`Open.traverse`. The concurrency is
 `Scout::Config.get(:cpus, :agent_ask, :agents, env: 'ASK_AGENTS', default: 3)`.
 Each answer is paired back with the tool call that produced it by position
 (a duplicate agent in one round gets its own answer, not the first one's).
+Workflow `Step` results are produced first (`Workflow.produce`, with the
+live-workload `jobs_file` sidecar described in
+[Provenance.md](Provenance.md)); agent fan-out runs after that, so an agent
+tool result never blocks on unrelated workflow jobs.
 
 There is no streaming either (`stream_results` does not exist): every request
 is blocking and returns once complete. The only `stream` token in the
@@ -310,6 +326,26 @@ pins it per backend.
 | `lib/scout/llm/backends/relay.rb` | Relay (scp round-trip) provider |
 | `lib/scout/llm/backends/bedrock.rb` | AWS Bedrock provider (standalone `ask`) |
 | `lib/scout/llm/backends/glm.rb` | GLM provider (image/pdf/websearch formatting) |
+
+---
+
+## Tests that pin this
+
+No unit test pins the shared `chain_tools` loop or the backend-selection
+ladder directly; they are exercised end-to-end by the per-backend suites.
+`LLM::Relay` has no unit test at all — it shells out to `scp` and has no
+client seam, so its unit test stays disabled (see the comment at the top of
+`test/scout/llm/backends/test_relay.rb`).
+
+| Area | Test file | Representative cases |
+|---|---|---|
+| Backend selection / tool chains | `test/scout/llm/test_ask.rb` | `test_knowledge_base_ask_tool_chain`, `test_knowledge_base_association_tool_chain` |
+| Anthropic | `test/scout/llm/backends/test_anthropic.rb` | `test_tool`, `test_tool_call_output_weather`, `test_json_output` |
+| Bedrock | `test/scout/llm/backends/test_bedrock.rb` | `test_ask`, `test_ask_prompt_type`, `test_tool_loop` |
+| HuggingFace | `test/scout/llm/backends/test_huggingface.rb` | `test_format_tool_call`, `test_ask_with_fake_client`, `test_ask_tool_loop_with_fake_client` |
+| Ollama | `test/scout/llm/backends/test_ollama.rb` | `test_ask`, `test_tool`, `test_embeddings` |
+| OpenWebUI | `test/scout/llm/backends/test_openwebui.rb` | `test_ask_request_construction` |
+| Reasoning blocks | `test/scout/llm/backends/test_reasoning.rb` | 12 cases over provider `reasoning`/`thinking` extraction |
 
 ---
 

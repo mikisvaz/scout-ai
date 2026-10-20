@@ -536,7 +536,6 @@ anyway into the shared `Scout.var.cache.ask` store. The config lookup now
 runs only when the caller said nothing (`persist.nil?`), so `persist: false`
 genuinely bypasses the cache. `lib/scout/llm/ask.rb`; covered by
 `test/scout/llm/test_ask.rb`. Committed in 838586a.
-`test/scout/llm/test_ask.rb`. Committed in 838586a.
 
 ### R14 (open). Workspace `test_tsv` harness assertion failure
 
@@ -546,14 +545,13 @@ mismatch (the test compares `return_path` bytes while the task returns
 `job.path`-shaped TSV text), not a tsv logic regression; the failure
 predates the sandbox refactor (present on the parent commit too — the
 facts sheet labeled it `[unverified: would require checking out the parent
-commit]`, and the artifacts `reports/scout-ai-sandbox-docs-outcome.md` /
-`research/sandbox-docs-facts.md` record the same reading; the
-facts-sheet residue itself was retired on 2026-10-19 — its durable facts
-live in `doc/developer/Sandbox.md` and this ledger). Open decision:
-whether `tsv.rb` should adopt the sandbox-path check or the harness
-assertion should be re-targeted. Evidence pointer (retired 2026-10-19; copy
-at `tmp/notes/cleanup/retired-sandbox-docs-facts.md`): the facts sheet's
-§5 Workspace-suite table.
+commit]`, and the retired `research/sandbox-docs-facts.md` recorded the
+same reading; the durable statement now lives in
+[developer/Sandbox.md](developer/Sandbox.md) Layer-1 and this ledger).
+Open decision: whether `tsv.rb` should adopt the sandbox-path check or
+the harness assertion should be re-targeted; the facts sheet's §5
+Workspace-suite table was its evidence, retired with it on 2026-10-19
+(no in-repo copy survives).
 
 ### R15 (open, review gap). sandbox-grant-sources round lacks independent review
 
@@ -561,8 +559,8 @@ The grant-source layer move from `Workspace` into `LLM::Sandbox`
 (commit c5cc5cb) was validated by tests and equivalence probes
 (`writable identical: true`, `readable identical: true` across working
 directories) but **independent review was never performed** — recorded in
-the closing line of the producing artifact
-(`reports/scout-ai-sandbox-grant-sources.md`). The verified content itself
+the closing line of the producing artifact (since retired; no in-repo copy).
+The verified content itself
 is already promoted into [developer/Sandbox.md](developer/Sandbox.md)
 Layer-1; the residual gap is the review, not the content. Note: the
 equivalence probes depended on `RUBYOPT` checkout overrides; see
@@ -578,8 +576,6 @@ lives in the scout-gear Cortex store as
 `claims/scout-exception-recoverability-contract.md` (map `scout_gear_lib`):
 ScoutException subclasses are for non-recoverable, reproducible input
 failures; scout-ai's engine usage matches it. That claim is outside this
-repository's purge scope and survives it; the open item is whether to
-surface a short contract statement in scout-ai's own developer docs.
 repository's purge scope and survives it; the open item is whether to
 surface a short contract statement in scout-ai's own developer docs.
 
@@ -609,8 +605,9 @@ closed, recorded here so the history survives the Cortex purge.
 For anyone chasing count drift later: the ordinary suite baseline moved
 656 tests/3178 assertions (after availability integration) → 679/3238
 (test-repair round, three identical runs + Critic confirmation) →
-688/3255 (finalize round, +9 `path_list` tests) → current 688/3255 at
-HEAD `a2e3f6f` (disposition §7). All runs used `cd <checkout> &&
+688/3255 (finalize round, +9 `path_list` tests) — the count still standing
+at the 2026-10-18 baseline commit (`a2e3f6f`) and unchanged at the current
+HEAD. All runs used `cd <checkout> &&
 BWRAP_PATH=false rake test` — the env var placement matters (a leading
 token is intercepted by the bash wrapper and silently dropped).
 Omissions throughout: 3 HF-cache, 1 transformers/datasets, 2 torch, 1

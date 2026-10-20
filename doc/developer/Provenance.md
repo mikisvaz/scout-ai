@@ -568,6 +568,33 @@ ChatAnalyst is expected to consume the receipt primitives above — `Chat.agent_
 | `lib/scout/llm/tools/call.rb` | `<base>.jobs` sidecar writer/removal in `LLM.process_calls`. |
 | `scout_commands/llm/prov` | Tree, flow, DOT, and plot rendering. |
 
+## Tests
+
+The provenance contract is pinned by four test files:
+
+- `test/scout/llm/chat/test_provenance.rb` — traversal relations and layout
+  globs: `test_does_not_follow_imports`,
+  `test_does_not_follow_continue_or_last`,
+  `test_provenance_relations_does_not_include_import`,
+  `test_traverses_job_and_log_relations`,
+  `test_new_layout_society_sidecar_is_traversed_with_log_relation`,
+  `test_new_layout_root_copy_is_not_traversed`,
+  `test_new_layout_top_level_transcript_is_traversed_from_chat_root`,
+  `test_both_layouts_coexist_without_duplicates`,
+  `test_files_outside_the_glob_families_are_not_swept`.
+- `test/scout/llm/chat/test_agent_meta_provenance.rb` — the `agent_job`
+  relation and receipt hygiene:
+  `test_agent_job_edge_links_receipt_job_to_enclosing_chat`,
+  `test_follow_agent_job_includes_only_the_agent_job_edge`,
+  `test_nested_receipt_chain_terminates_with_both_delegation_edges`,
+  `test_deliberate_receipt_cycle_does_not_hang`,
+  `test_malformed_receipts_become_agent_job_warnings`,
+  `test_saved_chat_sidecar_society_chats_are_traversed_with_log_relation`.
+- `test/scout/llm/chat/test_agent_meta.rb` / `test_agent_meta_tokens.rb` —
+  receipt parsing, token events, and malformed-entry tolerance.
+- `test/scout/llm/chat/test_prov_cli.rb` (plus the live/plot/timeline
+  siblings) — CLI rendering over the same traversal.
+
 ## Environment trap: checkout vs installed gem
 
 `Chat.live_report` and the rest of the live machinery live in this

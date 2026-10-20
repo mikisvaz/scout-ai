@@ -7,6 +7,11 @@ keeping agent orchestration in Scout-AI.
 **You should read this if:** you have Python code or libraries you want to
 expose as agent tools.
 
+**Scope note:** this page is about *tasks written in Python* that a Ruby
+Scout-AI agent loads as tools. It is not about *driving Scout from Python*:
+for the separate Python client that builds and runs agents from Python code
+(`python/scout_ai/` in this repository), see `python/README.md`.
+
 ---
 
 ## The idea
@@ -38,6 +43,11 @@ No `workflow.rb` file is needed if Python tasks are sufficient.
 ## Writing a Python task
 
 Create a Python function with type hints and register it with `scout.task()`:
+
+> `scout` here is the Python package that ships with the Scout toolchain
+> (via the `scout-rig` gem), **not** something you install from this
+> repository. It is already on the Python path when Scout runs your
+> agent's Python tasks.
 
 ```python
 # python/greet.py
@@ -71,7 +81,7 @@ Once the directory is set up, load the agent normally:
 ```ruby
 require 'scout-ai'
 
-agent = LLM::Agent.load_agent('MyAgent', endpoint: :openai)
+agent = LLM.load_agent('MyAgent', endpoint: :openai)
 agent.start
 agent.user 'Greet Alice using your tool'
 puts agent.chat

@@ -87,16 +87,13 @@ Agent/
     start_chat
 ```
 
-`start_chat`:
+`start_chat` (seed only — system prompt, no user turn; see
+[BuildingAgents.md](BuildingAgents.md) "Common mistakes"):
 
 ```text
 system:
 
 You are a friendly greeter. Always greet by name.
-
-user:
-
-Hello!
 ```
 
 Use it:

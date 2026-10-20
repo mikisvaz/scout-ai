@@ -34,14 +34,7 @@ require 'scout-ai'
 agent = LLM.agent(endpoint: :openai)
 ```
 
-### Setting the system prompt### Setting the system prompt
-
-> Agents can also expose *path kinds* — typed, sandboxed filesystem
-> namespaces with read/write/edit/patch operations and per-kind custom
-> operations. A workflow declares the kinds it provides as a `PATH_KINDS`
-> constant; agents that incorporate the whole workflow through a
-> `tool: MyWorkflow` chat line receive them automatically. See the
-> [Path engine](../developer/PathEngine.md) developer document.
+### Setting the system prompt
 
 The system prompt lives on `start_chat`:
 
@@ -306,6 +299,13 @@ agent.workflow do
   end
 end
 ```
+
+> Agents can also expose *path kinds* — typed, sandboxed filesystem
+> namespaces with read/write/edit/patch operations and per-kind custom
+> operations. A workflow declares the kinds it provides as a `PATH_KINDS`
+> constant; agents that incorporate the whole workflow through a
+> `tool: MyWorkflow` chat line receive them automatically. See the
+> [Path engine](../developer/PathEngine.md) developer document.
 
 ### Declaring tools in the start chat
 

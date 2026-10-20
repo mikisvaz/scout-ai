@@ -293,10 +293,10 @@ scout-ai llm prov --live /path/to/saved.chat
 
 `chat_task` inputs are plain text parsed into a Chat, so they can declare
 arbitrary tooling or run arbitrary code; that is why Scout-AI never exposes
-chat_tasks directly — higher layers (e.g. Cortex) expose them through
-prompt-only interfaces that append to conversations the agent has limited or
-indirect control over. The five ways of asking, and what is visible live vs
-after the fact, are tabulated in
+chat_tasks directly — the security rationale and the mitigation are stated in
+[Delegation.md](Delegation.md#chat_task-power-and-why-it-is-never-exposed-directly).
+The five ways of asking, and what is visible live vs after the fact, are
+tabulated in
 [Delegation.md](Delegation.md#the-five-ways-of-asking-and-what-you-can-see).
 
 See [../developer/Provenance.md](../developer/Provenance.md) for provenance
@@ -304,26 +304,22 @@ internals and [BuildingAgents.md](BuildingAgents.md) for save semantics.
 
 ---
 
-### SC26-style compositions
+### Composition idioms
 
-`research/multi-agent-patterns-analysis.md` (retired 2026-09-12) catalogued
-seven compositions from a real agent ecosystem: a linear **Planned pipeline**
-(request → search → plan → work → ask as chained `chat_task`s), a **Manager
-control loop** (budgeted Search → Edit → Score → Select driven by the `ask`
-tool with named branch chats), a **Critic** verification stage (JSON
-`PASS`/`NEEDS_WORK`/`BLOCKED` verdict parsed with `Chat.parse_json` and stored
-with `set_info`, the critic agent created with `no_ask_override: true` so it
-cannot delegate), a **Branched** fan-out (a splitter agent partitions the plan,
+Larger multi-agent systems compose from the vocabulary on this page. The
+recurring shapes are: a **linear pipeline** of chained `chat_task`s
+(request → search → plan → work → ask, each task's result appended into
+the next agent's context with `chat.follow`); a **manager control loop**
+(budgeted Search → Edit → Score → Select driven by the delegation `ask`
+tool with named branch conversations); a **critic verification stage**
+(JSON verdicts parsed with `Chat.parse_json` and stored with `set_info`,
+the critic built with `no_ask_override: true` so it cannot delegate); a
+**branched fan-out** (a splitter partitions the plan, then
 `iterate_dictionary ... cpus: N` runs one isolated worker per branch over
-`plan.dup`, an aggregate critic reads the reports), a **Refined**
-worker/critic retry loop (shared chat across rounds, `clear_tools` between
-rounds), and a two-phase **InterpretData** prep pipeline (an analyst agent
-reduces data into artifacts, a worker consumes them). Every idiom involved
-lives in scout-ai — `dep`, `chat_task`, `chat.follow`,
-`iterate_dictionary`, `log_agent`, `self.agent(nil, chat:, tooling:)`,
-`IndiferentHash.setup` over parsed JSON — so treat the paragraph above as the
-surviving summary; the compositions are reproducible from this page's
-vocabulary.
+`plan.dup`, with an aggregate critic over the reports); a **worker/critic
+retry loop** (shared chat across rounds, `clear_tools` between rounds);
+and a **two-phase prep pipeline** (an analyst agent reduces data into
+artifacts that a worker consumes).
 
 ## Common mistakes
 

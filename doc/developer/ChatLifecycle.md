@@ -63,6 +63,31 @@ The `meta`, `tool`, `introduce`, `mcp`, `kb`, `option`, and similar roles are
 **side-channel** roles: they are extracted from the message array during
 compilation and do not appear in the prompt sent to the model.
 
+The table above lists the roles that shape the *stored* message array. The
+compilation pipeline consumes further roles that never reach the backend at
+all — each is resolved to ordinary `user:`/`assistant:` content (or removed)
+by the stage named below:
+
+| Compiled-away role | Stage (`Chat.chat`) | Resolution |
+|---|---|---|
+| `import` / `continue:` / `last:` | imports (`Chat.imports`) | File read + `LLM.purge`d expansion; `continue:` keeps only the last non-empty message, `last:` only the purged last |
+| `clear` / `clear_tools` / `clean_role` / `clear_role` | clear (`Chat.clear`) | `clear` truncates history at its position; `clear_tools` drops `function_call*` after it; `clean_role`/`clear_role` name roles to clean |
+| `skip` / `previous_response_id` | clean (`Chat.clean`) | Dropped from the prompt (default clean roles) |
+| `config` | config (`Chat.config`) | Applied as `Scout::Config.set(key, value, *tokens)`, message removed |
+| `task` / `inline_task` / `exec_task` | tasks (`Chat.tasks`) | Workflow job created; `exec_task` runs it and inlines the result, `task`/`inline_task` leave a `job`/`inline_job` message |
+| `job` / `inline_job` | jobs (`Chat.jobs`) | Loaded Step rendered as a `function_call` + `function_call_output` pair (or, for `inline_job`, an inline `file`) |
+| `directory` / `step` | files (`Chat.files`) | `directory` expands to a `file` message per file below it; `step` loads the referenced job step's answer as an `assistant` message |
+| `allow_path` / `allow_read_path` | files (`Chat.files`) | Sandbox grant side-effect (`Chat.allow_path` / `Chat.allow_read_path`); message removed (compacted away) |
+
+`previous_response_id` deserves a note: it survives compilation in the stored
+chat (`Chat.options` keeps it as a *sticky* option, unlike most options which
+reset after an `assistant` reply) but `Chat.clean` drops it from the prompt
+content, and `Chat.pull`/`Chat.purge` move/remove it so the backend can
+consume it as a provider continuation token.
+
+The parser accepts any `role:` prefix, so unrecognized roles pass through
+untouched; only the roles named above have compile-time behavior.
+
 ---
 
 ## The Annotation pattern
@@ -117,7 +142,7 @@ Input (String / file / Array)
   ▼
 8. Jobs       — pending jobs produced (Workflow.produce)
   ▼
-9. Files      — file:/attach: roles resolved to content or paths
+9. Files      — file:/directory:/step: roles resolved to content or paths
   ▼
 10. Setup     — Chat.setup: the array is annotated with the Chat DSL,
                producing the compiled chat
@@ -184,9 +209,14 @@ format (see [../user/WritingChats.md](../user/WritingChats.md)). The
   only, no task/job/file/import expansion). Provenance inspection uses it so
   reading a chat never re-executes anything.
 - Annotated chats carry three writers that all default a bare filename to
-  `Scout.chats` and skip existing files unless `force`: `save` (`LLM.print`
-  of the chat), `write` (`self.print` — the processed form), and
-  `write_answer` (the final answer text only).
+  `Scout.chats` and **overwrite by default** — `save` (`LLM.print` of the
+  chat), `write` (`self.print` — the processed form), and `write_answer`
+  (the final answer text only) all take `force = true`, and an existing file
+  is skipped only when called with `force: false`
+  (`Chat#save`/`Chat#write`/`Chat#write_answer` in `chat/annotation.rb`).
+  If a persistence path must not clobber prior output, pass `force: false`
+  explicitly; with `force: false` a colliding write is silently dropped, not
+  queued.
 - `.chat` is also a **workflow result type** (`Workflow::TYPE_EXTENSIONS[:chat]`
   with `Persist.save_drivers`/`load_drivers` in `chat/persist.rb`). Saving an
   `LLM::Agent` through that driver writes `current_chat - start_chat` — this
@@ -220,10 +250,28 @@ and inspection.
 
 The prompt strategies are documented in
 [PromptProcessing.md](PromptProcessing.md); this table only maps the files.
+
 | `lib/scout/llm/chat/persist.rb` | .chat file load/save |
 | `lib/scout/llm/chat/provenance.rb` | Provenance/receipt traversal primitives |
 | `lib/scout/llm/chat/tool_calls.rb` | Tool-call message normalization |
 | `lib/scout/llm/chat/agent_meta.rb` | Agent receipt (`meta`) message shaping |
+
+---
+
+## Tests that pin this
+
+Behavior in this document is pinned by the tests under `test/scout/llm/chat/`;
+no dedicated unit test pins the `force` semantics of the persistence writers
+(`Chat#save`/`#write`/`#write_answer`), which are documented from
+`chat/annotation.rb` directly.
+
+| Area | Test file | Representative cases |
+|---|---|---|
+| Parsing / printing round-trip | `test/scout/llm/chat/test_parse.rb` | `test_no_leading_empty_user_message`, `test_protect_print` |
+| Task/job pipeline | `test/scout/llm/chat/test_process.rb` | `test_tasks_creates_jobs_and_calls_workflow_produce` |
+| Meta segments / provenance metadata | `test/scout/llm/chat/process/test_meta.rb` | `test_message_identity_includes_non_meta_history`, `test_project_keeps_inference_meta_inline_with_one_job_marker`, `test_serialize_meta_quotes_value_containing_equals` (round-trips) |
+| Inbox + prompt preparation | `test/scout/llm/chat/test_prompt.rb` | `test_inbox_is_consume_once`, `test_inbox_abort_file_aborts_inference_and_is_consumed_once`, `test_prepare_prompt_forwards_save_file_only_to_strategies_that_accept_it` |
+| Agent receipt shaping | `test/scout/llm/chat/test_agent_meta.rb`, `test_agent_meta_tokens.rb`, `test_agent_meta_provenance.rb` | see [Provenance.md](Provenance.md) |
 
 ---
 

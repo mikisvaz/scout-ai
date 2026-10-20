@@ -89,9 +89,11 @@ therefore land in one shared, accumulating conversation, not in fresh
 per-call chats. Use distinct `conversation` names whenever you want
 isolation between calls.
 
-Each delegated call leaves provenance evidence in the parent chat: the
-specialist's token usage is recorded next to the tool answer, so token costs
-can be traced afterwards with `scout-ai llm prov --evidence`. See the
+Each delegated call leaves provenance evidence in the parent chat: a receipt
+of the specialist's run (including its token usage) is attached to the tool
+answer, so token costs can be traced afterwards with
+`scout-ai llm prov --evidence`. Receipts are embedded provenance, not extra
+messages in your conversation. See the
 [developer provenance guide](../developer/Provenance.md) for details.
 
 ---

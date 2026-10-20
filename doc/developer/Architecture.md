@@ -111,7 +111,7 @@ A single inference request flows through the layers as follows:
 |---|---|---|
 | A new LLM provider | `lib/scout/llm/backends/<provider>.rb` | Define a module that `prepend`s `<Provider>Methods` and `include`s `Backend::ClassMethods`. Override `query`, `process_response`, `format_messages` as needed. |
 | A new tool type | `lib/scout/llm/tools/<type>.rb` | Define a module method that returns `{ name => [executor, definition] }` hashes. |
-| A new prompt strategy | Register in `REGISTERED_STRATEGIES` (currently undefined) or pass a `Proc` via `prompt_strategies:` option. |
+| A new prompt strategy | `lib/scout/llm/chat/prompt/<strategy>.rb` (add the `require_relative` in `chat/prompt.rb`): either add a `when` arm to the `case` in `Chat.prepare_prompt`, register a proc in `Chat::REGISTERED_STRATEGIES` (populated by callers, not by the built-ins), or fall back to a public `Chat.<strategy>` method, which the `else` branch calls by name. Select with the `prompt_strategies:` option or `PROMPT_STRATEGY` env/config key, or bypass entirely with a `Proc`. See [PromptProcessing.md](PromptProcessing.md). |
 | A new agent type | `Agent/<Name>/` directory with `start_chat`, `agent.rb`, or `workflow.rb`. | Conventional discovery. |
 | A new chat-task workflow | `include_workflow AgentWorkflow` in your Workflow module. | Use `chat_task`, `helper :agent`, etc. |
 
@@ -130,3 +130,16 @@ A single inference request flows through the layers as follows:
 
 > For detailed code investigations of each subsystem, browse the
 > [research/](../../research/) directory.
+
+---
+
+## Tests that pin this
+
+There is no unit test for the dependency graph itself; the layering claims
+above are pinned indirectly by what loads standalone in the suites. The
+prompt-strategy registry mechanism (`REGISTERED_STRATEGIES` + the
+`prepare_prompt` case dispatch) is directly pinned by
+`test/scout/llm/chat/test_prompt.rb`
+(`test_prepare_prompt_forwards_save_file_only_to_strategies_that_accept_it`,
+`test_prompt_strategies_survive_tool_call_re_entry`). Per-subsystem test
+anchors are listed in each subsystem document.

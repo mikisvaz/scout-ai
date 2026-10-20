@@ -417,6 +417,38 @@ Three mechanisms coexist:
 
 ---
 
+## Test anchors
+
+The strategy contracts are pinned by `test/scout/llm/chat/test_prompt.rb`
+(20 cases). The most load-bearing ones:
+
+- **inbox semantics**: `test_inbox_no_save_file_is_noop_and_creates_nothing`,
+  `test_inbox_missing_inbox_dir_is_noop_and_creates_nothing`,
+  `test_inbox_dir_derivation_strips_only_the_last_extension`,
+  `test_inbox_non_canonical_save_file_uses_the_sibling_rule`,
+  `test_inbox_appends_in_sorted_order_moves_files_and_preserves_mtime`,
+  `test_inbox_skips_directories_and_dotfiles`,
+  `test_inbox_is_consume_once`,
+  `test_inbox_collision_in_removed_gets_numeric_suffix`,
+  `test_inbox_unreadable_file_is_skipped_without_raising`,
+  `test_inbox_returns_chat_annotated_array`.
+- **abort**: `test_inbox_abort_file_aborts_inference_and_is_consumed_once`,
+  `test_inbox_abort_file_content_is_the_reason_and_never_reaches_the_prompt`,
+  `test_inbox_files_before_abort_are_delivered_and_consumed`,
+  `test_inbox_empty_abort_still_aborts_with_default_reason`,
+  `test_inbox_non_abort_files_behave_as_before_around_an_abort`.
+- **dispatcher**: `test_prepare_prompt_forwards_save_file_only_to_strategies_that_accept_it`,
+  `test_prepare_prompt_registered_proc_ignores_save_file`,
+  `test_prompt_strategies_survive_tool_call_re_entry`,
+  `test_inbox_composes_with_shorten_tools_epoch_increment_in_both_orders`.
+
+No test file pins the numeric thresholds of `shorten_tools` /
+`shorten_tools_epoch` / `shorten_tools_epoch_increment` in isolation; those
+constants live in `lib/scout/llm/chat/prompt/*.rb` and are re-read from
+`Scout::Config` per process (memoized on first access).
+
+---
+
 ## Cross-references
 
 - [../user/ManagingContext.md](../user/ManagingContext.md) — User guide for long contexts.

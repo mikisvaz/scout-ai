@@ -170,6 +170,7 @@ responds with plain text.
 | Use external tools | MCP (`mcp:`) |
 | Build multi-agent systems | Delegation (`socialize` / `delegate`) |
 | Build reproducible pipelines | AgentWorkflow (Scout Workflow + Agent) |
+| Wrap ML/PyTorch/HF models as reproducible agents | The Model subsystem ([../Model.md](../Model.md)) |
 
 ---
 

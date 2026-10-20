@@ -116,13 +116,15 @@ scout-ai llm ask -c hello.chat
 
 ## Your first agent
 
-Agents are **named directories**. Create one:
+Agents are **named directories**. Create one under `~/.scout/chats/Agent/`
+(the location `LLM.load_agent` and `scout-ai agent` look up regardless of
+your current directory):
 
 ```bash
-mkdir -p ~/chats/Agent/Greeter
+mkdir -p ~/.scout/chats/Agent/Greeter
 ```
 
-Create `~/chats/Agent/Greeter/start_chat`:
+Create `~/.scout/chats/Agent/Greeter/start_chat`:
 
 ```text
 system:

@@ -435,6 +435,17 @@ New code should use `conversation` and `inherit` as separate parameters.
 | `lib/scout/llm/chat/provenance.rb` | Live passes over save files, society trees and `.jobs` sidecars |
 | `lib/scout/llm/tools/call.rb` | `<base>.jobs` writer/removal in `LLM.process_calls` |
 
+## Tests
+
+| Behavior documented above | Test anchor |
+|---|---|
+| `open_conversation` pipeline (template memoization, seed, anchor, restart, validation) | `test/scout/llm/agent/test_conversation.rb` — `test_open_conversation_uses_the_memoized_template_but_returns_new_agents`, `test_shared_construction_clones_seed_and_options_and_anchors_before_start`, `test_open_conversation_defaults`, `test_open_conversation_scopes_identity_per_conversation`, `test_open_conversation_restart_rebranches_existing_conversation`, `test_open_conversation_validation`, `test_ask_conversation_prompt_is_never_parsed_as_chat_syntax` |
+| `inherit` modes and preamble ordering | `test/scout/llm/agent/test_conversation.rb` — `test_open_conversation_inherit_none_tools_conversation`, `test_open_conversation_preamble_follows_inherited_context` |
+| `adopt: :current` seeding | `test/scout/llm/agent/test_delegate.rb` — `test_adopt_current_folds_template_progress_into_the_seed`, `test_adopt_with_empty_template_current_chat_is_a_no_op` |
+| `delegate` hand-off block, slot naming, parent sweep | `test/scout/llm/agent/test_delegate.rb` — `test_default_block_returns_an_agent`, `test_parent_save_sweeps_the_hand_off_child`, `test_hyphenated_name_gives_a_sanitized_slot`, `test_pre_registered_agent_is_the_society_template`, `test_custom_block_receives_the_passed_agent_and_mutates_it`, `test_bad_hand_off_returns_the_exception_not_a_raise` |
+| Society persistence layout and autosave | `test/scout/llm/agent/test_save.rb` — `test_society_dir_for`, `test_save_nested_society`, `test_save_cyclic_society_terminates`, `test_child_auto_save_keeps_canonical_layout`, `test_restart_snapshot`, `test_save_produces_no_legacy_log_tree` |
+| Legacy `chat` parameter mapping | no direct test (`social_tool_parameters`, `lib/scout/llm/agent/conversation.rb`); the compatibility path is exercised only indirectly through stored-call replay. |
+
 ---
 
 ## Cross-references

@@ -2,6 +2,12 @@
 
 The Model subsystem in scout-ai provides a small, composable framework to wrap machine‑learning models (pure Ruby, Python/PyTorch, and Hugging Face Transformers) with a consistent API for evaluation, training, feature extraction, post‑processing, and persistence.
 
+> **Not about LLM endpoints.** This page is about the *ML model* subsystem
+> (PyTorch/Hugging Face wrappers). For inference-provider endpoints
+> (OpenAI, Anthropic, Ollama…), see
+> [user/RunningInference.md](user/RunningInference.md) and
+> [user/CoreConcepts.md](user/CoreConcepts.md).
+
 It consists of a base class (ScoutModel) and higher-level implementations:
 - PythonModel — instantiate and drive Python classes via ScoutPython.
 - TorchModel — drive arbitrary PyTorch modules with simple training/eval loops, tensor helpers, and state save/load.
@@ -274,7 +280,7 @@ Training:
   - labels: rewards for each pair.
 - After training, it reloads state from disk.
 
-Usage example (test/test_causal.rb):
+Usage example (test/scout/model/python/huggingface/test_causal.rb):
 ```ruby
 model = CausalModel.new 'mistralai/Mistral-7B-Instruct-v0.3'
 model.init
@@ -324,10 +330,12 @@ A key pattern is to keep evaluation logic generic and tailor feature extraction 
 - extract_features(sample) and extract_features_list(list) let you shape inputs into the structure your model consumes.
 - post_process(result) or post_process_list(list) convert raw outputs to your final format (e.g., argmax to label, logits to softmax).
 
-ExTRI2 workflow example (SequenceClassification)
+ExTRI2 workflow example (SequenceClassification) — the same example is expanded at the end of this document
 ```ruby
-# tri_sentences task uses a Huggingface SequenceClassification model
-tri_model = Rbbt.models[tri_model].find unless File.exist?(tri_model)
+# tri_sentences task uses a Huggingface SequenceClassification model;
+# tri_model points at a local model directory (a scout path or an
+# absolute path, resolved by the caller)
+tri_model = tri_model.find unless File.exist?(tri_model)
 model = HuggingfaceModel.new 'SequenceClassification', tri_model, nil,
   tokenizer_args: { model_max_length: 512, truncation: true },
   return_logits: true    # NOTE: no-op today, see 'Known issues' below

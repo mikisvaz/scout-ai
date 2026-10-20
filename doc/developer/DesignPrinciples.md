@@ -37,6 +37,7 @@ Behavior is composed through Ruby modules:
 # Agent's behavior is split across multiple files that reopen the class:
 #   lib/scout/llm/agent.rb          — core (ask, prompt, workflow)
 #   lib/scout/llm/agent/chat.rb     — chat management
+#   lib/scout/llm/agent/construction.rb — clone_agent/build (template-clone pattern)
 #   lib/scout/llm/agent/iterate.rb  — iteration patterns
 #   lib/scout/llm/agent/delegate.rb — multi-agent delegation
 #   lib/scout/llm/agent/conversation.rb — conversation save/load
@@ -365,6 +366,14 @@ wins over an auto-generated one with the same name.
     merges helpers and task state into the receiving Workflow module; a plain
     `include` copies no class-level state, so `self.agent`/`self.chat` are
     missing at run time even though the file loads.
+
+Several anti-patterns are pinned by regression tests: delegation behavior by
+`test/scout/llm/agent/` (`test_delegate.rb`, `test_conversation.rb`,
+`test_save.rb`, `test_workflow.rb`), backend registration and dispatch by
+`test/scout/llm/test_request_context.rb` (a test backend registered via
+`LLM.register_backend`) plus the provider suites in
+`test/scout/llm/backends/`, and prompt ephemerality (#6) by
+`test/scout/llm/chat/test_prompt.rb`.
 
 ---
 

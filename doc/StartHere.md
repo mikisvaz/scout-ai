@@ -16,12 +16,6 @@ typed, inspectable workflow jobs.
 
 The user documentation explains how to use Scout-AI to build agents, define
 tools, configure inference, and orchestrate multi-agent workflows. It is
-organized around concepts and tasks, not internal classes.### I want to build applications with Scout-AI
-
-→ Go to **[user/](user/)** documentation.
-
-The user documentation explains how to use Scout-AI to build agents, define
-tools, configure inference, and orchestrate multi-agent workflows. It is
 organized around concepts and tasks, not internal classes.
 
 The ML model subsystem (`ScoutModel`, `TorchModel`, Hugging Face wrappers)
@@ -74,6 +68,7 @@ retained — `provenance-navigation-design.md`, the rationale tracked by
 | **Understand the sandbox / execution boundaries** | developer/Sandbox |
 | **Track and inspect provenance** | developer/Provenance |
 | **Write idiomatic code** | developer/DesignPrinciples |
+| **Use the ML/PyTorch model subsystem** | Model.md |
 | **Use the CLI** | user/Cookbook (CLI quick reference) |
 
 ---
