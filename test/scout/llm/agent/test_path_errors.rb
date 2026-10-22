@@ -248,5 +248,143 @@ class TestPathErrors < Test::Unit::TestCase
   # unchanged, destination absent).
   # ------------------------------------------------------------------
 
+  # ------------------------------------------------------------------
+  # Root-selector grammar (fix 3) and path_kinds kind filter (fix 5)
+  #
+  # "", "." and "./" address the kind ROOT, never one file inside it.
+  # Every file-shaped built-in must reject them with a ParameterException
+  # that names the operation that received the value, points at path_list
+  # as the enumeration surface, and never leaks the junk target
+  # ("<root>/..rb") an extension-bearing kind would otherwise resolve to.
+  # path_list is not guarded (it normalizes the selector to the root
+  # listing) and path_dispatch is not guarded (custom operations own their
+  # path grammar); both contracts are pinned in test_path.rb.
+  # ------------------------------------------------------------------
+
+  # Extension-bearing by default, mimicking a task-like kind; pass
+  # extension: nil for the no-extension variant.  validate and smoke get
+  # real implementations so the matrix exercises the path guard, not the
+  # "no implementation" raise that precedes it in path_kind_operation.
+  def register_root_selector_kind(name = "rbkind", extension: "rb")
+    definition = {
+      "description" => "Root-selector probe kind #{name}",
+      "locations" => ["project"],
+      "default_location" => "project",
+      "roots" => {"project" => File.join(@tmpdir, name)},
+      "capabilities" => {
+        "read" => true, "write" => true, "edit" => true,
+        "move" => true, "rename" => true, "delete" => true,
+        "validate" => true, "smoke" => true, "promote" => true,
+        "patch" => true
+      },
+      "validate" => ->(*) { {"ok" => true} },
+      "smoke" => ->(*) { {"ok" => true} }
+    }
+    definition["extension"] = extension unless extension.nil?
+
+    @agent.register_path_kind(name, definition)
+    FileUtils.mkdir_p(File.join(@tmpdir, name))
+  end
+
+  # One callable per file-shaped operation, with every OTHER argument
+  # filled in validly so the first path's rejection is the only thing the
+  # invocation can fail on.
+  def root_selector_invocations(kind, value)
+    {
+      "path_read" => -> { @agent.path_read("kind" => kind, "path" => value) },
+      "path_write" => -> { @agent.path_write("kind" => kind, "path" => value, "content" => "x") },
+      "path_patch" => -> { @agent.path_patch("kind" => kind, "path" => value, "patch" => "") },
+      "path_edit" => lambda {
+        @agent.path_edit(
+          "kind" => kind, "path" => value,
+          "selector" => {"type" => "lines", "start" => 1, "end" => 1},
+          "replacement" => "x"
+        )
+      },
+      "path_move" => -> { @agent.path_move("kind" => kind, "path" => value, "destination" => "dest") },
+      "path_rename" => -> { @agent.path_rename("kind" => kind, "path" => value, "name" => "newname") },
+      "path_delete" => -> { @agent.path_delete("kind" => kind, "path" => value) },
+      "path_validate" => -> { @agent.path_validate("kind" => kind, "path" => value) },
+      "path_smoke" => -> { @agent.path_smoke("kind" => kind, "path" => value) },
+      "path_promote" => -> { @agent.path_promote("kind" => kind, "path" => value) }
+    }
+  end
+
+  def test_error_matrix_root_selector_rejected_by_every_file_shaped_operation
+    # Extension-bearing and no-extension kinds must behave identically: the
+    # rejection is about the path grammar, not the kind's file naming.
+    {"rbkind" => "rb", "plainkind" => nil}.each do |kind, extension|
+      register_root_selector_kind(kind, extension: extension)
+
+      # "" and "." are pinned on every operation; "./" is the same root
+      # selector, pinned on one operation per kind so the matrix stays
+      # readable while still covering the spelling.
+      root_selector_invocations(kind, "./").slice("path_read").each do |operation, call|
+        error = assert_raise(ParameterException,
+                             "#{kind} #{operation} './'") { call.call }
+        assert_match(/addresses the kind root/, error.message, "#{kind} #{operation} './'")
+      end
+
+      root_selector_invocations(kind, nil).keys.each do |operation|
+        ["", "."].each do |value|
+          call = root_selector_invocations(kind, value).fetch(operation)
+
+          error = assert_raise(ParameterException,
+                               "#{kind} #{operation} #{value.inspect}") { call.call }
+
+          # The message names the operation that received the value and
+          # points at the enumeration surface.
+          assert_match(/Invalid path for #{operation}/, error.message,
+                       "#{kind} #{operation} #{value.inspect}")
+          assert_match(/addresses the kind root/, error.message,
+                       "#{kind} #{operation} #{value.inspect}")
+          assert_match(/path_list/, error.message,
+                       "#{kind} #{operation} #{value.inspect}")
+          # The resolved junk target must never reach the caller.
+          assert_not_match(/\.\.rb/, error.message,
+                           "#{kind} #{operation} #{value.inspect}")
+        end
+      end
+    end
+  end
+
+  def test_path_write_root_selector_creates_no_file
+    register_root_selector_kind("rbkind")
+    root = File.join(@tmpdir, "rbkind")
+
+    error = assert_raise(ParameterException) do
+      @agent.path_write("kind" => "rbkind", "path" => ".", "content" => "junk")
+    end
+    assert_match(/addresses the kind root/, error.message)
+
+    # Neither the "..rb" junk target a "." path used to produce, nor the
+    # empty-path variant, may appear on disk.
+    assert_false File.exist?(File.join(root, "..rb")),
+                 "no junk ..rb file may be created by a rejected root selector"
+    assert_false File.exist?(File.join(root, ".rb")),
+                 "no file may be created from an empty path"
+    assert_empty Dir.children(root).sort, "the kind root must stay empty"
+  end
+
+  def test_error_matrix_path_kinds_unknown_kind_lists_available_kinds
+    register_text_kind
+
+    error = assert_raise(ParameterException) do
+      @agent.path_kinds("kind" => "nope")
+    end
+
+    # Same lowercase spelling the rest of the error matrix pins.
+    assert_match(/Unknown path kind: nope/, error.message)
+    # The message names at least one kind that IS available.
+    assert_match(/available: .*text/, error.message)
+  end
+
+  # A nil or empty kind still enumerates everything: the filter is opt-in.
+  def test_error_matrix_path_kinds_empty_kind_returns_full_map
+    register_text_kind
+
+    assert @agent.path_kinds({"kind" => ""}).key?("text")
+    assert @agent.path_kinds({"kind" => nil}).key?("text")
+  end
 
 end

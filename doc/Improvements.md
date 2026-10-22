@@ -570,7 +570,7 @@ caveat.
 ### R16 (open). ScoutException recoverability semantics not documented in doc/
 
 `doc/` documents `ParameterException` as the error contract (e.g.
-[developer/PathEngine.md](developer/PathEngine.md) §8) but nowhere states
+[developer/PathEngine.md](developer/PathEngine.md) §9) but nowhere states
 the recoverability semantics of Scout exceptions. The durable statement
 lives in the scout-gear Cortex store as
 `claims/scout-exception-recoverability-contract.md` (map `scout_gear_lib`):

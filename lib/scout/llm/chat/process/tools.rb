@@ -25,7 +25,8 @@ module Chat
                  Kernel.const_get workflow
                rescue
                  if Scout.chats.Agent[workflow]['workflow.rb'].exists?
-                   Workflow.require_workflow_file Scout.chats.Agent[workflow]['workflow.rb'].find
+                   wf = Workflow.require_workflow Scout.chats.Agent[workflow]['workflow.rb'].find
+                   return wf if wf.name == workflow
                    Workflow.main || Workflow.workflows.last
                  else
                    Workflow.require_workflow(workflow)

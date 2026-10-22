@@ -677,7 +677,8 @@ module LLM
                         "description" => <<~DESC.strip,
                           List the virtual Path kinds currently available to this agent.
                           Each kind identifies a namespace of textual objects and declares
-                          its supported locations and operations.
+                          its supported locations and operations. Supply kind to return
+                          only that kind's entry.
                         DESC
                         "parameters" => {
                           "type" => "object",
@@ -1186,6 +1187,34 @@ module LLM
     # Argument and selector validation
     # ------------------------------------------------------------------
 
+    # Root selectors are an ENUMERATION surface only: an empty string, "."
+    # and "./" all address the kind ROOT as a whole, not one file within it.
+    # Every file-shaped built-in calls this guard with its own tool name so
+    # the rejection names the operation that received the bad value and
+    # points at the enumeration surface (path_list).  path_list itself is
+    # NOT guarded: it normalizes a root selector to the empty prefix
+    # instead.  path_dispatch is not guarded either: custom operations own
+    # their path grammar and may legitimately receive ".".
+    ROOT_SELECTOR_PATHS = ["", ".", "./"].freeze
+
+    def path_reject_root_selector!(operation, path)
+      value = path.to_s
+      return value unless ROOT_SELECTOR_PATHS.include?(value)
+
+      raise ParameterException,
+            "Invalid path for #{operation}: #{value.inspect} addresses the " \
+            "kind root; use a path relative to the root, or path_list to " \
+            "enumerate the root"
+    end
+
+    # path_list's counterpart to the guard above: instead of rejecting a
+    # root selector it maps it onto the empty prefix, which lists the whole
+    # kind root.
+    def path_root_selector_normalize(path)
+      value = path.to_s
+      ROOT_SELECTOR_PATHS.include?(value) ? "" : value
+    end
+
     # Fetch a required argument of a tool invocation.  Invalid input must
     # surface as the framework's parameter error, never an incidental
     # KeyError from Hash#fetch.
@@ -1282,21 +1311,35 @@ module LLM
     # Tool implementations
     # ------------------------------------------------------------------
 
-    def path_kinds(_args = {})
-      path_kind_registry.transform_values do |definition|
-        {
-          "description" => definition["description"],
-          "locations" => definition["locations"],
-          "default_location" => definition["default_location"],
-          "sandbox" => definition["sandbox"],
-          "capabilities" => definition["capabilities"]
-        }
+    def path_kinds(args = {})
+      kind = args["kind"]
+      registry = path_kind_registry
+      unless kind.nil? || kind.to_s.empty?
+        kind = kind.to_s
+        unless registry.key?(kind)
+          raise ParameterException,
+                "Unknown path kind: #{kind} (available: #{registry.keys.sort.join(', ')})"
+        end
+
+        return {kind => path_kind_registry_entry(registry.fetch(kind))}
       end
+
+      path_kind_registry.transform_values { |definition| path_kind_registry_entry(definition) }
+    end
+
+    def path_kind_registry_entry(definition)
+      {
+        "description" => definition["description"],
+        "locations" => definition["locations"],
+        "default_location" => definition["default_location"],
+        "sandbox" => definition["sandbox"],
+        "capabilities" => definition["capabilities"]
+      }
     end
 
     def path_read(args)
       kind = path_argument(args, "kind")
-      path = path_argument(args, "path")
+      path = path_reject_root_selector!("path_read", path_argument(args, "path"))
       location = args["location"]
       target = resolve_path(kind, path, location)
       path_authorize!(kind, target, location, mode: :read)
@@ -1313,7 +1356,7 @@ module LLM
 
     def path_write(args)
       kind = path_argument(args, "kind")
-      path = path_argument(args, "path")
+      path = path_reject_root_selector!("path_write", path_argument(args, "path"))
       content = path_argument(args, "content")
       location = args["location"]
 
@@ -1345,7 +1388,7 @@ module LLM
     # type receive (content, args) with the patch text in args["patch"].
     def path_patch(args)
       kind = path_argument(args, "kind")
-      path = path_argument(args, "path")
+      path = path_reject_root_selector!("path_patch", path_argument(args, "path"))
       patch_text = path_argument(args, "patch")
       location = args["location"]
 
@@ -1381,7 +1424,10 @@ module LLM
       kind = path_argument(args, "kind")
       definition = path_kind_definition(kind)
       location = args["location"] || definition["default_location"]
-      prefix = args["path"].to_s
+      # A root selector (".", "./", or an empty prefix) addresses the kind
+      # ROOT itself; normalize it to the empty prefix so listing falls into
+      # the root branch below instead of resolving a bogus file target.
+      prefix = path_root_selector_normalize(args["path"])
       target = resolve_path(kind, prefix, location)
 
       path_authorize!(kind, target, location, mode: :read)
@@ -1412,7 +1458,7 @@ module LLM
 
     def path_move(args)
       kind = path_argument(args, "kind")
-      source_path = path_argument(args, "path")
+      source_path = path_reject_root_selector!("path_move", path_argument(args, "path"))
       destination = path_argument(args, "destination")
       location = args["location"]
 
@@ -1427,7 +1473,7 @@ module LLM
 
     def path_rename(args)
       kind = path_argument(args, "kind")
-      source_path = path_argument(args, "path")
+      source_path = path_reject_root_selector!("path_rename", path_argument(args, "path"))
       name = path_argument(args, "name")
       location = args["location"]
 
@@ -1454,7 +1500,7 @@ module LLM
 
     def path_delete(args)
       kind = path_argument(args, "kind")
-      path = path_argument(args, "path")
+      path = path_reject_root_selector!("path_delete", path_argument(args, "path"))
       location = args["location"]
 
       unless path_kind_capable?(kind, "delete")
@@ -1493,7 +1539,7 @@ module LLM
       definition = path_kind_definition(kind)
 
       location = args["location"] || definition["default_location"]
-      path = path_argument(args, "path").to_s
+      path = path_reject_root_selector!("path_promote", path_argument(args, "path"))
       target = resolve_path(kind, path, location)
       path_authorize!(kind, target, location, mode: :write)
       unless path_exists?(target)
@@ -1577,13 +1623,14 @@ module LLM
       raise ParameterException, "Path kind #{kind} has no #{operation} implementation" unless implementation
 
       location = args["location"] || definition["default_location"]
-      target = resolve_path(kind, path_argument(args, "path").to_s, location)
+      path = path_reject_root_selector!("path_#{operation}", path_argument(args, "path"))
+      target = resolve_path(kind, path, location)
       path_authorize!(kind, target, location, mode: :read)
 
       implementation.call(
         self,
-        path_argument(args, "path").to_s,
-        (args["location"] || definition["default_location"]).to_s,
+        path,
+        location.to_s,
         args
       )
     end

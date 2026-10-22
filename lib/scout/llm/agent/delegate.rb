@@ -89,8 +89,8 @@ module LLM
 Ask another agent and receive only its text answer. Omit `conversation` for an
 independent one-shot call. Set `conversation` to a name and reuse the same name
 with the same agent for follow-up turns. `inherit` controls only how a new call
-or named conversation is initialized; follow-up turns retain their own history.
-The specialist's own start_chat is always applied first.
+or named conversation is initialized; follow-up turns retain their own
+history. The specialist's own start_chat is always applied first.
       EOF
 
       definition = LLM.tool_definition(task_name, description, properties,

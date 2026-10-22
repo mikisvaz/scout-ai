@@ -7,8 +7,9 @@ exposes filesystem operations to agents: how to register a path kind, how
 to declare the kinds a workflow provides (`PATH_KINDS`) so incorporating
 agents receive them, how to override a built-in operation, how to introduce
 a custom operation, how tool aggregation resolves conflicts, what the
-callback contract and trust boundary are, and how the single-file patch
-operation behaves. It is intended for workflow and plugin authors; no
+callback contract and trust boundary are, how the single-file patch
+operation behaves, and which `path` spellings select the kind root rather
+than a file. It is intended for workflow and plugin authors; no
 Scout internals knowledge is assumed beyond `LLM.agent`.
 
 ---
@@ -301,7 +302,7 @@ Override call shapes follow the handler `type`:
   ORIGINAL file's termination, whatever the handler returned.
 - `:full`: `implementation.call(agent, target, args)` receives the
   resolved, authorized target and returns the operation result. This is
-  trusted plugin code (see section 8).
+  trusted plugin code (see section 9).
 
 ## 6. Introducing a custom operation
 
@@ -379,7 +380,47 @@ operations (`read write edit list move rename delete`), the four special
 operations (`validate promote smoke patch`), plus `path_kinds` itself —
 at most 12 engine tools, before any kind-specific custom operations.
 
-## 8. Callback contract and trust boundary
+`path_kinds` takes an optional `kind`. With no `kind` (or an empty
+string) it returns one entry per registered kind; with a `kind` it
+returns exactly that kind's entry, in the same per-kind shape as the
+full-map entries (`description`, `locations`, `default_location`,
+`sandbox`, `capabilities`). An unknown `kind` raises `ParameterException`
+(`Unknown path kind: <kind> (available: <sorted kind names>)`).
+
+## 8. Root selectors address the kind root, never a file
+
+The empty string, `"."` and `"./"` all address the kind **root as a
+whole**. They are enumeration selectors, not file paths, and the ten
+file-shaped built-in operations reject them at the argument-validation
+point, before resolution or authorization:
+
+- rejected by `path_read`, `path_write`, `path_patch`, `path_edit`,
+  `path_move`, `path_rename`, `path_delete`, `path_validate`,
+  `path_smoke` and `path_promote`;
+- every rejection is `ParameterException`:
+  `Invalid path for <operation>: "<value>" addresses the kind root; use
+  a path relative to the root, or path_list to enumerate the root`.
+  Without the rejection, a `"."` on an extension-bearing kind would
+  resolve to the junk target `<root>/..<ext>` (previously a silent
+  create on write and an empty listing on read);
+- `path_list` is the enumeration surface: a `.`/`./` prefix is
+  normalized to the empty prefix and lists the kind root, exactly like
+  an omitted path;
+- `path_dispatch` is deliberately exempt. Custom operations own their
+  path grammar and may legitimately receive `"."` (for example a
+  suite-scope enumeration); the engine passes the value through as
+  given. A custom operation's `path` argument still names one file
+  unless that operation documents otherwise.
+
+The grammar is pinned by
+`test/scout/llm/agent/test_path_errors.rb`
+(`test_error_matrix_root_selector_rejected_by_every_file_shaped_operation`,
+`test_path_write_root_selector_creates_no_file`) and
+`test/scout/llm/agent/test_path.rb`
+(`test_path_list_root_selector_lists_the_kind_root`,
+`test_path_dispatch_passes_root_selector_to_custom_operation`).
+
+## 9. Callback contract and trust boundary
 
 Callbacks run **only after** kind validation, path resolution,
 capability checks and authorization have all succeeded. An
@@ -399,10 +440,6 @@ Errors follow the engine contract: invalid arguments, missing files and
 failed authorization raise `ParameterException` (a Scout exception).
 The agent-facing tool callables serialize Scout exceptions as
 `{"exception": ..., "exception_line": ...}`; non-Scout exceptions are
-not caught there — handlers must normalize their own failures.Errors follow the engine contract: invalid arguments, missing files and
-failed authorization raise `ParameterException` (a Scout exception).
-The agent-facing tool callables serialize Scout exceptions as
-`{"exception": ..., "exception_line": ...}`; non-Scout exceptions are
 not caught there — handlers must normalize their own failures.
 
 The trust boundary is pinned by
@@ -419,9 +456,11 @@ The trust boundary is pinned by
 The error surface per failure class is pinned by
 `test/scout/llm/agent/test_path_errors.rb` (its `test_error_matrix_*`
 cases: unknown kind/location, missing argument, invalid or malformed
-selector, path outside grant, unsupported operation).
+selector, path outside grant, unsupported operation, the root-selector
+rejections of section 8, and the `path_kinds` unknown-kind error of
+section 7).
 
-## 9. Single-file patch; multi-file changes are not supported
+## 10. Single-file patch; multi-file changes are not supported
 
 `patch` is a built-in operation, default-off (`"patch" => true` in
 capabilities to enable). Its tool takes `kind`, `path`, optional
@@ -463,7 +502,7 @@ The patch contract is pinned by `test/scout/llm/agent/test_path_patch.rb`
 `test_patch_default_off_and_capability_enables`,
 `test_patch_on_unauthorized_target_writes_nothing`).
 
-## 10. `edit` selector semantics are byte-exact (pinned by tests)
+## 11. `edit` selector semantics are byte-exact (pinned by tests)
 
 `path_edit` never normalizes whitespace. Untouched content is copied
 byte-identically; only the selected span changes. The contracts below are

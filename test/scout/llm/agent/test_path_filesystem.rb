@@ -279,8 +279,11 @@ class TestPathFilesystem < Test::Unit::TestCase
     register_text_kind
     # The authorized target exists as a directory, so the filesystem rejects
     # File.write. This exercises the real write failure path without stubbing.
+    # ("." no longer reaches File.write: the root-selector guard rejects it,
+    # so the directory target is spelled explicitly.)
+    FileUtils.mkdir_p(File.join(@tmpdir, "directory_target"))
     assert_raise(Errno::EISDIR) do
-      @agent.path_write("kind" => "text", "path" => ".", "content" => "cannot replace directory")
+      @agent.path_write("kind" => "text", "path" => "directory_target", "content" => "cannot replace directory")
     end
   end
 

@@ -1217,6 +1217,88 @@ class TestPathContracts < Test::Unit::TestCase
     assert_equal true, result["text"]["capabilities"]["rename"]
   end
 
+  # Fix 5: the path_kinds kind input is an opt-in filter.  With more than
+  # one kind registered, supplying one kind returns exactly that kind's
+  # entry, in the same per-kind shape the full map uses (test_plugin_loading_
+  # installs_tools_on_llm_agent pins the omitted/{} full-map case).
+  def test_path_kinds_kind_input_returns_only_that_kind
+    register_text_kind("text")
+    register_text_kind("other")
+
+    result = @agent.path_kinds({"kind" => "other"})
+
+    assert_equal ["other"], result.keys
+    assert_equal "Test text paths", result["other"]["description"]
+
+    full = @agent.path_kinds
+    assert_equal ["text", "other"].sort, full.keys.sort
+    # Same per-kind shape as a full-map entry.
+    assert_equal full["other"].keys.sort, result["other"].keys.sort
+    assert_equal full["other"]["capabilities"], result["other"]["capabilities"]
+  end
+
+  # Fix 3, path_list side: "." and "./" are root selectors, not file paths.
+  # On a populated extension-bearing kind they list exactly what an omitted
+  # (or empty) prefix lists: the whole kind root.
+  def test_path_list_root_selector_lists_the_kind_root
+    @agent.register_path_kind(
+      "rbkind",
+      "description" => "Extension-bearing kind",
+      "locations" => ["project"],
+      "default_location" => "project",
+      "roots" => {"project" => File.join(@tmpdir, "rbkind")},
+      "extension" => "rb",
+      "capabilities" => {"list" => true}
+    )
+    root = File.join(@tmpdir, "rbkind")
+    FileUtils.mkdir_p(File.join(root, "sub"))
+    File.write(File.join(root, "alpha.rb"), "x\n")
+    File.write(File.join(root, "sub", "beta.rb"), "y\n")
+
+    listing = ->(path) { @agent.path_list({"kind" => "rbkind"}.merge(path || {})) }
+
+    expected = ["alpha.rb", "sub/beta.rb"]
+    assert_equal expected, listing.call(nil), "omitted path lists the root"
+    assert_equal expected, listing.call("path" => ""), "empty prefix lists the root"
+    assert_equal expected, listing.call("path" => "."), "dot selector lists the root"
+    assert_equal expected, listing.call("path" => "./"), "dot-slash selector lists the root"
+  end
+
+  # Fix 3, dispatch exemption: path_dispatch applies no root-selector
+  # grammar of its own.  A kind-defined custom operation legitimately
+  # receives "." (an enumeration client's suite scope does exactly that),
+  # so the raw value must reach the implementation untouched.
+  def test_path_dispatch_passes_root_selector_to_custom_operation
+    seen = []
+    @agent.register_path_kind(
+      "custom",
+      "description" => "Custom-operation kind",
+      "locations" => ["project"],
+      "default_location" => "project",
+      "roots" => {"project" => File.join(@tmpdir, "custom")},
+      "operations" => {
+        "peek" => {
+          "description" => "Record the raw path argument.",
+          "parameters" => {"properties" => {}, "required" => []},
+          "implementation" => lambda { |_agent, _target, args|
+            seen << args["path"]
+            "PEEK #{args["path"]}"
+          },
+          "type" => :full,
+          "authorization" => :read
+        }
+      }
+    )
+    FileUtils.mkdir_p(File.join(@tmpdir, "custom"))
+
+    result = @agent.path_dispatch(
+      kind: "custom", operation: "peek", "path" => "."
+    )
+
+    assert_equal "PEEK .", result
+    assert_equal ["."], seen, "the custom operation must receive the root selector as given"
+  end
+
   def test_path_kind_specific_operation
     calls = []
 

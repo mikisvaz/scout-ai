@@ -160,7 +160,7 @@ module LLM
 
       def path_edit(args)
         kind = path_argument(args, "kind")
-        path = path_argument(args, "path")
+        path = path_reject_root_selector!("path_edit", path_argument(args, "path"))
         selector = path_argument(args, "selector")
         replacement = path_argument(args, "replacement")
         location = args["location"]

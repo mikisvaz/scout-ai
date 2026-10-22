@@ -82,7 +82,6 @@ module LLM
       messages = [messages] unless messages.is_a? Array
       model ||= @model if model
 
-
       no_ask_override = @other_options[:no_ask_override]
 
       messages.delete_if{|info| info[:role] == 'agent' }
@@ -259,7 +258,7 @@ module LLM
 
         @@agent_workflow ||= {}
         workflow = @@agent_workflow[agent_name] ||= if agent_path.workflow.find_with_extension("rb").exists?
-                                                      Workflow.require_workflow_file agent_path.workflow.find_with_extension("rb")
+                                                      Workflow.require_workflow agent_path.workflow.find_with_extension("rb")
                                                     elsif workflow_path.exists?
                                                       agent_path = workflow_path
                                                       Workflow.require_workflow agent_name
