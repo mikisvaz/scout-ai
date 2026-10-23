@@ -75,6 +75,32 @@ module LLM
       "list" => :read
     }.freeze
 
+    # Built-ins whose overrides the engine actually DISPATCHES to, with the
+    # handler types each accepts.  Registering an override for any other
+    # built-in is rejected at registration time: the callable could never
+    # run, because only write/edit/patch consult the operation table at
+    # dispatch (DC-1).  The non-dispatching built-ins that are customizable
+    # at all use their own hook mechanisms instead of overrides.
+    OVERRIDE_DISPATCH_OPERATIONS = %w[write edit patch].freeze
+    OVERRIDE_HANDLER_TYPES = {
+      "write" => %i[content full].freeze,
+      "edit" => %i[content full].freeze,
+      "patch" => %i[content].freeze
+    }.freeze
+
+    # Handler type recorded in a kind's operation table for a built-in the
+    # kind does NOT override.  Only write/edit/patch can be overridden
+    # (OVERRIDE_DISPATCH_OPERATIONS), so the engine-default entry for every
+    # other built-in stays :full; for the overridable three the default
+    # records the type the ENGINE method itself dispatches with (write
+    # dispatches content handlers, edit and patch dispatch content
+    # handlers too - see path_write / path_edit / path_patch).
+    BUILTIN_DEFAULT_HANDLER_TYPES = {
+      "write" => :content,
+      "edit" => :content,
+      "patch" => :content
+    }.freeze
+
     # ------------------------------------------------------------------
     # Registry
     # ------------------------------------------------------------------
@@ -443,7 +469,7 @@ module LLM
         table[operation] = {
           "implementation" => overrides.dig(operation, "implementation"),
           "authorization" => BUILTIN_OPERATION_AUTHORIZATION.fetch(operation, :write),
-          "type" => :full
+          "type" => overrides.dig(operation, "type") || BUILTIN_DEFAULT_HANDLER_TYPES.fetch(operation, :full)
         }
       end
 
@@ -453,7 +479,7 @@ module LLM
         table[operation] = {
           "implementation" => spec["implementation"],
           "authorization" => BUILTIN_OPERATION_AUTHORIZATION.fetch(operation, :write),
-          "type" => :full
+          "type" => spec["type"]
         }
       end
 
@@ -623,10 +649,38 @@ module LLM
       entry && entry["implementation"]
     end
 
+    # Handler type of the recorded entry (:content/:full); the engine
+    # default carries BUILTIN_DEFAULT_HANDLER_TYPES, an override carries
+    # its declared (validated) type.
+    def path_operation_handler_type(kind, operation)
+      entry = path_kind_definition(kind).fetch("operation_table", {})[operation.to_s]
+      entry && entry["type"]
+    end
+
+    # Apply a :content handler and REQUIRE a String return.  Used where the
+    # engine has no final-newline preservation to perform (write), so the
+    # shared path_apply_content_handler guarantees would be a no-op; the
+    # String check itself is the shared non-String guard.
+    def path_content_handler_string(handler, target, original, args, kind)
+      result = handler.call(original, args)
+      unless String === result
+        raise ParameterException,
+              "Path kind #{kind} content handler must return a String, " \
+              "got #{result.class}"
+      end
+      result
+    end
+
     # Normalize the optional "overrides" key: built-in name -> implementation
     # Callable (or spec Hash with an "implementation" entry).  An override
     # replaces the implementation ONLY; the public tool schema stays
     # engine-owned, and capability gating is not bypassed.
+    #
+    # The spec's declared "type" is preserved (default :content) and
+    # validated against the handler types the target built-in actually
+    # supports (OVERRIDE_HANDLER_TYPES).  Only write/edit/patch dispatch to
+    # overrides today; overriding any other built-in is rejected here,
+    # because the callable would silently never run.
     def path_normalize_operation_overrides(definition)
       overrides = definition["overrides"]
       overrides = {} if overrides.nil?
@@ -644,6 +698,17 @@ module LLM
             "(#{BUILT_IN_OPERATIONS.join(', ')})"
         end
 
+        unless OVERRIDE_DISPATCH_OPERATIONS.include?(name)
+          raise ParameterException,
+            "Override #{name.inspect} cannot be dispatched: the engine " \
+            "only consults overrides for #{OVERRIDE_DISPATCH_OPERATIONS.join(', ')}. " \
+            "Kind hooks, not overrides, customize the remaining built-ins: " \
+            "\"list\" (definition[\"list\"]), \"validate\" and \"smoke\" " \
+            "(definition[\"validate\"] / definition[\"smoke\"] via " \
+            "path_kind_operation); read/move/rename/delete have no " \
+            "customization surface"
+        end
+
         spec = {"implementation" => spec} if spec.respond_to?(:call)
         implementation = spec["implementation"] if Hash === spec
         unless implementation.respond_to?(:call)
@@ -651,7 +716,22 @@ module LLM
             "Override #{name.inspect} requires an implementation Callable"
         end
 
-        normalized[name] = {"implementation" => implementation}
+        handler = spec["type"] if Hash === spec
+        handler = :content if handler.nil?
+        unless String === handler || Symbol === handler
+          raise ParameterException,
+            "Override #{name.inspect} type must be a String or Symbol"
+        end
+        handler = handler.to_sym
+        supported = OVERRIDE_HANDLER_TYPES.fetch(name)
+        unless supported.include?(handler)
+          raise ParameterException,
+            "Override #{name.inspect} type must be one of " \
+            "#{supported.map(&:inspect).join(', ')}; got #{handler.inspect}. " \
+            "#{name} dispatches its override as a content transform"
+        end
+
+        normalized[name] = {"implementation" => implementation, "type" => handler}
       end
       normalized
     end
@@ -1242,6 +1322,16 @@ module LLM
     def path_apply_content_handler(handler, target, original, args, kind)
       result = handler.call(original, args)
 
+      unless String === result
+        # The content-handler contract is "return transformed content".  A
+        # non-String return would raise NoMethodError on #end_with? below
+        # and escape path_install_tool's ScoutException-only rescue, so it
+        # is normalized here into the framework's parameter error.
+        raise ParameterException,
+              "Path kind #{kind} content handler must return a String, " \
+              "got #{result.class}"
+      end
+
       original_terminated = original.end_with?("\n")
       result_terminated = result.end_with?("\n")
 
@@ -1366,16 +1456,50 @@ module LLM
 
       target = resolve_path(kind, path, location)
       path_authorize!(kind, target, location, mode: :write)
-      path_write_text(target, content)
 
-      {
+      override = path_operation_implementation(kind, "write")
+      override_type = override && path_operation_handler_type(kind, "write")
+      payload =
+        if override && override_type == :full
+          # DC-1: a :full write override performs the write itself.  The
+          # engine hands it the resolved, AUTHORIZED target; the engine
+          # still composes the canonical result keys and verifies the
+          # write landed on that target.
+          handler_result = override.call(self, target, args)
+          unless Hash === handler_result
+            raise ParameterException,
+                  "Path kind #{kind} :full write override must return a " \
+                  "Hash payload, got #{handler_result.class}"
+          end
+          handler_result
+        elsif override
+          # DC-1: a :content write override is a pure content transform.
+          # The engine reads nothing (there is no original to preserve for
+          # a write) and writes the transformed String itself, exactly like
+          # the default write.
+          transformed = path_content_handler_string(
+            override, target, content, args, kind
+          )
+          path_write_text(target, transformed)
+          {}
+        else
+          path_write_text(target, content)
+          {}
+        end
+
+      canonical = {
         "doc_id" => path_doc_id(kind, path, args["version"]),
         "kind" => kind,
         "path" => path,
         "location" => location || path_kind_definition(kind)["default_location"],
         "target_file" => target,
-        "written" => true
+        "written" => path_exists?(target)
       }
+      # Engine-authoritative canonical keys are never overridable; any
+      # other payload key the :full handler returned is merged additively.
+      payload.each_with_object(canonical) do |(key, value), result|
+        result[key] = value unless canonical.key?(key)
+      end
     end
 
     # path_edit lives in lib/scout/llm/agent/path/edit.rb

@@ -515,6 +515,153 @@ class TestPathEditing < Test::Unit::TestCase
       edit_after[:parameters][:properties].keys
   end
 
+
+  # ------------------------------------------------------------------
+  # Step 3 (DC-2) — type-aware edit dispatch
+  # ------------------------------------------------------------------
+
+  def register_edit_override_kind(spec, name = "fancy_edit")
+    @agent.register_path_kind(
+      name,
+      "roots" => {"project" => @tmpdir},
+      "overrides" => {"edit" => spec}
+    )
+  end
+
+  def test_full_edit_override_fires_with_agent_target_and_args
+    calls = []
+    register_edit_override_kind(
+      "implementation" => lambda { |agent, target, args|
+        calls << [agent, target, args["path"]]
+        original = File.read(target.to_s)
+        File.write(target.to_s, original.sub("one", "ONE"))
+        {"applied_count" => 1, "content" => "handler-lie"}
+      },
+      "type" => :full
+    )
+
+    @agent.path_write(
+      "kind" => "fancy_edit", "path" => "note.txt", "content" => "one two\n"
+    )
+
+    result = @agent.path_edit(
+      "kind" => "fancy_edit", "path" => "note.txt",
+      "selector" => {"type" => "lines", "start" => 0, "end" => 0},
+      "replacement" => "ignored"
+    )
+
+    target = File.join(@tmpdir, "note.txt")
+    assert_equal 1, calls.length
+    assert_same @agent, calls.first.first
+    assert_equal target, calls.first[1]
+    assert_equal "note.txt", calls.first[2]
+
+    # Verified reality at the authorized target, not the handler's claim
+    assert_equal "ONE two\n", File.read(target)
+    assert_equal "ONE two\n", result["content"]
+    assert_equal true, result["changed"]
+    assert_equal 1, result["applied_count"]
+  end
+
+  def test_full_edit_override_non_hash_return_is_parameter_error_envelope
+    register_edit_override_kind(
+      "implementation" => ->(agent, target, args) { "NOT A HASH" },
+      "type" => :full
+    )
+
+    @agent.path_write(
+      "kind" => "fancy_edit", "path" => "note.txt", "content" => "body\n"
+    )
+
+    tools = @agent.instance_variable_get(:@other_options)[:tools]
+    result = JSON.parse(
+      tools["path_edit"].first.call(
+        "path_edit",
+        {"kind" => "fancy_edit", "path" => "note.txt",
+         "selector" => {"type" => "lines", "start" => 0, "end" => 0},
+         "replacement" => "x"}
+      )
+    )
+
+    assert_match(/must return a Hash payload/, result["exception"])
+    assert result.key?("exception_line")
+    # The handler performed no write; the file is untouched
+    assert_equal "body\n", File.read(File.join(@tmpdir, "note.txt"))
+  end
+
+  def test_content_edit_override_receives_content_and_args_and_writes_string
+    calls = []
+    register_edit_override_kind(
+      lambda { |content, args|
+        calls << [content, args["path"]]
+        content.upcase
+      }
+    )
+
+    @agent.path_write(
+      "kind" => "fancy_edit", "path" => "note.txt", "content" => "body\n"
+    )
+
+    result = @agent.path_edit(
+      "kind" => "fancy_edit", "path" => "note.txt",
+      "selector" => {"type" => "lines", "start" => 0, "end" => 0},
+      "replacement" => "ignored"
+    )
+
+    target = File.join(@tmpdir, "note.txt")
+    assert_equal [["body\n", "note.txt"]], calls
+    assert_equal "BODY\n", File.read(target)
+    assert_equal "BODY\n", result["content"]
+    assert_equal true, result["changed"]
+  end
+
+  def test_content_edit_override_selector_replacement_not_applied
+    # PINNED CONTRACT (DC-2 decision): under a :content edit override the
+    # selector/replacement arguments are validated but NOT applied; the
+    # handler's returned content IS the edited file.  Documented in
+    # doc/developer/PathEngine.md §5.
+    register_edit_override_kind(
+      lambda { |content, args| "REWRITTEN\n" }
+    )
+
+    @agent.path_write(
+      "kind" => "fancy_edit", "path" => "note.txt",
+      "content" => "line 0\nline 1\n"
+    )
+
+    # A selector that would, if applied, replace only line 1
+    result = @agent.path_edit(
+      "kind" => "fancy_edit", "path" => "note.txt",
+      "selector" => {"type" => "lines", "start" => 1, "end" => 1},
+      "replacement" => "SELECTOR APPLIED"
+    )
+
+    target = File.join(@tmpdir, "note.txt")
+    assert_equal "REWRITTEN\n", File.read(target),
+      "handler return must land in the file wholesale"
+    refute File.read(target).include?("SELECTOR APPLIED"),
+      "selector/replacement must not be applied under a content edit override"
+    assert_equal "REWRITTEN\n", result["content"]
+  end
+
+  def test_full_edit_override_authorization_failure_runs_no_handler
+    calls = []
+    register_edit_override_kind(
+      "implementation" => ->(agent, target, args) { calls << target },
+      "type" => :full
+    )
+
+    assert_raise(ParameterException) do
+      @agent.path_edit(
+        "kind" => "fancy_edit", "path" => "../../etc/hostname",
+        "selector" => {"type" => "lines", "start" => 0, "end" => 0},
+        "replacement" => "denied"
+      )
+    end
+
+    assert_empty calls
+  end
+
   # Step 6: patch operation
   # ------------------------------------------------------------------
 

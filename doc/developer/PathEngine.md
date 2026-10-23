@@ -281,6 +281,33 @@ the same `path_edit` (or `path_read`, ...) arguments, and the kind
 capability gate still applies — an override cannot resurrect an
 operation the kind lacks the capability for.
 
+**Only `write`, `edit` and `patch` can be overridden.** These are the
+built-ins whose dispatch actually consults the operation table, so an
+override registered for any other built-in could never run. Such a
+registration is rejected loudly at `register_path_kind` time with a
+`ParameterException` naming the supported set. The remaining built-ins
+are customized through their own hook mechanisms, not overrides:
+`"list"` via the `"list"` definition key, `"validate"`/`"smoke"` via the
+`"validate"`/`"smoke"` definition keys (dispatched by
+`path_kind_operation`), and `"promote"` via the `"promotion_destination"`
+and `"promotion_post_move"` definition keys (its legacy mover hook is
+retired). `read`, `move`, `rename` and
+`delete` have none at all.
+
+Each overridable built-in accepts a specific set of handler types:
+
+| operation | accepted `type` values | undeclared default |
+|---|---|---|
+| `write` | `:content`, `:full` | `:content` |
+| `edit`  | `:content`, `:full` | `:content` |
+| `patch` | `:content` only | `:content` |
+
+A `type` outside the operation's accepted set is rejected at
+registration with a `ParameterException` naming the accepted values;
+declaring `"type" => :full` for `patch` fails because patch dispatches
+its override as a strict content transform (it applies a unified diff
+and never hands the handler a write).
+
 ```ruby
 agent.register_path_kind(
   "fancy",
@@ -292,17 +319,39 @@ agent.register_path_kind(
 )
 ```
 
-Override call shapes follow the handler `type`:
+The example above registers a `:content` edit override (the undeclared
+default). Override call shapes follow the declared `type`:
 
-- `:content` (default for content transforms): the engine resolves and
-  authorizes the target, reads it, calls `implementation.call(content,
-  args)`, and writes the result back through the same authorized
+- `:content` (the default): the engine resolves and authorizes the
+  target, reads it, calls `implementation.call(content, args)`, and
+  writes the result back through the same authorized
   target. The handler receives **no path** and cannot redirect the
-  write. The result's final-newline state is normalized to the
-  ORIGINAL file's termination, whatever the handler returned.
+  write. The result's final-newline state is normalized to the ORIGINAL
+  file's termination, whatever the handler returned. The handler **must
+  return a String**; a non-String return is converted to a
+  `ParameterException` naming the contract (see section 9).
+  - For `edit` specifically: under a `:content` edit override the
+    `selector` and `replacement` arguments are still **validated** (they
+    are required by the tool schema) but are **not applied** — the
+    handler's returned content IS the edited file, wholesale. A
+    `:content` edit override replaces the edit transform entirely; a
+    kind that wants selector semantics must not override `edit` at all.
 - `:full`: `implementation.call(agent, target, args)` receives the
-  resolved, authorized target and returns the operation result. This is
-  trusted plugin code (see section 9).
+  resolved, authorized target and must return a **Hash payload**; a
+  non-Hash return is converted to a `ParameterException` naming the
+  contract. The handler performs the write itself, but the canonical
+  result keys stay **engine-authoritative**: the engine composes
+  `doc_id`/`kind`/`path`/`location`/`target_file`/`written` (write) or
+  `doc_id`/`kind`/`path`/`changed`/`content` (edit) itself and
+  **ignores** any attempt by the payload to set them; other payload keys
+  are merged into the result additively. The engine verifies reality
+  instead of trusting the handler's claim: `write` reports `target_file`
+  as the authorized target and `written` as actual existence there;
+  `edit` reads `content`/`changed` back from the authorized target after
+  the handler returns. This is trusted plugin code (see section 9).
+
+Authorization completes **before** any handler call, for both types: an
+authorization failure invokes no override and mutates nothing.
 
 ## 6. Introducing a custom operation
 
@@ -347,8 +396,10 @@ registration time: `path_operation_support?(kind, op)` and
 Registration validation raises `ParameterException` for: an operation
 name colliding with a built-in, a non-callable implementation, an
 unknown authorization mode or handler type, an override whose target is
-not a built-in, or a declared parameter colliding with the reserved
-`kind`/`path`/`location` arguments.
+not a built-in, an override of a built-in outside the dispatchable set
+(`write`/`edit`/`patch`, see section 5), an override whose declared
+`type` is not accepted by its target operation, or a declared parameter
+colliding with the reserved `kind`/`path`/`location` arguments.
 
 ## 7. Parameter collision policy
 
@@ -440,7 +491,13 @@ Errors follow the engine contract: invalid arguments, missing files and
 failed authorization raise `ParameterException` (a Scout exception).
 The agent-facing tool callables serialize Scout exceptions as
 `{"exception": ..., "exception_line": ...}`; non-Scout exceptions are
-not caught there — handlers must normalize their own failures.
+not caught there. Custom-operation handlers must therefore normalize
+their own failures. The engine guards its own mediated call sites:
+an override `:content` handler returning a non-String (for `write`,
+`edit` or `patch`) or a `:full` handler returning a non-Hash is
+converted to a `ParameterException` naming the contract and serialized
+as an error envelope, never a raw `NoMethodError`/`ArgumentError`
+escape.
 
 The trust boundary is pinned by
 `test/scout/llm/agent/test_path_filesystem.rb`
@@ -448,11 +505,15 @@ The trust boundary is pinned by
 `test_sandbox_fails_closed_when_authorizer_is_unavailable`,
 `test_path_write_success_is_at_the_authorized_target`,
 `test_path_write_denies_resolver_target_outside_root`,
-`test_path_write_filesystem_failure_does_not_return_success`) and
+`test_path_write_filesystem_failure_does_not_return_success`),
 `test/scout/llm/agent/test_path.rb`
 (`test_dispatch_authorization_failure_runs_no_callback_and_mutates_nothing`,
 `test_dispatch_content_op_cannot_redirect_write_to_other_file`,
-`test_dispatch_edit_override_authorization_failure_runs_no_override`).
+`test_dispatch_edit_override_authorization_failure_runs_no_override`,
+`test_write_override_authorization_failure_runs_no_handler`) and
+`test/scout/llm/agent/test_path_edit.rb`
+(`test_full_edit_override_authorization_failure_runs_no_handler`).
+
 The error surface per failure class is pinned by
 `test/scout/llm/agent/test_path_errors.rb` (its `test_error_matrix_*`
 cases: unknown kind/location, missing argument, invalid or malformed

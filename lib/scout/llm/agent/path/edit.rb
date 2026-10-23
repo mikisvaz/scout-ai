@@ -174,22 +174,54 @@ module LLM
         original = path_read_text(target)
 
         override = path_operation_implementation(kind, "edit")
-        if override
-          edited = path_apply_content_handler(
-            override, target, original, args, kind
-          )
-        else
-          edited = path_apply_selector(original, selector, replacement)
-        end
-        path_write_text(target, edited)
+        payload, engine_edited =
+          if override && path_operation_handler_type(kind, "edit") == :full
+            # DC-2: a :full edit override performs the edit itself.  The
+            # engine hands it the resolved, AUTHORIZED target; the handler
+            # returns a Hash payload whose non-canonical keys are merged
+            # into the result (canonical keys stay engine-authoritative,
+            # same contract as path_write's :full branch).
+            handler_result = override.call(self, target, args)
+            unless Hash === handler_result
+              raise ParameterException,
+                    "Path kind #{kind} :full edit override must return a " \
+                    "Hash payload, got #{handler_result.class}"
+            end
+            [handler_result, nil]
+          elsif override
+            # DC-2, pinned behavior: under a :content edit override the
+            # selector/replacement arguments are validated above (they are
+            # required by the tool schema) but are NOT applied - the
+            # handler's returned content IS the edited file.  A :content
+            # edit override replaces the edit transform wholesale; a kind
+            # that wants selector semantics must not override edit at all.
+            # (Documented in doc/developer/PathEngine.md §5.)
+            edited = path_apply_content_handler(
+              override, target, original, args, kind
+            )
+            path_write_text(target, edited)
+            [{}, edited]
+          else
+            edited = path_apply_selector(original, selector, replacement)
+            path_write_text(target, edited)
+            [{}, edited]
+          end
 
-        {
+        # Edit keeps its own canonical result shape (doc_id/kind/path/
+        # changed/content).  Under a :full override the handler performed
+        # the write, so changed/content are read back from the authorized
+        # target: verified reality, never the handler's claim.
+        final_content = engine_edited || path_read_text(target)
+        canonical = {
           "doc_id" => path_doc_id(kind, path, args["version"]),
           "kind" => kind,
           "path" => path,
-          "changed" => original != edited,
-          "content" => edited
+          "changed" => original != final_content,
+          "content" => final_content
         }
+        payload.each_with_object(canonical) do |(key, value), result|
+          result[key] = value unless canonical.key?(key)
+        end
       end
     end
   end

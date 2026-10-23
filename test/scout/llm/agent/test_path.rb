@@ -1118,6 +1118,182 @@ class TestPathContracts < Test::Unit::TestCase
     end
   end
 
+  # ------------------------------------------------------------------
+  # Step 2 (DC-1) — write override dispatch and override-type plumbing
+  # ------------------------------------------------------------------
+
+  def register_write_override_kind(spec, name = "fancy")
+    @agent.register_path_kind(
+      name,
+      "roots" => {"project" => @tmpdir},
+      "overrides" => {"write" => spec}
+    )
+  end
+
+  def test_write_content_override_transforms_content_and_keeps_result_shape
+    calls = []
+    register_write_override_kind(
+      lambda { |content, args|
+        calls << [content, args["path"]]
+        "TRANSFORMED:" + content
+      }
+    )
+
+    result = @agent.path_write(
+      "kind" => "fancy", "path" => "note.txt", "content" => "body"
+    )
+
+    assert_equal [["body", "note.txt"]], calls
+    target = File.join(@tmpdir, "note.txt")
+    assert_equal "TRANSFORMED:body", File.read(target)
+    assert_equal %w[doc_id kind location path target_file written],
+                 result.keys.sort
+    assert_equal target, result["target_file"]
+    assert_equal true, result["written"]
+  end
+
+  def test_write_content_override_default_type_is_content
+    register_write_override_kind(lambda { |content, args| content })
+
+    table = @agent.path_kind_definition("fancy")["operation_table"]
+    overrides = @agent.path_kind_definition("fancy")["overrides"]
+    assert_equal :content, overrides["write"]["type"]
+    assert_equal :content, table["write"]["type"]
+  end
+
+  def test_write_full_override_fires_with_agent_target_and_args
+    calls = []
+    register_write_override_kind(
+      "implementation" => lambda { |agent, target, args|
+        calls << [agent, target, args["path"]]
+        FileUtils.mkdir_p(File.dirname(target.to_s))
+        File.write(target.to_s, "HANDLER WROTE\n")
+        {"bytes" => 13, "target_file" => "handler-lie.txt"}
+      },
+      "type" => :full
+    )
+
+    result = @agent.path_write(
+      "kind" => "fancy", "path" => "full.txt", "content" => "ignored"
+    )
+
+    target = File.join(@tmpdir, "full.txt")
+    assert_equal 1, calls.length
+    assert_same @agent, calls.first.first
+    assert_equal target, calls.first[1]
+    assert_equal "full.txt", calls.first[2]
+    assert_equal "HANDLER WROTE\n", File.read(target)
+    assert_equal target, result["target_file"]
+    assert_equal 13, result["bytes"]
+    # Canonical keys are engine-authoritative: the handler's attempt to
+    # redirect target_file is ignored, and written reflects reality.
+    assert_equal true, result["written"]
+  end
+
+  def test_write_content_override_non_string_return_is_parameter_error
+    register_write_override_kind(
+      lambda { |content, args| {"nope" => content} }
+    )
+
+    error = assert_raise(ParameterException) do
+      @agent.path_write(
+        "kind" => "fancy", "path" => "note.txt", "content" => "body"
+      )
+    end
+    assert_match(/must return a String/, error.message)
+
+    refute File.exist?(File.join(@tmpdir, "note.txt"))
+  end
+
+  def test_write_content_override_non_string_return_serializes_through_tool
+    register_write_override_kind(
+      lambda { |content, args| [content] }
+    )
+
+    tools = @agent.instance_variable_get(:@other_options)[:tools]
+    result = JSON.parse(
+      tools["path_write"].first.call(
+        "path_write",
+        {"kind" => "fancy", "path" => "note.txt", "content" => "body"}
+      )
+    )
+
+    assert_match(/must return a String/, result["exception"])
+    assert result.key?("exception_line")
+  end
+
+  def test_write_override_invalid_type_rejected_at_registration
+    error = assert_raise(ParameterException) do
+      register_write_override_kind(
+        "implementation" => ->(c, a) { c },
+        "type" => :partial
+      )
+    end
+    assert_match(/type must be one of :content, :full; got :partial/,
+                 error.message)
+  end
+
+  def test_patch_full_override_rejected_at_registration
+    error = assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "patchy",
+        "roots" => {"project" => @tmpdir},
+        "capabilities" => {"patch" => true},
+        "overrides" => {
+          "patch" => {
+            "implementation" => ->(agent, target, args) { target },
+            "type" => :full
+          }
+        }
+      )
+    end
+    assert_match(/patch.*type must be one of :content; got :full/,
+                 error.message)
+    assert_match(/dispatches its override as a content transform/,
+                 error.message)
+  end
+
+  def test_override_on_non_dispatching_builtin_rejected_at_registration
+    register_text_kind
+
+    error = assert_raise(ParameterException) do
+      @agent.register_path_kind(
+        "dead",
+        "roots" => {"project" => @tmpdir},
+        "overrides" => {"read" => ->(content, args) { content }}
+      )
+    end
+
+    assert_match(/Override "read" cannot be dispatched/, error.message)
+    assert_match(/only consults overrides for write, edit, patch/,
+                 error.message)
+    assert_match(/definition\["list"\]/, error.message)
+  end
+
+  def test_write_override_authorization_failure_runs_no_handler
+    %i[content full].each do |type|
+      calls = []
+      spec = {"implementation" => ->(*) { calls << type }}
+      spec["type"] = type if type == :full
+      @agent.register_path_kind(
+        "locked_#{type}",
+        "roots" => {"project" => @tmpdir},
+        "overrides" => {"write" => spec}
+      )
+
+      assert_raise(ParameterException) do
+        @agent.path_write(
+          "kind" => "locked_#{type}",
+          "path" => "../../etc/hostname",
+          "content" => "denied"
+        )
+      end
+
+      assert_empty calls
+      refute File.exist?("/nonexistent-root-f.xyz")
+    end
+  end
+
   def test_override_registration_selects_override_implementation
     override_calls = []
     register_text_kind
