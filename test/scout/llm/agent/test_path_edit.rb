@@ -666,4 +666,243 @@ class TestPathEditing < Test::Unit::TestCase
   # ------------------------------------------------------------------
 
 
+  # ------------------------------------------------------------------
+  # H-011 regression (path-edit corruption cluster, step 2 of the fix plan).
+  #
+  # Incident: `path_edit` with a `lines` selector on a multi-line
+  # single-quoted YAML scalar duplicated preceding lines in Research
+  # Hypothesis record H-011 across v5-v12; sloppy repairs added further
+  # duplication (v12->v13 appended `demonstration)` onto an existing list
+  # item; v13->v14 cleaned a `the migration manifest. the migration
+  # manifest.` duplication).
+  #
+  # Step-1 attribution evidence (probed exhaustively in a fresh process):
+  # the generic `lines` splice alone NEVER duplicates a preceding/head line;
+  # duplication arises exactly when the caller-supplied replacement itself
+  # carries the preceding text (the agent re-pasted lines it had already
+  # read).  These tests pin, through the PUBLIC path_edit operation:
+  #
+  #   1. the generic layer writes a corruption-shaped replacement
+  #      FAITHFULLY (no YAML parsing, no duplicate-text heuristics may enter
+  #      AgentPathEdit; `lines` keeps meaning "replace these physical
+  #      lines"),
+  #   2. the INTENDED edit is byte-exact and leaves unselected lines
+  #      byte-identical,
+  #   3. the same public operation against a kind registering the SAME
+  #      `:full` edit override shape the Research `hypothesis` kind uses
+  #      (records.rb L345-L353: re-apply the caller's selector/replacement
+  #      through agent.path_apply_selector, then validate and re-serialize)
+  #      commits the corruption end to end: the re-parse CONCATENATES the
+  #      duplicated fragments into one statement value, which is how H-011
+  #      v5-v12 corruption persisted through record validation.
+  # ------------------------------------------------------------------
+
+  # The reviewer's illustrative multi-line single-quoted scalar fixture
+  # (commentary cL2785-2791), carried over from the step-1 reconstruction.
+  H011_FIXTURE_LINES = [
+    "statement: 'The initial interpretation remains provisional\n",
+    "  because the shared response is also present in the control.\n",
+    "  The final qualification must remain intact.'\n",
+    "scope:\n",
+    "  population: \"cohort A\"\n",
+    "limitations:\n",
+    "  - \"No biological replicates\"\n"
+  ].freeze
+  H011_FIXTURE = H011_FIXTURE_LINES.join.freeze
+
+  def test_h011_generic_lines_edit_writes_duplication_faithfully_when_replacement_duplicates
+    register_text_kind
+
+    @agent.path_write(
+      "kind" => "text",
+      "path" => "doc.yaml",
+      "content" => H011_FIXTURE
+    )
+
+    # Corruption-shaped edit: insert lines 0-1 verbatim between line 0 and
+    # line 1 (start == end == 1 is a zero-length span, i.e. an insertion
+    # point, per the documented exclusive-end semantics; the step-1
+    # reconstruction's exact reproducer).  The public operation must write
+    # it faithfully: the generic layer is a predictable text editor, not a
+    # validator.  Pins candidate (a) as disproved and the fix constraint
+    # that `lines` semantics stay untouched.
+    result = @agent.path_edit(
+      "kind" => "text",
+      "path" => "doc.yaml",
+      "selector" => {"type" => "lines", "start" => 1, "end" => 1},
+      "replacement" => H011_FIXTURE_LINES[0, 2].join
+    )
+
+    # head = [line 0]; the span [1...1] is empty so the replacement is
+    # inserted verbatim; tail = lines 1.. untouched.
+    expected =
+      H011_FIXTURE_LINES[0, 1].join +
+      H011_FIXTURE_LINES[0, 2].join +
+      H011_FIXTURE_LINES[1..].join
+
+    assert_equal expected, result["content"],
+      "the generic lines splice must reproduce the incident's duplication " \
+      "signature verbatim when the replacement carries preceding text: this " \
+      "pins the attribution that the generic layer is a faithful text " \
+      "editor, never a silent repairer"
+    assert_equal expected, File.read(File.join(@tmpdir, "doc.yaml"))
+    assert_equal true, result["changed"]
+  end
+
+  def test_h011_generic_lines_edit_intended_replacement_is_byte_exact
+    register_text_kind
+
+    @agent.path_write(
+      "kind" => "text",
+      "path" => "doc.yaml",
+      "content" => H011_FIXTURE
+    )
+
+    # The same public operation with the INTENDED replacement: replace the
+    # single physical line 1 with its own text (span [1...2] is exactly that
+    # line).  Byte-identical document, every unselected line untouched.
+    result = @agent.path_edit(
+      "kind" => "text",
+      "path" => "doc.yaml",
+      "selector" => {"type" => "lines", "start" => 1, "end" => 2},
+      "replacement" => H011_FIXTURE_LINES[1]
+    )
+
+    assert_equal H011_FIXTURE, result["content"],
+      "replacing line 1 with its own text must leave the document " \
+      "byte-identical, including the folded single-quoted scalar"
+    assert_equal H011_FIXTURE, File.read(File.join(@tmpdir, "doc.yaml"))
+    assert_equal false, result["changed"]
+  end
+
+  # Minimal mirror of the Research records.rb `:full` edit override
+  # (records.rb L345-L353 registration, L448-L522 transform, quoted verbatim
+  # in the bout report): the override receives the resolved authorized
+  # target, re-applies the caller's selector/replacement through
+  # agent.path_apply_selector, re-parses the candidate, and - decisive for
+  # the incident - RE-SERIALIZES AND COMMITS whatever still parses.  A :full
+  # override must return a Hash payload (engine contract, edit.rb DC-2).
+  #
+  # The fixture is a serializer-format record whose `statement` is a
+  # multi-line folded scalar - the shape whose physical-line edits can
+  # duplicate folded content (the incident's single-quoted folded scalar is
+  # covered by the Research-side regression, which drives the real kind).
+  H011_RECORD = {
+    "version" => 1,
+    "statement" =>
+      "The initial interpretation remains provisional because the shared " \
+      "response is also present in the control. The final qualification " \
+      "must remain intact.",
+    "scope" => {"population" => "cohort A"},
+    "status" => "proposed",
+    "limitations" => ["No biological replicates"]
+  }.freeze
+
+  def register_h011_full_override_kind
+    require "yaml"
+    @agent.register_path_kind(
+      "recordish",
+      "roots" => {"project" => @tmpdir},
+      "capabilities" => {"edit" => true},
+      "overrides" => {
+        "edit" => {
+          "type" => :full,
+          "implementation" => lambda { |agent, target, args|
+            current_text = File.read(target.to_s)
+            candidate_text =
+              agent.path_apply_selector(current_text,
+                                        args["selector"], args["replacement"])
+            candidate = YAML.safe_load(candidate_text,
+                                       permitted_classes: [], aliases: false)
+            return {"changed" => false} if candidate_text == current_text
+
+            candidate["version"] += 1
+            File.write(target.to_s, YAML.dump(candidate))
+            {"changed" => true, "version" => candidate["version"]}
+          }
+        }
+      }
+    )
+  end
+
+  def h011_write_record(name)
+    require "yaml"
+    @agent.path_write(
+      "kind" => "recordish",
+      "path" => name,
+      "content" => YAML.dump(H011_RECORD)
+    )
+    File.join(@tmpdir, name)
+  end
+
+  def h011_statement_line_index(path)
+    File.readlines(path).index { |line| line.start_with?("statement:") }
+  end
+
+  def test_h011_full_override_commits_duplicated_folded_scalar_verbatim
+    register_h011_full_override_kind
+    record = h011_write_record("H-001.yaml")
+    stmt_idx = h011_statement_line_index(record)
+    body_lines = File.readlines(record)
+
+    # The corruption-shaped edit the incident agent performed: replace the
+    # statement VALUE line with the statement line plus its own continuation
+    # line verbatim (re-pasting what it had just read).  The override
+    # re-parses the candidate - and Psych folds the duplicated fragments
+    # into ONE statement value with the text concatenated - so the record
+    # layer commits the corruption and bumps the version.  This pins, at
+    # engine level, the mechanism that let H-011 v5-v12 duplication persist
+    # through record validation: the engine hands the override the caller's
+    # selector/replacement verbatim, and the override's own validation is
+    # the only gate.  The REJECTING regression lives in the Research checkout
+    # (test/Research/path_kinds/test_h011_lines_edit.rb).
+    # ScoutCoder: under a :full edit override the engine hands the override
+    # the caller's selector/replacement VERBATIM (path_apply_selector inside
+    # the handler) and the override's own validation is the ONLY gate - a
+    # corruption-shaped `lines` edit that still YAML-parses is committed and
+    # version-bumped, because Psych folds duplicated folded-scalar fragments
+    # into one value.  Kinds owning :full edit overrides must reject, never
+    # repair or commit, corruption-shaped candidates.
+    result = @agent.path_edit(
+      "kind" => "recordish",
+      "path" => "H-001.yaml",
+      "selector" => {"type" => "lines", "start" => stmt_idx, "end" => stmt_idx + 1},
+      "replacement" => body_lines[stmt_idx, 2].join
+    )
+
+    parsed = YAML.safe_load(File.read(record), permitted_classes: [], aliases: false)
+    assert_equal "The initial interpretation remains provisional because the " \
+                 "shared response is also present in the control. The final " \
+                 "qualification must remain intact. is also present in the " \
+                 "control. The final qualification must remain intact.",
+                 parsed["statement"],
+      "the override-mediated edit must commit the duplication signature " \
+      "verbatim (duplicated folded text concatenated into one value)"
+    assert_equal 2, parsed["version"]
+    assert_equal true, result["changed"]
+  end
+
+  def test_h011_full_override_intended_edit_preserves_scalar_value
+    register_h011_full_override_kind
+    record = h011_write_record("H-002.yaml")
+    stmt_idx = h011_statement_line_index(record)
+
+    # The INTENDED edit: replace the statement VALUE line with its own text.
+    # The scalar VALUE must survive the parse/serialize round trip untouched
+    # and the edit must be reported as a no-op.
+    result = @agent.path_edit(
+      "kind" => "recordish",
+      "path" => "H-002.yaml",
+      "selector" => {"type" => "lines", "start" => stmt_idx, "end" => stmt_idx + 1},
+      "replacement" => File.readlines(record)[stmt_idx]
+    )
+
+    parsed = YAML.safe_load(File.read(record), permitted_classes: [], aliases: false)
+    assert_equal H011_RECORD["statement"], parsed["statement"],
+      "the intended edit must leave the folded scalar VALUE byte-identical " \
+      "after the override's parse/serialize round trip"
+    assert_equal false, result["changed"]
+  end
+
+
 end

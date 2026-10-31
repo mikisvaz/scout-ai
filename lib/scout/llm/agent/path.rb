@@ -1448,6 +1448,7 @@ module LLM
       kind = path_argument(args, "kind")
       path = path_reject_root_selector!("path_write", path_argument(args, "path"))
       content = path_argument(args, "content")
+      raise ParameterException, "Context compactation tag detected in content (#{Chat::COMPACTATION_MESSAGE}); old tool calls are stale and may need to be re-derived." if content.include?(Chat::COMPACTATION_MESSAGE)
       location = args["location"]
 
       unless path_kind_capable?(kind, "write")
@@ -1515,6 +1516,8 @@ module LLM
       path = path_reject_root_selector!("path_patch", path_argument(args, "path"))
       patch_text = path_argument(args, "patch")
       location = args["location"]
+
+      raise ParameterException, "Context compactation tag detected in content (#{Chat::COMPACTATION_MESSAGE}); old tool calls are stale and may need to be re-derived." if patch_text.include?(Chat::COMPACTATION_MESSAGE)
 
       unless path_kind_capable?(kind, "patch")
         raise ParameterException, "Path kind #{kind} does not support patch"
@@ -1760,8 +1763,8 @@ module LLM
     end
 
     def path_move_target(source, destination)
-      FileUtils.mkdir_p(File.dirname(destination.to_s))
-      FileUtils.mv(source.to_s, destination.to_s)
+      raise ParameterException, "Source file not found un path move #{source}" unless Open.exists?(source)
+      Open.mv(source, destination)
     end
   end
 end

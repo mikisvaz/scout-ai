@@ -35,7 +35,7 @@ module LLM
                         # Pin the anonymous agent workflow's job directory to
                         # the checkout var/jobs (path-map leak fix, H2); see
                         # AgentWorkflow.pin_workflow_job_directory!.
-                        AgentWorkflow.pin_workflow_job_directory!(m) if AgentWorkflow.respond_to?(:pin_workflow_job_directory!)
+                        #AgentWorkflow.pin_workflow_job_directory!(m) if AgentWorkflow.respond_to?(:pin_workflow_job_directory!)
                         m
                       end
       end

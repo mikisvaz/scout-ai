@@ -19,19 +19,22 @@ module AgentWorkflow
   # is evaluated. Only the unlocated default is upgraded in place; any
   # caller that already set Workflow.directory (tests, CLI, other repos)
   # keeps its setting untouched.
-  def self.pin_workflow_job_directory!(workflow)
-    dir = workflow.directory rescue nil
-    return dir if dir.nil? || dir.to_s.start_with?(File::SEPARATOR)
+  #
+  # THIS IS PROBABLY WRONG
+  #
+  #def self.pin_workflow_job_directory!(workflow)
+  #  dir = workflow.directory rescue nil
+  #  return dir if dir.nil? || dir.to_s.start_with?(File::SEPARATOR)
 
-    global = Workflow.directory
-    if global.nil? || global.to_s.empty?
-      Workflow.directory = global = Path.setup(Scout.root.find(:current))['var']['jobs']
-    elsif !global.to_s.start_with?(File::SEPARATOR)
-      Workflow.directory = global = Path.setup(Scout.root.find(:current))[global.to_s]
-    end
-    workflow.directory = global[workflow.name]
-    workflow.directory
-  end
+  #  global = Workflow.directory
+  #  if global.nil? || global.to_s.empty?
+  #    Workflow.directory = global = Path.setup(Scout.root.find(:current))['var']['jobs']
+  #  elsif !global.to_s.start_with?(File::SEPARATOR)
+  #    Workflow.directory = global = Path.setup(Scout.root.find(:current))[global.to_s]
+  #  end
+  #  workflow.directory = global[workflow.name]
+  #  workflow.directory
+  #end
 
   helper :chat do |chat=nil|
     @chat ||= begin

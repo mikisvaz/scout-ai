@@ -9,13 +9,14 @@ module Chat
   DEFAULT_CONTEXT_STRATEGY = %w(shorten_tools_epoch_increment inbox)
   DEFAULT_SHORT_STRING_LENGTH = 200
   DEFAULT_SHORT_JSON_LENGTH = 2000
+  COMPACTATION_MESSAGE='CONTEXT-COMPACTED'
 
   # --- Shared utility used by all strategies ---
 
   def self.shorten_string(string, size = DEFAULT_SHORT_STRING_LENGTH, step: nil)
     new = Log.truncate_string(string, size)
     if new.length < string.length
-      new_array = ['CONTEXT-COMPACTED', 'Historical account compacted for context efficiency; it does not faithfully represent what happened',  "Original content length: #{string.length}"]
+      new_array = [COMPACTATION_MESSAGE, 'Historical account compacted for context efficiency; it does not faithfully represent what happened',  "Original content length: #{string.length}"]
       if step
         new_array << "Full output found in job: #{step}"
       end

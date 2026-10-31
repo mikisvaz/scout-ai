@@ -237,13 +237,20 @@ class TestLLMRequestContext < Test::Unit::TestCase
     value = 'concurrent-producer'
     definition = LLM.task_tool_definition(context_workflow, :echo)
     tools = {'echo' => [context_workflow, definition]}
-    calls = [{'id' => 'call-1', 'name' => 'echo', 'arguments' => {value: value}}]
+    calls = [
+      {'id' => 'call-1', 'name' => 'echo', 'arguments' => {value: value}},
+      {'id' => 'call-2', 'name' => 'echo', 'arguments' => {value: value}},
+      {'id' => 'call-3', 'name' => 'echo', 'arguments' => {value: value}},
+      {'id' => 'call-4', 'name' => 'echo', 'arguments' => {value: value}},
+      {'id' => 'call-5', 'name' => 'echo', 'arguments' => {value: value}}
+    ]
     errors = Queue.new
 
     threads = (0...4).map do |i|
       Thread.new do
         begin
-          LLM.process_calls(tools, calls, request_context: {request_id: "producer-#{i}"})
+          sleep rand
+          LLM.process_calls(tools, [calls[i]], request_context: {request_id: "producer-#{i}"})
         rescue Exception => e
           errors << e
         end

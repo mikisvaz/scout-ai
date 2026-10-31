@@ -205,6 +205,16 @@ Key extra constants (all read through `Scout::Config` accessors on
 | `epoch_increment_compacted_growth_ratio` | `EPOCH_INCREMENT_COMPACTED_GROWTH_RATIO` | 2.0 | Extra compacted calls retained per extra epoch call |
 | `epoch_increment_max_compacted_tool_calls` | `EPOCH_INCREMENT_MAX_COMPACTED_TOOL_CALLS` | 160 | Upper bound of the grown compacted window |
 
+Turning compaction off entirely (drop-only) requires zeroing the base window
+**and** its growth: `epoch_compacted_tool_calls = 0` alone is not enough,
+because the growth ratio re-populates the compacted region as epochs grow
+(base 0 with the default ratio 2.0 yields 60 compacted calls by 400 tool
+calls). Either also set `epoch_increment_compacted_growth_ratio = 0`, or pin
+the whole window with `epoch_increment_max_compacted_tool_calls = 0` — the cap
+is applied after growth, so it dominates every growth path. Keep
+`epoch_full_tool_calls > 0`: with full AND base both at 0 the strategy
+disables itself and nothing is ever dropped.
+
 Like the other shorten strategies it is **ephemeral**: it only changes what
 the model sees; the stored chat keeps full fidelity.
 

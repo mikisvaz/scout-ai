@@ -275,7 +275,7 @@ module Chat
       To fit within the model context window, this conversation has been
       compacted: some tool calls arguments and tool call outputs are shown with
       compacted content, and some have been hidden entirely. Compacted content
-      is show as '[CONTEXT-COMPACTED ...]'. Don't try to reconstruct what
+      is show as '[#{COMPACTATION_MESSAGE} ...]'. Don't try to reconstruct what
       happened involving tools that have been compacted.
 
       Remember that the real tool call did not suffer any compactation at the

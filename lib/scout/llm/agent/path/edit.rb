@@ -165,6 +165,8 @@ module LLM
         replacement = path_argument(args, "replacement")
         location = args["location"]
 
+        raise ParameterException, "Context compactation tag detected in replacement (#{Chat::COMPACTATION_MESSAGE}); old tool calls are stale and may need to be re-derived." if replacement && replacement.include?(Chat::COMPACTATION_MESSAGE)
+
         unless path_kind_capable?(kind, "edit")
           raise ParameterException, "Path kind #{kind} does not support edit"
         end

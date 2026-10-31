@@ -64,6 +64,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   cortex
 
   path_kind_fixes
+
+  path_kind_defects
+
+  path_edit
   
   test=test{
    task
