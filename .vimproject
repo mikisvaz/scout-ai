@@ -70,6 +70,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   path_edit
   
   compactation
+
+  compactation_new_version
   test=test{
    task
    clean
@@ -105,6 +107,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
       shorten_tools.rb
       shorten_tools_epoch.rb
       shorten_tools_epoch_increment.rb
+      epoch_tool_compactation.rb
      }
      process=process{
       clear.rb
