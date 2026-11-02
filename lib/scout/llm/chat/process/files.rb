@@ -102,6 +102,16 @@ module Chat
         path = message[:content].to_s.strip
         Chat.allow_read_path(path)
         nil
+      elsif message[:role] == 'allow_job'
+        path = message[:content].to_s.strip
+        step = Step.load path
+        Chat.allow_job(step)
+        nil
+      elsif message[:role] == 'allow_read_job'
+        path = message[:content].to_s.strip
+        step = Step.load path
+        Chat.allow_read_job(step)
+        nil
       else
         message
       end
