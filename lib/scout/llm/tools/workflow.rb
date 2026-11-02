@@ -40,6 +40,7 @@ module LLM
       type = task_info[:input_types][input]
       description = task_info[:input_descriptions][input]
       options = task_info[:input_options][input] || {}
+      next if ! (names && names.include?(input)) && options && options.include?(:hidden) && options[:hidden].to_s.downcase == 'true'
       required = options[:required]
       default = task_info[:input_defaults][input]
 
