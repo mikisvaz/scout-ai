@@ -40,7 +40,9 @@ module LLM
       when 'previous_response_id'
         nil
       else
-        message
+        # ScoutCoder: keep the wire payload key-clean; see the matching branch
+        # in Backend::ClassMethods#format_other (default.rb).
+        IndiferentHash.setup({ role: message[:role], content: message[:content] })
       end
     end
   end

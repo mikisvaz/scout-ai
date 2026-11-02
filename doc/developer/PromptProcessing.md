@@ -35,7 +35,8 @@ lib/scout/llm/chat/
 └── prompt/
     ├── shorten_tools.rb             # Recomputes the truncation each turn
     ├── shorten_tools_epoch.rb       # Cache-friendly epoch variant
-    ├── shorten_tools_epoch_increment.rb # Epochs + growing compacted window (DEFAULT)
+    ├── shorten_tools_epoch_increment.rb # Epochs + growing compacted window
+    ├── epoch_tool_compactation.rb       # Epoch schedule; oversized pairs removed and replaced by metadata records (DEFAULT)
     └── inbox.rb                     # Consume-once message inbox (NOT ephemeral)
 ```
 
@@ -81,8 +82,8 @@ The method supports four input forms for `prompt_strategies`:
 | Input type | Behavior |
 |---|---|
 | `Proc` | Called directly with the prompt array — full custom hook. |
-| `nil` | Falls back to `Scout::Config` (`prompt_strategies`, env `PROMPT_STRATEGY`), then `DEFAULT_CONTEXT_STRATEGY` = `['shorten_tools_epoch_increment','inbox']`. |
-| `String` | Split by comma into strategy names (e.g., `"inbox,shorten_tools_epoch_increment"`). |
+| `nil` | Falls back to `Scout::Config` (`prompt_strategies`, env `PROMPT_STRATEGY`), then `DEFAULT_CONTEXT_STRATEGY` = `['epoch_tool_compactation','inbox']`. |
+| `String` | Split by comma into strategy names (e.g., `"inbox,epoch_tool_compactation"`). |
 | `Array<String>` | Apply each named strategy in sequence. |
 
 Strategies are applied **in sequence**: each receives the output of the
@@ -177,17 +178,22 @@ variables, following the same pattern as `shorten_tools`.
 
 ---
 
-## The `shorten_tools_epoch_increment` strategy (default)
+## The `shorten_tools_epoch_increment` strategy
 
-This is the **current default** (first element of `DEFAULT_CONTEXT_STRATEGY =
-['shorten_tools_epoch_increment','inbox']`, `lib/scout/llm/chat/prompt.rb`).
+Not the default anymore, but still selectable by name (`PROMPT_STRATEGY`,
+`prompt_strategies`). It is the strategy whose epoch schedule
+`epoch_tool_compactation` reuses verbatim (see the next section).
+
 It keeps the epoch-frozen compaction boundary of `shorten_tools_epoch` and
 grows two windows over the life of the conversation: the epoch size itself
 (periodically, and additionally whenever an epoch contains repeated calls) and,
 for each extra call of effective epoch size, the compacted region (growth ratio
 2.0, capped at 160 compacted calls). The amount of retained truncated history
 therefore increases as the conversation lengthens, instead of always resetting
-to a fixed window.
+to a fixed window. Inside the compacted window, oversized calls and outputs are
+**shortened in place** (`CONTEXT-COMPACTED` previews via `Chat.shorten_string`,
+400 chars for outputs, 200 chars per string argument value) with tool names
+prefixed `compacted-`; older interactions are dropped entirely.
 
 Key extra constants (all read through `Scout::Config` accessors on
 `Chat.prompt`/`context`, same memoization pattern):
@@ -217,6 +223,69 @@ disables itself and nothing is ever dropped.
 
 Like the other shorten strategies it is **ephemeral**: it only changes what
 the model sees; the stored chat keeps full fidelity.
+
+---
+
+## The `epoch_tool_compactation` strategy (default)
+
+This is the **current default** (first element of `DEFAULT_CONTEXT_STRATEGY =
+['epoch_tool_compactation','inbox']`, `lib/scout/llm/chat/prompt.rb`). It
+reuses the `shorten_tools_epoch_increment` epoch schedule unchanged — same
+config keys, same ENV vars, same windows (`Chat.build_epoch_increment_repeat_data`
+/ `Chat.build_epoch_increment_schedule`) — and changes only what happens to an
+interaction inside the compacted window: an oversized pair stops being
+represented as a tool interaction at all.
+
+**Trigger** (strictly-greater, matching `Chat.shorten_string`'s no-op
+semantics at or under the limit): a pair is oversized when the output
+`content.to_s.length > DEFAULT_SHORT_STRING_LENGTH * 2` (400) or **any**
+argument value is a String with `length > DEFAULT_SHORT_STRING_LENGTH` (200).
+
+**Classification by the schedule's tool position** (1-based on outputs, newest
+first):
+
+- protected position (repeated call, most recent instance) or within the full
+  window → kept at full fidelity regardless of size;
+- inside the compacted window and oversized → **both messages of the pair
+  removed**, replaced by one metadata record at the position where the pair's
+  output stood; sub-threshold pairs stay byte-identical (no `compacted-`
+  renames, ids of survivors never modified);
+- older than the grown compacted window → **both messages dropped** with no
+  per-pair record (same drop semantics as the epoch strategies).
+
+**Record format** — one role `:user` message carrying `compacted: true` and
+text that begins with the `TOOL_COMPACTATION_MESSAGE` marker and contains: the
+exact original tool name; the call id as plain text; the original sizes
+(arguments total chars, output chars); the identifying arguments; one line
+`Full output found in job: <step>` only when the output carried a `step`
+(workflow/job tools only — set at `lib/scout/llm/tools/call.rb:293-298`,
+value `Step#short_path`); and a closing sentence stating the pair was removed,
+the record is metadata not a tool result, and the tool should be re-run if the
+value is needed. The record never contains a `Preview:` and never a truncation
+of a value.
+
+**Exact-or-omitted argument rule**: each argument entry is rendered `key=value`
+exactly when the value is a String of at most `DEFAULT_SHORT_STRING_LENGTH`
+(200) chars or a scalar (Integer, Float, Symbol, `true`/`false`/`nil`);
+anything else renders as `key=<omitted, N chars>`. Exact or omitted, nothing
+in between — a truncated, executable-looking command can never appear.
+
+**Orphans and malformed pairs**: a call without its output (or the reverse)
+and a pair whose content JSON does not parse are left completely untouched —
+they are never replaced, dropped, or renamed — but still count toward the
+interaction totals so the schedule matches what the epoch strategies would
+compute. Outputs with a blank id are paired by adjacency (universal in real
+layouts).
+
+**Global notice**: when at least one pair was replaced or dropped, one fixed,
+counter-free `:user` message is prepended at index 0 stating that historical
+tool interactions may be omitted and compaction records are metadata, not tool
+results. The text is deliberately free of counters so the prompt prefix stays
+byte-stable between rounds and provider prompt caches remain valid.
+
+Like the other strategies it is **ephemeral**: the stored chat keeps every
+interaction at full fidelity; only what the model sees changes. Tests:
+`test/scout/llm/chat/prompt/test_epoch_tool_compactation.rb` (17 cases).
 
 ---
 
@@ -323,10 +392,10 @@ the default rather than appending to it), or to *reorder* it:
 ```ruby
 # In chat options (delivered notices are unaffected by the shortener, but
 # inbox-first keeps the semantics obvious)
-options[:prompt_strategies] = 'inbox,shorten_tools_epoch_increment'
+options[:prompt_strategies] = 'inbox,epoch_tool_compactation'
 
 # Or in a chat file:
-# option prompt_strategies inbox,shorten_tools_epoch_increment
+# option prompt_strategies inbox,epoch_tool_compactation
 ```
 
 To disable it, set `prompt_strategies` to a list without `inbox` (the string
@@ -352,9 +421,10 @@ apply only when you select it explicitly. All thresholds are read via
 | `max_tool_chars` | `MAX_TOOL_CHARS` | 100,000 | Cumulative character budget for retained tool content |
 
 These are `shorten_tools`' own limits. They are not the default-strategy
-bounds (see the `shorten_tools_epoch_increment` table above: threshold 50,
-20 full, 80 compacted) and they are not a request round limit — the ask loop
-has no round counter.
+bounds (the epoch schedule shared by `shorten_tools_epoch_increment` and
+`epoch_tool_compactation` is tabulated above: threshold 50, 20 full, 80
+compacted) and they are not a request round limit — the ask loop has no round
+counter.
 
 ### Memoization trade-off
 
@@ -413,7 +483,7 @@ Three mechanisms coexist:
 
 1. **Hard-coded `case` dispatch** for the built-in strategies
    (`shorten_tools`, `shorten_tools_epoch`, `shorten_tools_epoch_increment`,
-   `inbox`, `none`).
+   `epoch_tool_compactation`, `inbox`, `none`).
 2. **`REGISTERED_STRATEGIES` hash** for user/plugin-registered strategies.
 3. **`Chat.send(strategy)` fallback**: any unrecognized name is dispatched to
    the Chat class method of the same name, so defining `def self.my_strategy`
@@ -455,7 +525,13 @@ The strategy contracts are pinned by `test/scout/llm/chat/test_prompt.rb`
 No test file pins the numeric thresholds of `shorten_tools` /
 `shorten_tools_epoch` / `shorten_tools_epoch_increment` in isolation; those
 constants live in `lib/scout/llm/chat/prompt/*.rb` and are re-read from
-`Scout::Config` per process (memoized on first access).
+`Scout::Config` per process (memoized on first access). The default strategy's
+own contract is pinned separately by
+`test/scout/llm/chat/prompt/test_epoch_tool_compactation.rb` (17 cases:
+replacement position, record contents, exact-or-omitted arguments, trigger
+boundaries at 200/201 and 400/401, sub-threshold byte-identity, repeated-call
+protection, orphans and malformed pairs, drop band, stability under repeated
+application, notice gating, and dispatch).
 
 ---
 

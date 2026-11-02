@@ -165,7 +165,7 @@ module Chat
   def self.epoch_increment_parse_tool_json(json)
     return nil if json.nil?
 
-    JSON.parse(json)
+    IndiferentHash.setup(JSON.parse(json))
   rescue JSON::ParserError, TypeError
     nil
   end
@@ -580,10 +580,11 @@ module Chat
 
           if new_content != content
             tool_call['content'] = new_content
+            tool_call['name'] =  'compacted-' + tool_call['name']
             new_json = tool_call.to_json
 
             Log.low(
-              "Epoch increment: truncated tool output " \
+              "Epoch increment: compacted tool output " \
               "#{id} #{name} #{json.length} to #{new_json.length}"
             )
 
@@ -641,6 +642,7 @@ module Chat
 
             if new_arguments != arguments
               tool_call['arguments'] = new_arguments
+              tool_call['name'] =  'compacted-' + tool_call['name']
               new_json = tool_call.to_json
 
               Log.low(

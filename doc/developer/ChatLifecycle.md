@@ -245,7 +245,8 @@ and inspection.
 | `lib/scout/llm/chat/prompt.rb` | `prepare_prompt` dispatch only; the strategies themselves live in the `chat/prompt/` strategy files below |
 | `lib/scout/llm/chat/prompt/shorten_tools.rb` | Truncation strategy (not in the default list) |
 | `lib/scout/llm/chat/prompt/shorten_tools_epoch.rb` | Cache-friendly epoch strategy |
-| `lib/scout/llm/chat/prompt/shorten_tools_epoch_increment.rb` | Growing-window epoch strategy (default) |
+| `lib/scout/llm/chat/prompt/shorten_tools_epoch_increment.rb` | Growing-window epoch strategy |
+| `lib/scout/llm/chat/prompt/epoch_tool_compactation.rb` | Epoch schedule with pairwise tool removal + metadata records (default) |
 | `lib/scout/llm/chat/prompt/inbox.rb` | Consume-once inbox strategy |
 
 The prompt strategies are documented in

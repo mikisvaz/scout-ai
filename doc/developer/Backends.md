@@ -99,11 +99,13 @@ Each iteration:
 
 There is no hard loop counter. The loop ends when `query()` returns no tool
 calls; what bounds it is context size, not a round limit. The default
-`shorten_tools_epoch_increment` strategy (see
+`epoch_tool_compactation` strategy (see
 [PromptProcessing.md](PromptProcessing.md)) no-ops at or below **50** total
 tool calls, keeps the most recent **20** at full fidelity, may keep up to
-**80** compacted, and truncates the rest to `DEFAULT_SHORT_STRING_LENGTH * 2`
-(400 characters). These are strategy bounds on the *prompt*,
+**80** compacted, and replaces an oversized pair (output over
+`DEFAULT_SHORT_STRING_LENGTH * 2` — 400 characters — or a string argument over
+`DEFAULT_SHORT_STRING_LENGTH` — 200) with a metadata record. These are
+strategy bounds on the *prompt*,
 not a request round limit — there is no `MAX_TOOL_CALLS` in the loop.
 
 ---

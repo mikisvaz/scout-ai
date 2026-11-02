@@ -30,20 +30,34 @@ Scout-AI applies **prompt strategies** — transformations to the conversation
 just before sending it to the model. These are **ephemeral**: they modify only
 what the model sees, never the saved chat file.
 
-The default strategy list is `['shorten_tools_epoch_increment', 'inbox']`:
-a tool-call pruning strategy with stable compaction boundaries (so provider
+The default strategy list is `['epoch_tool_compactation', 'inbox']`: a
+tool-call compaction strategy with stable epoch boundaries (so provider
 prompt caches stay useful), plus the one-off inbox described below. When tool
-calls accumulate, older ones are compacted while the recent ones stay whole:
+calls accumulate, oversized older ones are removed entirely and replaced by
+short metadata records, while the recent ones stay whole:
 
 | Threshold | Default | What happens |
 |-----------|---------|-------------|
 | Tool-call threshold | 50 | At or below this total, nothing is compacted |
 | Recent tool calls kept full | 20 | The newest calls stay at full fidelity |
-| Compacted tool calls | 80 | The calls before the full-recent window get truncated |
+| Compacted tool calls | 80 | Oversized calls before the full-recent window are replaced by metadata records |
 
 This means:
 - The most recent tool calls are always visible in full.
-- Older tool calls are progressively truncated (a 400-character short form).
+- An older tool interaction is oversized when its output is longer than 400
+  characters or one of its arguments is longer than 200; then **both its
+  messages are removed** and one **metadata record** takes their place: the
+  tool name, the call id, the original sizes, the identifying arguments, and a
+  pointer to the job that holds the full output when there is one. The record
+  is explicitly *not* a tool result and never contains a preview or a
+  truncated command — argument values appear either in full or as
+  `<omitted, N chars>`.
+- Interactions older than the compacted window disappear without a record;
+  sub-threshold ones are kept byte-for-byte.
+- A fixed notice at the top of the prompt warns the model that historical tool
+  interactions may be omitted and that compaction records are metadata, not
+  tool results. If a value from a removed interaction is needed, the model
+  must run the tool again.
 - The boundary only advances in **epochs**, so the same prefix is sent again
   and provider prompt caches stay valid.
 
@@ -68,17 +82,20 @@ user-supplied list **replaces** the default rather than appending to it) or to
 reorder it:
 
 ```text
-option prompt_strategies inbox,shorten_tools_epoch_increment
+option prompt_strategies inbox,epoch_tool_compactation
 ```
 
 or programmatically:
 
 ```ruby
-options[:prompt_strategies] = 'inbox,shorten_tools_epoch_increment'
+options[:prompt_strategies] = 'inbox,epoch_tool_compactation'
 ```
 
 To turn it off, set `prompt_strategies` to a list without `inbox` (the string
-`none` is the recognized no-op that disables every strategy).
+`none` is the recognized no-op that disables every strategy). To go back to the
+previous shortening behavior, select the old strategy explicitly —
+`option prompt_strategies shorten_tools_epoch_increment,inbox` (a user-supplied
+list replaces the default).
 
 ### Where the inbox lives
 
@@ -239,7 +256,7 @@ model actually saw:
 
 | Aspect | Saved chat file | What the model sees |
 |--------|----------------|-------------------|
-| Tool calls | All of them, in full | Possibly truncated/pruned |
+| Tool calls | All of them, in full | Older oversized ones replaced by metadata records or omitted |
 | File contents | Full file text | Same (unless cleared) |
 | `clear:` directives | Present as markers | Everything before is removed |
 | Inbox notices | **Absent** (see the `.inbox_removed` sibling) | Injected once, then gone |
@@ -263,8 +280,9 @@ the model's prompt is an **optimized view** for the current inference call.
 - **Not using `clear:` between phases**: If your workflow has distinct phases,
   clearing between them keeps each phase focused.
 - **Expecting `shorten_tools` limits**: those belong to the non-default
-  strategy; the default `shorten_tools_epoch_increment` numbers are
-  50 / 20 / 80 (see the table above).
+  strategy; the default `epoch_tool_compactation` numbers are 50 / 20 / 80
+  with a 400-character output and 200-character argument trigger (see the
+  table above).
 
 ---
 

@@ -1,12 +1,13 @@
 require_relative 'prompt/shorten_tools'
 require_relative 'prompt/shorten_tools_epoch'
 require_relative 'prompt/shorten_tools_epoch_increment'
+require_relative 'prompt/epoch_tool_compactation'
 require_relative 'prompt/inbox'
 
 module Chat
 
   REGISTERED_STRATEGIES = {}
-  DEFAULT_CONTEXT_STRATEGY = %w(shorten_tools_epoch_increment inbox)
+  DEFAULT_CONTEXT_STRATEGY = %w(epoch_tool_compactation inbox)
   DEFAULT_SHORT_STRING_LENGTH = 200
   DEFAULT_SHORT_JSON_LENGTH = 2000
   COMPACTATION_MESSAGE='CONTEXT-COMPACTED'
@@ -47,6 +48,8 @@ module Chat
                  Chat.shorten_tools_epoch(prompt)
                when 'shorten_tools_epoch_increment'
                  Chat.shorten_tools_epoch_increment(prompt)
+               when 'epoch_tool_compactation'
+                 Chat.epoch_tool_compactation(prompt)
                when 'inbox'
                  Chat.inbox(prompt, save_file: save_file)
                when 'none'

@@ -69,6 +69,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   path_edit
   
+  compactation
   test=test{
    task
    clean
@@ -96,9 +97,9 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      parse.rb
      persist.rb
      process.rb
-     prompt.rb
      provenance.rb
      tool_calls.rb
+     prompt.rb
      prompt=prompt{
       inbox.rb
       shorten_tools.rb

@@ -207,7 +207,12 @@ module LLM
         when 'previous_response_id'
           nil
         else
-          message
+          # ScoutCoder: format_messages output IS the provider request payload.
+          # Parsed/produced non-tool messages carry only {role, content} today,
+          # but strategy-injected bookkeeping flags (e.g. the compaction record's
+          # `compacted: true`) must never reach the wire: forward a copy with
+          # the two standard fields only, like format_tool_call/output rebuilds.
+          IndiferentHash.setup({ role: message[:role], content: message[:content] })
         end
       end
 
