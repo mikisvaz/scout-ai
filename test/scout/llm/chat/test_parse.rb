@@ -178,4 +178,21 @@ That was inside a content block
     m = Chat.parse txt
     assert_equal messages, m.reject{|msg| msg[:content].empty?}
   end
+
+  def test_path_kind_role_round_trips_verbatim
+    # The `path_kind:` chat role (per-agent path-kind configuration, consumed
+    # by Agent#ask; see lib/scout/llm/agent.rb) parses with the generic role
+    # rule and must round-trip through print/parse: agent preparation files
+    # are edited and re-saved as chat text.  print emits it as a block role
+    # (like user/system), which parse reads back as the same one message.
+    text = "path_kind: SomeWorkflow kind_a kind_b"
+    messages = Chat.parse text
+    assert_equal 1, messages.size
+    assert_equal 'path_kind', messages[0][:role]
+    assert_equal 'SomeWorkflow kind_a kind_b', messages[0][:content]
+
+    printed = Chat.print(messages).strip
+    assert_equal 'path_kind:', printed.split("\n").first
+    assert_equal messages, Chat.parse(printed)
+  end
 end

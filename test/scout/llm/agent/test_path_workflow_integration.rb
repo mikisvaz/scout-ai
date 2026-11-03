@@ -37,7 +37,12 @@ class TestPathWorkflowKindIntegration < Test::Unit::TestCase
   # -- registration through whole-workflow `tool:` ---------------------------
 
   def test_whole_workflow_tool_line_registers_kinds_and_installs_tools
-    agent = fresh_agent
+    # Back-compat, re-scoped (step 2 of the path_kind role): the whole-workflow
+    # `tool:` kind incorporation now happens only for an UNPREPARED agent (no
+    # start_chat file).  With a prepared start_chat the same line configures
+    # tools only -- see test_start_chat_present_zero_kinds_from_tool_lines.
+    agent = LLM::Agent.new(workflow: TestPathKindWorkflowB)
+    assert !agent.start_chat_file?
     ask_with(agent, "tool: TestPathKindWorkflowA\nuser\ndo things")
 
     assert agent.path_kind_registry.key?('wfa_kind')
@@ -136,6 +141,233 @@ class TestPathWorkflowKindIntegration < Test::Unit::TestCase
       agent.integrate_workflow_path_kinds(TestPathKindWorkflowBadEntry)
     end
     assert_include error.message, 'TestPathKindWorkflowBadEntry'
+  end
+
+  # -- subset selection (`only:`) -----------------------------------------------
+
+  def test_without_selection_registers_every_kind_unchanged
+    # The all-kinds contract, pinned beside the subset behavior: nil and an
+    # empty list are both the historical call.
+    %w[nil empty_array].each do |variant|
+      agent = fresh_agent
+      case variant
+      when 'nil'
+        result = agent.integrate_workflow_path_kinds(TestPathKindWorkflowArray, only: nil)
+      when 'empty_array'
+        result = agent.integrate_workflow_path_kinds(TestPathKindWorkflowArray, only: [])
+      end
+      assert_equal %w[arr_first arr_second], result.keys.sort
+      assert_equal %w[arr_first arr_second], agent.path_kind_registry.keys.sort
+      assert_equal 'TestPathKindWorkflowArray', agent.path_kind_sources['arr_first']
+      assert_equal 'TestPathKindWorkflowArray', agent.path_kind_sources['arr_second']
+    end
+  end
+
+  def test_subset_registers_exactly_the_named_kinds
+    agent = fresh_agent
+    result = agent.integrate_workflow_path_kinds(TestPathKindWorkflowArray, only: ['arr_second'])
+
+    assert_equal ['arr_second'], agent.path_kind_registry.keys
+    assert_equal ['arr_second'], result.keys
+    assert_nil agent.path_kind_sources['arr_first']
+    assert_equal 'TestPathKindWorkflowArray', agent.path_kind_sources['arr_second']
+
+    tool_names = (agent.other_options[:tools] || {}).keys
+    assert_include tool_names, 'path_read'
+    # the kind enum on the installed tools reflects the subset
+    kind_enum = (agent.other_options[:tools]['path_kinds'].last)[:parameters][:properties][:kind][:enum]
+    assert_equal ['arr_second'], kind_enum
+  end
+
+  def test_subset_accepts_a_single_name_and_symbols
+    agent = fresh_agent
+    agent.integrate_workflow_path_kinds(TestPathKindWorkflowArray, only: :arr_first)
+
+    assert_equal ['arr_first'], agent.path_kind_registry.keys
+  end
+
+  def test_unknown_kind_in_selection_raises_naming_workflow_and_kind
+    agent = fresh_agent
+    error = assert_raise(ParameterException) do
+      agent.integrate_workflow_path_kinds(TestPathKindWorkflowArray, only: ['arr_first', 'nope'])
+    end
+
+    assert_include error.message, 'TestPathKindWorkflowArray'
+    assert_include error.message, 'nope'
+    # cheap, welcome diagnostics: the valid names are listed
+    assert_include error.message, 'arr_second'
+    # the failed call registered nothing
+    assert_empty agent.path_kind_registry
+    assert_empty agent.path_kind_sources
+  end
+
+  def test_workflow_without_path_kinds_with_selection_raises
+    agent = fresh_agent
+    error = assert_raise(ParameterException) do
+      agent.integrate_workflow_path_kinds(TestPathKindWorkflowNone, only: ['anything'])
+    end
+
+    assert_include error.message, 'TestPathKindWorkflowNone'
+    assert_include error.message, 'anything'
+    assert_empty agent.path_kind_registry
+  end
+
+  def test_workflow_without_path_kinds_without_selection_stays_noop
+    # Existing contract restated beside the selection behavior: no
+    # PATH_KINDS, no selection -> silent nil, nothing registered.
+    agent = fresh_agent
+    assert_nil agent.integrate_workflow_path_kinds(TestPathKindWorkflowNone)
+    assert_nil agent.integrate_workflow_path_kinds(TestPathKindWorkflowNone, only: nil)
+    assert_nil agent.integrate_workflow_path_kinds(TestPathKindWorkflowNone, only: [])
+    assert_empty agent.path_kind_registry
+    assert_empty agent.path_kind_sources
+  end
+
+  def test_subset_repeated_is_idempotent_and_conflict_aware
+    # selection keeps the conflict bookkeeping: the same subset from the
+    # same workflow is idempotent, and a second workflow's kind still
+    # conflicts even when it is the selected one.
+    agent = fresh_agent
+    agent.integrate_workflow_path_kinds(TestPathKindWorkflowArray, only: ['arr_first'])
+    agent.integrate_workflow_path_kinds(TestPathKindWorkflowArray, only: ['arr_first'])
+    assert_equal ['arr_first'], agent.path_kind_registry.keys
+
+    # unrelated names do not interfere: the unselected arr_first does not
+    # block another workflow's wfa_kind
+    agent.integrate_workflow_path_kinds(TestPathKindWorkflowA, only: ['wfa_kind'])
+    assert_equal %w[arr_first wfa_kind], agent.path_kind_registry.keys.sort
+
+    error = assert_raise(ParameterException) do
+      agent.integrate_workflow_path_kinds(TestPathKindWorkflowConflict, only: ['wfa_kind'])
+    end
+    assert_include error.message, 'wfa_kind'
+    assert_equal %w[arr_first wfa_kind], agent.path_kind_registry.keys.sort
+  end
+
+  # -- `path_kind:` chat role --------------------------------------------------
+
+  def test_path_kind_all_kinds_line_registers_and_installs_tools
+    agent = fresh_agent
+    ask_with(agent, "path_kind: TestPathKindWorkflowArray\nuser\ndo things")
+
+    assert_equal %w[arr_first arr_second], agent.path_kind_registry.keys.sort
+    assert_equal 'TestPathKindWorkflowArray', agent.path_kind_sources['arr_first']
+
+    tool_names = (agent.other_options[:tools] || {}).keys
+    %w[path_kinds path_read path_write].each do |tool|
+      assert tool_names.include?(tool), "expected #{tool} in #{tool_names.inspect}"
+    end
+  end
+
+  def test_path_kind_subset_line_registers_only_the_named_kind
+    agent = fresh_agent
+    ask_with(agent, "path_kind: TestPathKindWorkflowArray arr_second\nuser\ndo things")
+
+    assert_equal ['arr_second'], agent.path_kind_registry.keys
+    assert_equal 'TestPathKindWorkflowArray', agent.path_kind_sources['arr_second']
+    assert_nil agent.path_kind_sources['arr_first']
+  end
+
+  def test_path_kind_multi_kind_line_and_separate_lines_accumulate
+    agent = fresh_agent
+    ask_with(agent, "path_kind: TestPathKindWorkflowArray arr_first arr_second\npath_kind: TestPathKindWorkflowA\nuser\ndo things")
+
+    assert_equal %w[arr_first arr_second wfa_kind], agent.path_kind_registry.keys.sort
+    assert_equal 'TestPathKindWorkflowA', agent.path_kind_sources['wfa_kind']
+    assert_equal 'TestPathKindWorkflowArray', agent.path_kind_sources['arr_first']
+  end
+
+  def test_path_kind_unknown_kind_raises_parameter_exception
+    agent = fresh_agent
+    error = assert_raise(ParameterException) do
+      ask_with(agent, "path_kind: TestPathKindWorkflowArray nope\nuser\ndo things")
+    end
+
+    assert_include error.message, 'TestPathKindWorkflowArray'
+    assert_include error.message, 'nope'
+    assert_empty agent.path_kind_registry
+  end
+
+  def test_path_kind_unloadable_workflow_raises
+    agent = fresh_agent
+    error = assert_raise(ParameterException) do
+      ask_with(agent, "path_kind: NoSuchWorkflowForPathKinds kind\nuser\ndo things")
+    end
+
+    assert_include error.message, 'NoSuchWorkflowForPathKinds'
+    assert_empty agent.path_kind_registry
+  end
+
+  def test_path_kind_line_honored_from_start_chat
+    # start_chat path: an agent built with an explicit prepared start_chat
+    # (start_chat_file? true) still honors an explicit path_kind line in it,
+    # while its whole-workflow `tool:` line stays tools-only.
+    agent = fresh_agent
+    agent.start_chat = LLM.chat("tool: TestPathKindWorkflowA\npath_kind: TestPathKindWorkflowArray arr_first\nsystem\nprepared")
+    assert agent.start_chat_file?
+
+    ask_with(agent, "user\ndo things")
+
+    assert_equal ['arr_first'], agent.path_kind_registry.keys
+    assert_equal 'TestPathKindWorkflowArray', agent.path_kind_sources['arr_first']
+  end
+
+  def test_start_chat_present_zero_kinds_from_tool_lines
+    agent = fresh_agent
+    agent.start_chat = LLM.chat("tool: TestPathKindWorkflowA\nsystem\nprepared")
+    assert agent.start_chat_file?
+
+    ask_with(agent, "tool: TestPathKindWorkflowA\nuser\ndo things")
+
+    assert_empty agent.path_kind_registry
+    assert_empty agent.path_kind_sources
+  end
+
+  def test_start_chat_file_false_falls_back_to_load_all
+    # Unprepared agent (no start_chat at all): its own workflow's PATH_KINDS
+    # load implicitly.
+    agent = LLM::Agent.new(workflow: TestPathKindWorkflowA)
+    assert !agent.start_chat_file?
+
+    ask_with(agent, "user\ndo things")
+
+    assert_equal ['wfa_kind'], agent.path_kind_registry.keys
+    assert_equal 'TestPathKindWorkflowA', agent.path_kind_sources['wfa_kind']
+  end
+
+  def test_synthetic_introduce_start_chat_still_loads_all
+    # load_agent's synthetic `introduce` fallback is NOT a start_chat file:
+    # implicit loading stays on (the flag load_agent sets is false).
+    agent = LLM::Agent.new(workflow: TestPathKindWorkflowA,
+                           start_chat: Chat.setup([{role: 'introduce', content: 'TestPathKindWorkflowA'}]))
+    agent.start_chat_file = false
+    assert !agent.start_chat_file?
+
+    ask_with(agent, "user\ndo things")
+
+    assert_equal ['wfa_kind'], agent.path_kind_registry.keys
+  end
+
+  def test_path_kind_content_never_reaches_the_model
+    # Mock-backend proof: registration happened AND no path_kind content is
+    # model-visible in any round the backend recorded.
+    agent = fresh_agent
+    ask_with(agent, "path_kind: TestPathKindWorkflowArray arr_first\nuser\ndo things")
+
+    assert_equal ['arr_first'], agent.path_kind_registry.keys
+    LLM::Mock.calls.each do |round_messages, _options|
+      assert !round_messages.any? { |m| m[:role].to_s == 'path_kind' },
+             "path_kind content reached the model: #{round_messages.collect{|m| m[:role]}.inspect}"
+    end
+  end
+
+  def test_clear_tools_does_not_bypass_path_kind_registration
+    # clear_tools strips earlier tool-call traces for the MODEL, but path_kind
+    # registration is driven from the full message list before any stripping.
+    agent = fresh_agent
+    ask_with(agent, "clear_tools\npath_kind: TestPathKindWorkflowArray arr_second\nuser\ndo things")
+
+    assert_equal ['arr_second'], agent.path_kind_registry.keys
   end
 
   # -- namespace locality -------------------------------------------------------

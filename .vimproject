@@ -68,10 +68,14 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   path_kind_defects
 
   path_edit
+
+  path_kind_loading
   
   compactation
 
   compactation_new_version
+
+
   test=test{
    task
    clean
@@ -86,11 +90,6 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
  lib=lib {
   scout-ai.rb
   scout=scout{
-   network=network{
-    paths.rb
-    knowledge_base.rb
-    entity.rb
-   }
    llm=llm{
     chat.rb
     chat=chat{
@@ -164,6 +163,11 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      save.rb
      workflow.rb
     }
+   }
+   network=network{
+    paths.rb
+    knowledge_base.rb
+    entity.rb
    }
    model=model{
     base.rb

@@ -37,6 +37,11 @@ module LLM
         agent = template.clone
         agent.request_context = template.request_context
         agent.start_chat = chat_copy(template.start_chat)
+        # Carry the deliberate-preparation signal across the clone (nil on the
+        # template recomputes from the copied start_chat; an explicit false --
+        # load_agent's synthetic `introduce` fallback -- must survive, or the
+        # clone would flip to loading kinds implicitly; see Agent#ask).
+        agent.start_chat_file = template.start_chat_file?
         agent.other_options = IndiferentHash.setup(duplicate(template.other_options || {}))
         agent.society = nil
         agent.chats = nil

@@ -28,19 +28,39 @@ module LLM
       # Kind definitions supplied by other callers (plugins, direct Ruby) do not
       # record a source; a later whole-workflow incorporation of the same kind
       # name simply re-registers it (the new source then owns the name).
-      def integrate_workflow_path_kinds(workflow)
+      #
+      # `only:` optionally restricts the incorporation to a subset of the
+      # workflow's kinds: nil (or an empty list) means every kind, unchanged;
+      # a nonempty list of kind names registers exactly those.  Selection
+      # happens AFTER normalization, so the names are the workflow's own kind
+      # names; an unknown name raises ParameterException naming the workflow
+      # and the kind.  A workflow without PATH_KINDS stays a silent no-op
+      # without a list, and raises with one (every requested name is
+      # unknown).  Normalization, deep-copying, conflict bookkeeping and
+      # registration are untouched by the selection.
+      def integrate_workflow_path_kinds(workflow, only: nil)
         # Only a local workflow Module qualifies: RemoteWorkflow instances
         # (remote `tool:` targets) and anything else without a resolvable
         # constant name are skipped entirely.
         return nil unless Module === workflow
         return nil if (workflow < RemoteWorkflow rescue false)
         return nil if workflow.name.nil?
-        return nil unless workflow.const_defined?(:PATH_KINDS, false)
 
-        kinds = workflow.const_get(:PATH_KINDS, false)
-        workflow_name = workflow.name
+        selection = path_kind_selection(only)
+        if workflow.const_defined?(:PATH_KINDS, false)
+          kinds = workflow.const_get(:PATH_KINDS, false)
+          workflow_name = workflow.name
+          definitions = path_normalize_workflow_path_kinds(kinds, workflow_name)
+        else
+          # Without a selection a PATH_KINDS-less workflow is the historical
+          # silent no-op; WITH a selection every requested name is unknown,
+          # which the selection check below raises on (empty definitions).
+          return nil unless selection
+          definitions = {}
+          workflow_name = workflow.name
+        end
 
-        definitions = path_normalize_workflow_path_kinds(kinds, workflow_name)
+        definitions = path_select_workflow_path_kinds(definitions, selection, workflow_name) if selection
 
         definitions.each do |name, definition|
           source = path_kind_sources[name]
@@ -61,6 +81,34 @@ module LLM
         end
 
         definitions
+      end
+
+      # Normalize the optional `only:` selection of integrate_workflow_path_kinds
+      # into a sorted Array of unique kind-name Strings.  nil and [] select
+      # everything (nil result); the input may be a single name or any
+      # enumerable of names, stringified like every other kind name.
+      def path_kind_selection(only)
+        return nil if only.nil?
+        selection = Array === only || only.respond_to?(:to_a) ? Array(only) : [only]
+        selection = selection.map(&:to_s).reject(&:empty?)
+        return nil if selection.empty?
+        selection.uniq.sort
+      end
+
+      # Apply the selection to a normalized definitions Hash: keeps exactly
+      # the named kinds.  An unknown name raises ParameterException naming
+      # the workflow, the kind and the valid names, so a typo cannot silently
+      # degrade into a no-op.
+      def path_select_workflow_path_kinds(definitions, selection, workflow_name)
+        missing = selection.reject { |name| definitions.key?(name) }
+        unless missing.empty?
+          raise ParameterException,
+            "Workflow #{workflow_name.inspect} does not declare the path " \
+            "kind#{missing.length > 1 ? 's' : ''} #{missing.inspect}. Valid " \
+            "path kinds: #{definitions.keys.sort.inspect}"
+        end
+
+        definitions.select { |name, _| selection.include?(name) }
       end
 
       # Accept either a Hash of kind name => definition or an Array of

@@ -10,7 +10,7 @@ module LLM
   end
 
   class Agent
-    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options, :path, :job, :request_context
+    attr_accessor :workflow, :knowledge_base, :start_chat, :process_exception, :other_options, :path, :job, :request_context, :start_chat_file
 
     def initialize(workflow: nil, knowledge_base: nil, start_chat: nil, **kwargs)
       @workflow = workflow
@@ -18,6 +18,18 @@ module LLM
       @knowledge_base = knowledge_base
       @other_options = IndiferentHash.setup(kwargs.dup)
       @start_chat = start_chat
+    end
+
+    # Whether this agent carries a start_chat that represents deliberate
+    # preparation: a start_chat file found by LLM::Agent.load_agent, or any
+    # chat explicitly supplied at construction.  load_agent's synthetic
+    # `introduce` fallback (workflow documentation with no start_chat file)
+    # sets this to false.  Agent#ask gates implicit path-kind loading on
+    # this signal: a prepared agent registers kinds ONLY through explicit
+    # `path_kind:` chat lines.
+    def start_chat_file?
+      return !!@start_chat_file unless @start_chat_file.nil?
+      !@start_chat.nil? && !@start_chat.empty?
     end
 
     def workflow(&block)
@@ -121,30 +133,67 @@ module LLM
           end
         else
 
-          # Whole-workflow `tool:` incorporation.  The tokenization mirrors
-          # Chat.tools (lib/scout/llm/chat/process/tools.rb): the first token
-          # names the workflow, the second a task.  Only lines without a task
-          # token incorporate the ENTIRE workflow, and only then may the
-          # workflow's PATH_KINDS path kinds be registered on this agent;
-          # `tool: Workflow task` lines never register.  Remote targets
-          # (Open.remote?) and unloadable names are skipped silently, exactly
-          # as the require loop itself tolerates failures.  Workflow
-          # resolution reuses Chat.load_workflow, the same resolver
-          # Chat.tools uses for `tool:` lines, so the namespace an agent
-          # incorporates is the namespace whose tools the backend exposes.
-          Chat.find_role(messages, :tool).each do |message|
-            workflow_name, task_name, *_inputs = Chat.content_tokens(message)
-            next if task_name
+          # Path-kind configuration.  Two loading rules meet here:
+          #
+          # 1. Explicit `path_kind: <Workflow> [<kind>...]` lines are honored
+          #    wherever they appear (start_chat or user chat): first token the
+          #    workflow, the rest kind names; multiple kinds per line and
+          #    multiple lines accumulate.  An empty kind list means every
+          #    kind of that workflow.  Resolution reuses Chat.load_workflow;
+          #    an unloadable workflow or an unknown kind raises loudly
+          #    (ParameterException, the same step-1 behavior), and registration
+          #    happens from the FULL message list BEFORE any stripping, so
+          #    clear_tools or role removal never bypasses it.
+          #
+          # 2. Implicit loading happens ONLY when the agent carries no
+          #    deliberate start_chat (`start_chat_file?` false): then the
+          #    agent's own workflow loads its PATH_KINDS (today's fallback
+          #    loaded none), and whole-workflow `tool:` lines keep their
+          #    historical kind incorporation as back-compat.  With a start_chat
+          #    present, `tool: W` configures tools only -- zero kinds load
+          #    unless a `path_kind:` line says otherwise.
+          path_kind_lines = Chat.find_role(messages, :path_kind)
+
+          unless start_chat_file?
+            # Own workflow first: when the agent's workflow declares
+            # PATH_KINDS, an unprepared agent gets all of them (the
+            # synthetic-introduce fallback used to load none).
+            integrate_workflow_path_kinds(@workflow) if @workflow
+
+            Chat.find_role(messages, :tool).each do |message|
+              workflow_name, task_name, *_inputs = Chat.content_tokens(message)
+              next if task_name
+              next if workflow_name.nil? || workflow_name.empty?
+              next if Open.remote? workflow_name
+
+              begin
+                workflow = Chat.load_workflow workflow_name
+              rescue
+                next
+              end
+              integrate_workflow_path_kinds(workflow)
+            end
+          end
+
+          path_kind_lines.each do |message|
+            tokens = Chat.content_tokens(message)
+            next if tokens.empty?
+            workflow_name = tokens.shift
             next if workflow_name.nil? || workflow_name.empty?
-            next if Open.remote? workflow_name
+            # No kind names on the line: every kind of the workflow, the
+            # same all-kinds semantics as a whole-workflow `tool:` line.
+            selection = tokens.empty? ? nil : tokens
 
             begin
               workflow = Chat.load_workflow workflow_name
-            rescue
-              next
+            rescue Exception
+              raise ParameterException, "The workflow #{workflow_name.inspect} named by the path_kind line could not be loaded: #{$!.message}"
             end
-            integrate_workflow_path_kinds(workflow)
+
+            integrate_workflow_path_kinds(workflow, only: selection)
           end
+
+          messages.remove_role(:path_kind)
 
           %w(socialize attachments).each do |capability|
             if (list = messages.remove_role(capability)).any?
@@ -156,19 +205,6 @@ module LLM
               self.send(capability.to_sym, options.dup) 
             end
           end
-
-          #if (list = messages.select{|info| info[:role] == 'socialize'}).any?
-          #  socialize = list.last[:content]
-          #  messages.delete_if{|info| info[:role] == 'socialize' }
-          #  self.socialize(options.dup) if socialize && %w(true TRUE True T 1).include?(socialize.to_s)
-          #end
-
-          #if (list = messages.select{|info| info[:role] == 'attachments'}).any?
-          #  attachments = list.last[:content]
-          #  messages.delete_if{|info| info[:role] == 'attachments' }
-          #  self.attachments if attachments && %w(true TRUE True T 1).include?(attachments.to_s)
-          #end
-
 
           tools = options[:tools] || {}
           if other_tools = @other_options[:tools]
@@ -273,19 +309,27 @@ module LLM
                            KnowledgeBase.load workflow_path.knowledge_base.find
                          end
 
-        chat = if agent_path.start_chat.exists?
-                 Chat.setup LLM.chat(agent_path.start_chat.find)
-               elsif workflow_path.start_chat.exists?
-                 Chat.setup LLM.chat(workflow_path.start_chat.find)
-               elsif agent_path.start_chat.exists?
-                 Chat.setup LLM.chat(agent_path.start_chat.find)
-               elsif workflow && workflow.documentation[:description]
-                 Chat.setup([ {role: 'introduce', content: workflow.name} ])
-               end
+        chat = nil
+        # Whether `chat` came from a real start_chat FILE (deliberate agent
+        # preparation) or from the synthetic `introduce` documentation
+        # fallback below.  Agent#ask gates implicit path-kind loading on
+        # this (start_chat_file?): only an unprepared agent loads kinds
+        # implicitly.
+        start_chat_file = false
+        if agent_path.start_chat.exists?
+          chat = Chat.setup LLM.chat(agent_path.start_chat.find)
+          start_chat_file = true
+        elsif workflow_path.start_chat.exists?
+          chat = Chat.setup LLM.chat(workflow_path.start_chat.find)
+          start_chat_file = true
+        elsif workflow && workflow.documentation[:description]
+          chat = Chat.setup([ {role: 'introduce', content: workflow.name} ])
+        end
       end
 
       agent = LLM::Agent.new **options.merge(workflow: workflow, knowledge_base: knowledge_base, start_chat: chat)
       agent.path = agent_path.find if agent_path
+      agent.start_chat_file = start_chat_file if agent_name
       agent
     end
   end

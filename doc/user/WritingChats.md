@@ -100,16 +100,26 @@ The full option-related set, and how each behaves:
 tool: MyWorkflow
 tool: MyWorkflow task_name input1=value1 input2=value2
 introduce: MyWorkflow
+path_kind: MyWorkflow
+path_kind: MyWorkflow path_kind_name
 ```
 
 - `tool: MyWorkflow` exposes the whole workflow (its exports, or all its
-  tasks if it has none exported). If the workflow declares a `PATH_KINDS`
-  constant, its path kinds are also registered on the agent (see the
-  [Path engine](../developer/PathEngine.md) developer document).
+  tasks if it has none exported). It registers path kinds only for an
+  agent without a start_chat file (back-compat default; see below).
 - `tool: MyWorkflow task_name ...` exposes one task; `name=value` tokens
   pre-fill and hide that input. This form never registers path kinds.
 - `introduce:` injects the workflow's documentation only; it generates no
   tools. Combine it with `tool:` when you want both.
+- `path_kind: MyWorkflow` enables every path kind the workflow declares;
+  `path_kind: MyWorkflow path_kind_name` enables exactly that kind, and
+  several kinds can be named on one line or across several lines.
+  Explicit `path_kind:` lines are honored wherever they appear, in the
+  start_chat or in the live chat. An agent with a start_chat file gets
+  no path kinds unless a `path_kind:` line says so; an agent without
+  one defaults to loading every kind of its own workflow. The full
+  loading rules live in the
+  [Path engine](../developer/PathEngine.md) developer document (§4.1).
 
 ### Importing files
 

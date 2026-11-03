@@ -4,8 +4,9 @@ This document explains how the Path engine (`lib/scout/llm/agent/path.rb`,
 with the editing implementation in `lib/scout/llm/agent/path/edit.rb` and
 the single-file diff applier in `lib/scout/llm/agent/path/patch.rb`)
 exposes filesystem operations to agents: how to register a path kind, how
-to declare the kinds a workflow provides (`PATH_KINDS`) so incorporating
-agents receive them, how to override a built-in operation, how to introduce
+to declare the kinds a workflow provides (`PATH_KINDS`) so agents can
+enable them through the `path_kind:` chat role, how to override a
+built-in operation, how to introduce
 a custom operation, how tool aggregation resolves conflicts, what the
 callback contract and trust boundary are, how the single-file patch
 operation behaves, and which `path` spellings select the kind root rather
@@ -167,16 +168,17 @@ agent.register_path_kind(
 ## 4. Declaring kinds in a workflow: `PATH_KINDS`
 
 A workflow may declare the path kinds it provides as a `PATH_KINDS`
-constant in its own namespace. When an agent incorporates the **entire
-workflow** through a whole-workflow `tool: MyWorkflow` chat line, the
-kinds are discovered and registered on that agent. Task-level imports
+constant in its own namespace. An agent enables a workflow's kinds
+through the `path_kind:` chat role (section 4.1); a whole-workflow
+`tool: MyWorkflow` line still grants kinds, but only for agents without
+a start_chat file (the back-compat path). Task-level imports
 (`tool: MyWorkflow some_task`) register nothing.
 
 The declaration is part of the workflow's Ruby, and the grant happens
-at incorporation: merely loading a workflow's files registers nothing
-anywhere, and the constant alone grants nothing. The two supported
-shapes are a Hash of kind name to definition, or an Array of definition
-Hashes each carrying its own `"name"` key:
+when an agent enables the kinds: merely loading a workflow's files
+registers nothing anywhere, and the constant alone grants nothing. The
+two supported shapes are a Hash of kind name to definition, or an Array
+of definition Hashes each carrying its own `"name"` key:
 
 ```ruby
 module MyWorkflow
@@ -220,25 +222,30 @@ Behavior at incorporation:
   `const_defined?(:PATH_KINDS, false)` on the workflow's own namespace,
   so a constant inherited from a parent module or superclass is not
   discovered.
-- **Only whole-workflow lines grant.** `tool: MyWorkflow` registers the
-  kinds; `tool: MyWorkflow some_task` does not. Remote `tool:` targets
-  and workflow names that cannot be resolved are skipped silently, and
-  a workflow with no `PATH_KINDS` constant is a silent no-op.
+- **Enabling is chat-level and explicit.** A `path_kind: MyWorkflow`
+  line registers every kind of that workflow; `path_kind: MyWorkflow
+  notes` registers exactly `notes` (see section 4.1). A whole-workflow
+  `tool: MyWorkflow` line still registers the kinds, but only for an
+  agent without a start_chat file; task-level `tool:` lines, remote
+  `tool:` targets and unresolvable workflow names register nothing, and
+  a workflow with no `PATH_KINDS` constant is a silent no-op unless a
+  `path_kind:` line names one of its kinds (then that name is unknown
+  and fails loudly).
 - **Definitions are deep-copied before registration.** `register_path_kind`
   copies only one level and `Hash#freeze` is shallow, so the
   incorporation path makes a full copy first; the shared frozen
   `PATH_KINDS` constant is never mutated through the registry, and
   mutating a registered definition never changes the workflow's
   constant.
-- **Provenance is recorded per kind.** Each incorporated kind name is
+- **Provenance is recorded per kind.** Each enabled kind name is
   mapped to its workflow in `agent.path_kind_sources` (bookkeeping
   only; the authoritative registry is `agent.path_kind_registry`).
-- **A kind name belongs to one workflow.** If two different
-  incorporated workflows declare the same kind name, incorporation
-  raises `ParameterException` naming both workflows and the kind; the
-  order of the two `tool:` lines never decides. Incorporating the same
-  workflow again is idempotent: the kind is re-registered in place and
-  the aggregated tools are refreshed without duplicates.
+- **A kind name belongs to one workflow.** If two different workflows
+  supply the same kind name to one agent, enabling raises
+  `ParameterException` naming both workflows and the kind; the order of
+  the lines never decides. Enabling the same workflow again is
+  idempotent: the kind is re-registered in place and the aggregated
+  tools are refreshed without duplicates.
 - **Malformed declarations fail loudly.** A `PATH_KINDS` that is not a
   Hash (or Array of Hashes), or an entry that is not a Hash, raises
   `ParameterException` naming the workflow, the kind and the actual
@@ -266,12 +273,42 @@ registry rollback by `test/scout/llm/agent/test_path.rb`
 `test_failed_kind_registration_rolls_back_registry_and_tool_surface_recovers`,
 `test_conflicting_contracts_are_rejected_at_installation`).
 
-There is no chat-level Path role: enabling a kind is done either by
-registering it directly in Ruby (`register_path_kind`, iterated over a
-mapping of kinds when needed, `load_path_plugins`) or by incorporating a
-workflow that declares `PATH_KINDS`. Authorization is unchanged in both
-cases: every operation still goes through `LLM::Sandbox.authorize_path`,
-which fails closed.
+Enabling a kind directly in Ruby is still done with `register_path_kind`
+(iterated over a mapping of kinds when needed) or `load_path_plugins`.
+Authorization is unchanged in every case: every operation still goes
+through `LLM::Sandbox.authorize_path`, which fails closed.
+
+## 4.1 The `path_kind:` chat role
+
+The `path_kind:` role is the chat-level channel for enabling a
+workflow's kinds on an agent. Line syntax:
+
+```
+path_kind: <Workflow> [<kind>...]
+```
+
+- The first token names the workflow, resolved exactly like a
+  `tool:` line target (`Chat.load_workflow`); the remaining tokens are
+  kind names. `path_kind: ScoutCoder` with no kind names enables every
+  kind the workflow declares; `path_kind: ScoutCoder probe` enables
+  exactly `probe`. Multiple kinds on one line and multiple lines
+  accumulate.
+- Explicit `path_kind:` lines are honored wherever they appear — in a
+  start_chat file or in the live chat.
+- An agent **with a start_chat file** gets no implicit kinds at all: a
+  start_chat with no `path_kind:` lines enables zero kinds, and for
+  such agents a whole-workflow `tool: W` line configures tools only,
+  never kinds.
+- An agent **without a start_chat file** defaults to load-all: every
+  kind of its own workflow (when it declares `PATH_KINDS`) plus the
+  whole-workflow `tool:` incorporation retained as back-compat.
+- Failures are loud. A kind name the workflow does not declare, or a
+  workflow that cannot be loaded, raises `ParameterException` naming
+  the workflow, the offending kind(s) and the valid kind names; a
+  failed selection registers nothing.
+- `path_kind:` lines are never model-visible: registration happens from
+  the full message list before the role is stripped, so `clear_tools`
+  or role removal cannot bypass it.
 
 ## 5. Overriding a built-in without changing its schema
 

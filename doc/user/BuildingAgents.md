@@ -303,8 +303,9 @@ end
 > Agents can also expose *path kinds* — typed, sandboxed filesystem
 > namespaces with read/write/edit/patch operations and per-kind custom
 > operations. A workflow declares the kinds it provides as a `PATH_KINDS`
-> constant; agents that incorporate the whole workflow through a
-> `tool: MyWorkflow` chat line receive them automatically. See the
+> constant; agents enable them with a `path_kind: MyWorkflow` chat line
+> (a start_chat-less agent also loads them automatically when it
+> incorporates the whole workflow). See the
 > [Path engine](../developer/PathEngine.md) developer document.
 
 ### Declaring tools in the start chat
