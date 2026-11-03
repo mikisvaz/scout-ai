@@ -36,13 +36,30 @@ receives:
 | **`none`** | Only its own system prompt | Fully isolated sub-agent |
 | **`tools`** *(default)* | Its own prompt + the tooling of the caller's whole current chat — including tooling added mid-conversation — but not its history | Same capabilities, private history |
 | **`conversation`** | Its own prompt + the caller's entire current conversation | Deep collaboration with shared context |
+| **`clear_tools`** | Like `conversation` when the conversation is created; when **continuing** an existing conversation, it additionally drops the earlier tool-call traces (`function_call`/`function_call_output`) from the context sent to the model | Long delegated conversations whose accumulated tool output is bloating context |
 
 The specialist always gets **its own** system prompt first. Inherited context
 is appended after.
 
-> **Important:** The inheritance mode only applies when a conversation is first
-> created. Subsequent turns in the same conversation reuse the accumulated
-> history regardless of the mode.
+> **Important:** The inheritance mode decides what the specialist receives
+> only when a conversation is first created; subsequent turns in the same
+> conversation reuse the accumulated history regardless of the mode — with
+> one exception: `clear_tools` is a *continuation-time* policy. When you
+> continue an existing conversation with `inherit: 'clear_tools'`, a
+> `clear_tools` marker is appended immediately before your new prompt, and
+> the model context for that round is compiled without the conversation's
+> earlier tool-call traces. Repeated continuations append one marker each;
+> they are equivalent to a single one.
+
+The `clear_tools` fallback and its guarantee:
+
+- **First creation (and `restart: true`) falls back to plain `conversation`
+  seeding** — there are no earlier bouts of that conversation to clear yet,
+  so no marker is appended; one low-severity log line records the fallback.
+- **Clearing is context-only.** Nothing is removed from the stored chat, the
+  logs, or provenance records: the specialist's saved conversation keeps
+  every tool call and output, and only the context sent to the model drops
+  them. The marker itself stays in the stored chat too.
 
 ---
 
@@ -70,7 +87,7 @@ The model sees a tool with these parameters:
 | `agent` | Yes | Name of the specialist agent |
 | `prompt` | Yes | Plain-text prompt for the specialist |
 | `conversation` | No | Named conversation. Omit for one-shot; reuse to continue |
-| `inherit` | No (default `tools`) | Context policy for new conversations |
+| `inherit` | No (default `tools`) | Context policy: `none`, `tools`, `conversation`, or `clear_tools` (like `conversation` at creation; on continuation drops earlier tool-call traces from the model context only) |
 
 ### Conversation persistence
 
@@ -256,7 +273,11 @@ The model can now delegate sub-tasks to any specialist by name.
   model has no tool to delegate with.
 - **Expecting specialists to share the orchestrator's tools by default**: Only
   if `inherit` is `tools` or `conversation`. With `none`, specialists are
-  isolated.
+  isolated. (`clear_tools` seeds like `conversation`, so it shares context the
+  same way at creation.)
+- **Expecting `clear_tools` to trim the stored conversation**: it never does.
+  Clearing is context-only — the saved chat, logs, and provenance keep every
+  tool call.
 - **Using `conversation: 'current'`**: This is a legacy value. Use explicit
   conversation names or omit the parameter.
 

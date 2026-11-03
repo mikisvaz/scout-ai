@@ -50,7 +50,9 @@ dictionary entries are streamed to the block as items.
 `socialize(options = {})` installs a narrow `ask` tool. Parameters (all
 required only `agent` and `prompt`): `agent`, `prompt`, `conversation`
 (pattern `^[A-Za-z0-9][A-Za-z0-9_.-]*$`), `inherit` (enum
-`SOCIAL_INHERIT_MODES` = `none/tools/conversation`, default `tools`). The tool
+`SOCIAL_INHERIT_MODES` = `none/tools/conversation/clear_tools`, default
+`tools`; `clear_tools` also acts on continuation, see
+`research/clear-tools-inherit.md`). The tool
 block never receives the specialist Chat object; it calls `ask_agent` ->
 `ask_conversation` -> `open_conversation` + `agent.user(prompt)`.
 

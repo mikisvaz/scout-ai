@@ -22,6 +22,20 @@ class TestLLMAgentConversation < Test::Unit::TestCase
     chat.select { |m| m[:role].to_s == role.to_s }.collect { |m| m[:content] }
   end
 
+  # clear_tools-mode helpers; the pinned rules are in
+  # research/clear-tools-inherit.md ("Adopted semantics").
+  def append_tool_round(agent)
+    agent.current_chat.concat([
+      {role: :function_call, content: {name: 'greet', arguments: {x: 1}, id: 'c1'}.to_json},
+      {role: :function_call_output, content: {id: 'c1', content: 'tool output'}.to_json},
+      {role: :assistant, content: 'assistant after tools'}
+    ])
+  end
+
+  def compiled_roles(chat)
+    Chat.clear(Chat.setup(chat.dup)).collect { |m| m[:role].to_s }
+  end
+
   def test_open_conversation_uses_the_memoized_template_but_returns_new_agents
     agent = parent_agent
 
@@ -262,5 +276,132 @@ class TestLLMAgentConversation < Test::Unit::TestCase
 
     # Symbol names and conversations normalize exactly as today
     assert_same via_open, agent.load_chat(:Worker, {}, :w)
+  end
+
+  # --- clear_tools inheritance mode (rules 1-7 in
+  # research/clear-tools-inherit.md) -----------------------------------
+
+  # Scenario A, rule 2: continuing a 'conversation'-seeded conversation with
+  # 'clear_tools' drops the earlier tool round from the compiled prompt, the
+  # stored chat keeps traces AND marker, and the marker sits immediately
+  # before the new user prompt.
+  def test_ask_conversation_clear_tools_continuation_after_conversation_seed
+    LLM::Mock.script('child answer')
+    agent = parent_agent
+
+    agent.ask_conversation('Worker', 'first prompt', conversation: 'w', inherit: 'conversation')
+    child = agent.conversation_agent('Worker/w')
+    append_tool_round(child)
+
+    agent.ask_conversation('Worker', 'follow up', conversation: 'w', inherit: 'clear_tools')
+
+    stored = child.current_chat.collect { |m| m[:role].to_s }
+    # Stored chat is untouched by the clearing policy (hard constraint)
+    assert_include stored, 'function_call'
+    assert_include stored, 'function_call_output'
+    assert_include stored, 'clear_tools'
+    # One marker, immediately before the new user prompt (rule 2)
+    assert_equal 1, stored.count('clear_tools')
+    assert_equal stored.index('clear_tools') + 1, stored.rindex('user')
+    assert_equal 'follow up', message_contents(child.current_chat, :user).last
+    # Compiled prompt drops the tool round and the marker (rule 3 + clear.rb)
+    compiled = compiled_roles(child.current_chat)
+    assert compiled.none? { |r| %w[function_call function_call_output clear_tools].include?(r) }
+    assert compiled.include?('assistant')
+  end
+
+  # Scenario B: identical continuation behavior from a 'none' seed — the
+  # marker clears the specialist's OWN accumulated round, not the seed.
+  def test_ask_conversation_clear_tools_continuation_after_none_seed
+    LLM::Mock.script('child answer')
+    agent = parent_agent
+
+    agent.ask_conversation('Worker', 'first prompt', conversation: 'w', inherit: 'none')
+    child = agent.conversation_agent('Worker/w')
+    append_tool_round(child)
+
+    agent.ask_conversation('Worker', 'follow up', conversation: 'w', inherit: 'clear_tools')
+
+    stored = child.current_chat.collect { |m| m[:role].to_s }
+    assert_include stored, 'function_call'
+    assert_include stored, 'function_call_output'
+    assert_equal stored.index('clear_tools') + 1, stored.rindex('user')
+    compiled = compiled_roles(child.current_chat)
+    assert compiled.none? { |r| %w[function_call function_call_output clear_tools].include?(r) }
+  end
+
+  # Rule 5: first creation with 'clear_tools' seeds exactly like
+  # 'conversation' (caller context copied), no marker appended.
+  def test_ask_conversation_clear_tools_creation_seeds_like_conversation
+    LLM::Mock.script('child answer')
+    base = parent_agent
+    base.current_chat.message 'option', 'endpoint mock'
+    base.user 'caller question'
+
+    via_clear = base.ask_conversation('Worker', 'prompt', conversation: 'c', inherit: 'clear_tools')
+    via_convo = base.ask_conversation('Worker', 'prompt', conversation: 'r', inherit: 'conversation')
+
+    roles_clear = via_clear.current_chat.collect { |m| m[:role].to_s }
+    assert roles_clear.none? { |r| r == 'clear_tools' }
+    # Same caller context as 'conversation': user question copied
+    assert_include message_contents(via_clear.current_chat, :user), 'caller question'
+    assert_equal ['child helper'], message_contents(via_clear.current_chat, :system)
+    assert_equal message_contents(via_convo.current_chat, :user),
+                 message_contents(via_clear.current_chat, :user)
+  end
+
+  # Rule 5 (restart parenthetical): restart: true on an existing
+  # conversation re-branches to start_chat, so there is nothing to clear —
+  # no marker even though a conversation already existed.
+  def test_ask_conversation_clear_tools_restart_takes_the_fallback
+    LLM::Mock.script('child answer')
+    agent = parent_agent
+
+    agent.ask_conversation('Worker', 'first prompt', conversation: 'w', inherit: 'none')
+    child = agent.conversation_agent('Worker/w')
+    append_tool_round(child)
+
+    agent.ask_conversation('Worker', 'restart prompt', conversation: 'w',
+                                          inherit: 'clear_tools', restart: true)
+
+    stored = child.current_chat.collect { |m| m[:role].to_s }
+    assert stored.none? { |r| r == 'clear_tools' }
+    assert stored.none? { |r| %w[function_call function_call_output].include?(r) }
+    # Re-branched: only start_chat + the new prompt
+    assert_equal ['child helper'], message_contents(child.current_chat, :system)
+    assert_equal ['restart prompt'], message_contents(child.current_chat, :user)
+  end
+
+  # Rule 1: the mode is accepted everywhere inherit is; rule via
+  # normalize_social_inherit — unknown modes still raise.
+  def test_clear_tools_is_a_valid_inherit_mode
+    agent = parent_agent
+    assert_equal 'clear_tools', agent.send(:normalize_social_inherit, 'clear_tools')
+    assert_include LLM::Agent::SOCIAL_INHERIT_MODES, 'clear_tools'
+    assert_raise(ParameterException) do
+      agent.send(:normalize_social_inherit, 'nonsense')
+    end
+    # open_conversation accepts the mode without raising validation errors
+    assert agent.open_conversation('Worker', conversation: 'valid', inherit: 'clear_tools')
+  end
+
+  # Rule 2 (granularity): two continuation markers are equivalent to one —
+  # identical compiled roles.
+  def test_ask_conversation_clear_tools_repeated_markers_equivalent
+    LLM::Mock.script('child answer')
+    agent = parent_agent
+
+    agent.ask_conversation('Worker', 'first prompt', conversation: 'w', inherit: 'none')
+    child = agent.conversation_agent('Worker/w')
+    append_tool_round(child)
+
+    agent.ask_conversation('Worker', 'second', conversation: 'w', inherit: 'clear_tools')
+    agent.ask_conversation('Worker', 'third', conversation: 'w', inherit: 'clear_tools')
+
+    stored = child.current_chat.collect { |m| m[:role].to_s }
+    assert_equal 2, stored.count('clear_tools')
+    assert_equal stored.rindex('clear_tools') + 1, stored.rindex('user')
+    compiled = compiled_roles(child.current_chat)
+    assert compiled.none? { |r| %w[function_call function_call_output clear_tools].include?(r) }
   end
 end

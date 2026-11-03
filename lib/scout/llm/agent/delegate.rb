@@ -81,16 +81,19 @@ module LLM
           type: 'string',
           enum: SOCIAL_INHERIT_MODES,
           default: 'tools',
-          description: "Context copied only when starting the call or named conversation: 'none' uses only the specialist start_chat, 'tools' also copies caller task tooling, and 'conversation' copies the caller task conversation"
+          description: "Context copied only when starting the call or named conversation: 'none' uses only the specialist start_chat, 'tools' also copies caller task tooling, and 'conversation' copies the caller task conversation; 'clear_tools' copies the caller conversation too and, when continuing an existing conversation, drops earlier tool-call traces from the model context only (the stored chat keeps them)"
         }
       }
 
       description = <<-EOF
 Ask another agent and receive only its text answer. Omit `conversation` for an
 independent one-shot call. Set `conversation` to a name and reuse the same name
-with the same agent for follow-up turns. `inherit` controls only how a new call
-or named conversation is initialized; follow-up turns retain their own
-history. The specialist's own start_chat is always applied first.
+with the same agent for follow-up turns. `inherit` controls how a new call or
+named conversation is initialized, and follow-up turns retain their own
+history, except `inherit: 'clear_tools'`, which also acts when continuing a
+named conversation: it drops that conversation's earlier tool-call traces from
+the model context only (the stored chat keeps them). The specialist's own
+start_chat is always applied first.
       EOF
 
       definition = LLM.tool_definition(task_name, description, properties,

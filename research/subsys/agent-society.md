@@ -130,7 +130,9 @@ it elsewhere.
 - Names are validated by `SOCIAL_AGENT_NAME = /\A[a-z_.-]+\z/i` in
   `normalize_social_agent_name` (a bad name raises `ParameterException`);
   conversations by `SOCIAL_CONVERSATION_NAME = /\A[a-z0-9][a-z0-9_.-]*\z/i`.
-- Inheritance modes `none/tools/conversation`; private options are stripped
+- Inheritance modes `none/tools/conversation` (plus `clear_tools`, the
+  continuation-time clearing mode — see `research/clear-tools-inherit.md`);
+  private options are stripped
   by `SOCIAL_PRIVATE_OPTIONS` - only things like `endpoint`/`model` flow to
   specialists.
 - The roster is a **free string parameter**: the `ask` tool's `agent`

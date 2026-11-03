@@ -1,7 +1,7 @@
 module LLM
   class Agent
 
-    SOCIAL_INHERIT_MODES = %w[none tools conversation].freeze
+    SOCIAL_INHERIT_MODES = %w[none tools conversation clear_tools].freeze
     SOCIAL_AGENT_NAME = /\A[a-z_.-]+\z/i
     SOCIAL_CONVERSATION_NAME = /\A[a-z0-9][a-z0-9_.-]*\z/i
     SOCIAL_PRIVATE_OPTIONS = %i[
@@ -24,8 +24,10 @@ module LLM
     #    initial chat exactly as `start_social_chat` does: copy of the
     #    specialist's own start_chat, then the inherited context selected by
     #    `inherit` (none = empty, tools = caller task tooling, conversation =
-    #    caller task conversation), then the `preamble:` messages, then
-    #    `agent.start(initial_chat)`. With `adopt: :current` the template's
+    #    caller task conversation; clear_tools seeds like conversation and,
+    #    on continuation in `ask_conversation`, additionally drops earlier
+    #    tool-call traces from the model context), then the `preamble:`
+    #    messages, then `agent.start(initial_chat)`. With `adopt: :current` the template's
     #    own progress (current_chat minus its start_chat) is folded in right
     #    after the start_chat copy, before the inherited context.
     # 3. Anchor: `agent.save_file = anchor || society_save_file(name,
@@ -82,11 +84,27 @@ module LLM
 
       conversation = 'default' if conversation.nil?
 
+      # Whether the conversation slot already holds a live agent: the
+      # continuation branch. `open_conversation` consults `inherit` only
+      # at creation, so the clear_tools marker (a context-only policy on
+      # the EXISTING chat) is appended here, immediately before the new
+      # user prompt. See research/clear-tools-inherit.md rules 2/4/5.
+      existing = conversation_agent(social_chat_key(name, conversation))
+
       agent = open_conversation(name, conversation: conversation, inherit: inherit,
                                              options: options, preamble: preamble,
                                              anchor: anchor, restart: restart,
                                              template: template, adopt: adopt,
                                              job: job)
+
+      # The clear_tools marker is context-only policy on the EXISTING chat,
+      # so it applies to a plain continuation only: creation and restart
+      # have no earlier bouts to clear (rule 5).
+      if existing && !restart
+        agent.current_chat.message :clear_tools, true if inherit == 'clear_tools'
+      elsif inherit == 'clear_tools'
+        Log.low "Inheritance policy 'clear_tools' has no continuation to clear; seeding conversation '#{conversation}' like 'conversation'"
+      end
 
       agent.request_context = IndiferentHash.add_defaults(agent.request_context || {}, self.request_context || {})
       agent.user(prompt)
@@ -247,7 +265,7 @@ module LLM
         #tooling = social_caller_context.tooling
         tooling = self.current_chat.tooling
         social_chat_copy(tooling)
-      when 'conversation'
+      when 'conversation', 'clear_tools'
         social_caller_context
       end
     end

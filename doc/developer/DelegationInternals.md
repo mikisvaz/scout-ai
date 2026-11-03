@@ -269,22 +269,26 @@ Custom blocks and non-Agent duck objects keep the legacy direct-mutation
 contract. The passed Agent is also pre-registered in `@society[name] ||=`,
 making it the template for later `ask` calls to that name.
 
-The `inherit` parameter is only consulted **once** — when the conversation is
-first created. Follow-up turns reuse the existing conversation with its
-accumulated history.
+The `inherit` parameter is consulted **once** for the three creation modes
+(`none`, `tools`, `conversation`) — when the conversation is first created.
+Follow-up turns reuse the existing conversation with its accumulated history.
+The fourth mode, `clear_tools`, is additionally a **continuation-time**
+policy: it seeds like `conversation` at creation and appends a clearing
+marker when the conversation is continued (details below).
 
 ---
 
 ## SOCIAL_INHERIT_MODES
 
-Three modes control how much caller context flows to a specialist on first
-contact:
+Four modes control how much caller context flows to a specialist on first
+contact — `clear_tools` also acts on continuation:
 
 | Mode | What is inherited | Use case |
 |---|---|---|
 | `none` | Nothing. Specialist starts with its own `start_chat` only. | Fully isolated sub-agent. |
 | `tools` *(default)* | Tooling roles (`introduce`, `tool`, `mcp`, `kb`) from the caller's **whole current chat**. | Shared capabilities, private history. |
 | `conversation` | The caller's entire current chat minus its own `start_chat` prefix. | Full context sharing for tight collaboration. |
+| `clear_tools` | Seeds exactly like `conversation` at creation; on **continuation** appends `message :clear_tools, true` before the new prompt, dropping the conversation's earlier `function_call`/`function_call_output` from the model context only. | Long delegated conversations whose tool rounds bloat the prompt. |
 
 ### Implementation: `social_inherited_context`
 
@@ -296,11 +300,48 @@ def social_inherited_context(inherit)
   when 'tools'
     tooling = self.current_chat.tooling
     social_chat_copy(tooling)   # whole current chat's tooling — see Known drift
-  when 'conversation'
+  when 'conversation', 'clear_tools'
     social_caller_context
   end
 end
 ```
+
+`clear_tools` shares the `'conversation'` seed: at creation there are no
+earlier bouts of the new conversation to clear.
+
+### `clear_tools` continuation: marker insertion and fallback
+
+`ask_conversation` (conversation.rb) checks whether the social key already
+held a live agent **before** calling `open_conversation` (the continuation
+branch), then:
+
+- **Continuation, no `restart:`** and `inherit == 'clear_tools'` — appends
+  `agent.current_chat.message :clear_tools, true` immediately before
+  `agent.user(prompt)`. One marker per continuation call; repeated markers
+  are equivalent because `Chat.clear`'s reverse scan sets the drop flag at
+  the nearest marker and never resets it.
+- **Creation or `restart: true`** — no marker; seeds like `conversation`
+  (a restart re-branches to `start_chat`, so there is nothing to clear) and
+  emits one `Log.low` line recording the fallback.
+
+The insertion site is `ask_conversation`, not `open_conversation`:
+`load_chat`/`open_conversation` without a following prompt must not fire
+clearing, because there is no new round to compile.
+
+**Why the marker does not strip chat-line tool definitions.**
+`Chat.tools`' forward walk resets gathered tool definitions at a
+`clear_tools` role (`tool_definitions = {}`, tools.rb), so a *direct*
+`Chat.tools` call on a marker-bearing chat returns nothing for lines before
+the marker. The ask pipeline never hits that branch with the marker:
+`LLM.chat` runs `Chat.clear` **before** any backend resolves tools
+(backends resolve tools on the post-`clear` message list, where the marker
+and the dropped tool traces are already gone). This consumption order is
+load-bearing — do not reorder `LLM.chat`. Design rationale and probe
+evidence: `research/clear-tools-inherit.md`.
+
+**Context-only guarantee.** The marker is consumed at prompt compilation
+only. The stored chat, save files, logs, and provenance records keep the
+marker and every `function_call`/`function_call_output` pair.
 
 ### `social_caller_context` — extracting non-start-chat messages
 
@@ -332,7 +373,7 @@ any specialist:
 | `agent` | string | Yes | Name of the specialist agent. |
 | `prompt` | string | Yes | Plain-text prompt. |
 | `conversation` | string | No | Named conversation ID (omit for one-shot). |
-| `inherit` | enum `[none, tools, conversation]` | No (default `tools`) | Context policy for new conversations only. `tools` reads the whole current chat's tooling, not the delegating task's. |
+| `inherit` | enum `[none, tools, conversation, clear_tools]` | No (default `tools`) | Context policy. `none`/`tools`/`conversation` apply at creation only. `tools` reads the whole current chat's tooling, not the delegating task's. `clear_tools` also acts on continuation: it drops earlier tool-call traces from the model context only (stored chats keep everything). |
 
 **Security boundary:** The tool block calls `ask_agent`, which uses
 `agent.user(prompt)` rather than `agent.prompt(prompt)`. This is deliberate:
@@ -441,6 +482,7 @@ New code should use `conversation` and `inherit` as separate parameters.
 |---|---|
 | `open_conversation` pipeline (template memoization, seed, anchor, restart, validation) | `test/scout/llm/agent/test_conversation.rb` — `test_open_conversation_uses_the_memoized_template_but_returns_new_agents`, `test_shared_construction_clones_seed_and_options_and_anchors_before_start`, `test_open_conversation_defaults`, `test_open_conversation_scopes_identity_per_conversation`, `test_open_conversation_restart_rebranches_existing_conversation`, `test_open_conversation_validation`, `test_ask_conversation_prompt_is_never_parsed_as_chat_syntax` |
 | `inherit` modes and preamble ordering | `test/scout/llm/agent/test_conversation.rb` — `test_open_conversation_inherit_none_tools_conversation`, `test_open_conversation_preamble_follows_inherited_context` |
+| `clear_tools` mode: continuation marker, creation/restart fallback, context-only clearing, repeated markers, validation | `test/scout/llm/agent/test_conversation.rb` — `test_ask_conversation_clear_tools_continuation_after_conversation_seed`, `test_ask_conversation_clear_tools_continuation_after_none_seed`, `test_ask_conversation_clear_tools_creation_seeds_like_conversation`, `test_ask_conversation_clear_tools_restart_takes_the_fallback`, `test_ask_conversation_clear_tools_repeated_markers_equivalent`, `test_clear_tools_is_a_valid_inherit_mode` |
 | `adopt: :current` seeding | `test/scout/llm/agent/test_delegate.rb` — `test_adopt_current_folds_template_progress_into_the_seed`, `test_adopt_with_empty_template_current_chat_is_a_no_op` |
 | `delegate` hand-off block, slot naming, parent sweep | `test/scout/llm/agent/test_delegate.rb` — `test_default_block_returns_an_agent`, `test_parent_save_sweeps_the_hand_off_child`, `test_hyphenated_name_gives_a_sanitized_slot`, `test_pre_registered_agent_is_the_society_template`, `test_custom_block_receives_the_passed_agent_and_mutates_it`, `test_bad_hand_off_returns_the_exception_not_a_raise` |
 | Society persistence layout and autosave | `test/scout/llm/agent/test_save.rb` — `test_society_dir_for`, `test_save_nested_society`, `test_save_cyclic_society_terminates`, `test_child_auto_save_keeps_canonical_layout`, `test_restart_snapshot`, `test_save_produces_no_legacy_log_tree` |

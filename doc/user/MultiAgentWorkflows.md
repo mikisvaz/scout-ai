@@ -167,7 +167,8 @@ end
 ```
 
 Delegation semantics — the `ask`/`hand_off_to_<name>` tool pair, the
-inheritance modes and their one-turn scope, conversation persistence and the
+inheritance modes and their creation-time scope (the `clear_tools` exception
+included), conversation persistence and the
 safe-delegation rules — are documented once in
 [Delegation.md](Delegation.md); nothing here repeats them.
 

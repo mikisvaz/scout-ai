@@ -219,20 +219,6 @@ module Chat
         next
       elsif role == 'path_kind'
         next
-        workflow_name, *selection = Chat.content_tokens(message)
-        next if workflow_name.nil? || workflow_name.empty?
-        # No kind names on the line: every kind of the workflow, the
-        # same all-kinds semantics as a whole-workflow `tool:` line.
-        selection = nil if selection.empty?
-
-        begin
-          workflow = Chat.load_workflow workflow_name
-        rescue Exception
-          raise ParameterException, "The workflow #{workflow_name.inspect} named by the path_kind line could not be loaded: #{$!.message}"
-        end
-
-        integrate_workflow_path_kinds(workflow, only: selection)
-        next
       elsif role == 'clear_tools'
         tool_definitions = {}
       else

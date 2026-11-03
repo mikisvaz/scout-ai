@@ -186,6 +186,14 @@ chat backwards and stops at the last `clear:`:
 - `clear_role: <role>` (alias `clean_role:`) — after the cut, removes every
   message of the named role from what survives.
 
+The `clear_tools:` directive is what backs the `clear_tools` delegation
+inheritance mode: continuing an existing delegated conversation with
+`inherit: 'clear_tools'` appends this same marker before your new prompt, so
+the model context drops the conversation's earlier tool-call traces while the
+stored chat keeps them. See
+[Delegation.md](Delegation.md) (inheritance modes) for the mode's creation
+fallback and its context-only guarantee.
+
 `import:` has two narrower siblings worth knowing: `continue:` imports only
 the last non-empty message of the referenced chat, and `last:` imports its
 last message after purging `previous_response_id` messages.
