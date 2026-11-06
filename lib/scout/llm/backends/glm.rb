@@ -45,7 +45,32 @@ module LLM
         IndiferentHash.setup({ role: message[:role], content: message[:content] })
       end
     end
+
+    def image(question, options = {}, &block)
+      messages = self.messages question, options
+
+      parameters = IndiferentHash.pull_keys options, :image
+
+      client = prepare_client options.merge(model: 'glm-image'), messages
+
+      parameters = {
+        model: options[:model],
+        prompt: messages.last[:content],
+        size: '1280x1280',
+        quality: 'hd'
+      }.merge(parameters)
+
+      messages = client.images.generate(parameters: parameters)
+      base64_image = begin
+                       messages.select{|info| info[:role] == 'image' }.first['content']['result']
+                     rescue
+                       Log.warn 'Image error: ' + "\n" + JSON.pretty_generate(messages)
+                       raise $!
+                     end
+    end
+
   end
+
 
   module GLM
     TAG = 'glm'

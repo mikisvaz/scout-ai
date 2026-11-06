@@ -75,6 +75,8 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   compactation_new_version
 
+  clear_tools
+
 
   test=test{
    task
@@ -134,9 +136,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
      workflow.rb
     }
     backends=backends{
+     default.rb
+
      anthropic.rb
      bedrock.rb
-     default.rb
      glm.rb
      huggingface.rb
      ollama.rb

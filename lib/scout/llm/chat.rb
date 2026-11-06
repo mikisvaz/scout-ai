@@ -82,4 +82,8 @@ module LLM
   def self.purge(...)
     Chat.purge(...)
   end
+
+  def self.branch
+    Chat.setup(self.dup)
+  end
 end

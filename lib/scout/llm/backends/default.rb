@@ -684,15 +684,22 @@ module LLM
       end
 
       def image(question, options = {}, &block)
-        messages = ask(question, options.merge({tools: [{type: 'image_generation'}], return_messages: true}), &block)
+        messages = self.messages question, options
 
+        parameters = IndiferentHash.pull_keys options, :image
+
+        client = prepare_client options, messages
+
+        options[:prompt] = messages.last[:content]
+        response = client.images.generate(parameters: options)
         base64_image = begin
-                         messages.select{|info| info[:role] == 'image' }.first['content']['result']
+                         response.dig('data', 0, 'b64_json')
                        rescue
                          Log.warn 'Image error: ' + "\n" + JSON.pretty_generate(messages)
                          raise $!
                        end
       end
+
 
       def embed_query(client, text, parameters = {})
         parameters[:text] = text

@@ -70,10 +70,13 @@ module LLM
       when :bedrock, "bedrock"
         require_relative 'backends/bedrock'
         LLM::Bedrock.image(messages, options, &block)
+      when :glm, "glm"
+        require_relative 'backends/glm'
+        LLM::GLM.image(messages, options, &block)
       else
         mod = BACKENDS[backend]
         raise "Unknown backend: #{backend}" if mod.nil?
-        mod.ask(messages, options, &block)
+        mod.image(messages, options, &block)
       end
     end
 

@@ -32,6 +32,7 @@ module LLM
           else
             raise ScoutException, "Unkown file type: #{parameters[:file_type]}"
           end
+          "File attached."
         rescue ScoutException => e
           e
         end

@@ -53,7 +53,11 @@ module LLM
     end
 
     def format_tool_output(message, last_id = nil)
-      info = JSON.parse(message[:content])
+      info = begin
+               JSON.parse(message[:content])
+             rescue
+               {error: 'Error parsing tool output', message: $!.message}
+             end
       id = info.delete('call_id') || info.dig('id') || last_id
       info['role'] = 'tool'
       info['tool_call_id'] = id
