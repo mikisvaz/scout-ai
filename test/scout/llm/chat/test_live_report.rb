@@ -256,4 +256,27 @@ class TestLLMChatLiveReport < Test::Unit::TestCase
     assert report[:scanned][:agent_view], 'agent save file existed'
     assert !report[:scanned][:society], 'no society tree existed'
   end
+
+  # Round-2 pin (bout 1).  The documented fold rule in
+  # lib/scout/llm/chat/provenance/live.rb (~447-457): for one agent log
+  # carrying BOTH live trailing activity and a dangling `job=` meta that
+  # resolves to a running job, the per-log fold yields ONE entry whose
+  # kind is :dangling_job (the dangling job wins as the kind) with the
+  # activity facts riding along.  Pinned BEFORE the round-2 semantic
+  # reconciliation so the later change is test-guarded.
+  def test_dangling_job_wins_kind_over_agent_activity_for_same_log
+    write_info('WF/ask/one', 'running', Process.pid, type: 'chat')
+    Open.write(save_file, chat_text({role: 'user', content: 'go'},
+                                    {role: 'meta', content: 'job=WF/ask/one'}))
+
+    report = Chat.live_report(save_file, captured: [])
+    assert_equal 1, report[:entries].length,
+                 'one agent log folds to at most one entry'
+    entry = report[:entries].first
+    assert_equal :dangling_job, entry[:kind],
+                 'documented precedence: the dangling job wins as the kind'
+    assert_equal 'WF/ask/one', entry[:reference]
+    assert entry[:activity] || entry[:reason],
+           'activity facts ride along with the dangling job entry'
+  end
 end

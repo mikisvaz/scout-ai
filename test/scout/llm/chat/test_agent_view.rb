@@ -151,4 +151,28 @@ class TestLLMChatAgentView < Test::Unit::TestCase
   def test_agent_view_live_is_empty_for_missing_file
     assert_equal [], Chat.agent_view_live(agent_file + '.missing', captured: [])
   end
+
+  # Round-2 pin (bout 1).  A log with MULTIPLE outstanding `job=` metas
+  # resolves to several dangling entries in agent_view_live, and the
+  # per-log fold in live_report must preserve ALL of them (union of the
+  # references), not only the first.  Pinned BEFORE the round-2 fix.
+  def test_multiple_dangling_job_references_are_all_preserved
+    write_info('WF/ask/one', 'running', Process.pid, type: 'chat')
+    write_info('WF/load/two', 'running', Process.pid, type: 'chat')
+    Open.write(agent_file, Chat.print([
+                                          {role: 'user', content: 'go'},
+                                          {role: 'meta', content: 'job=WF/ask/one'},
+                                          {role: 'meta', content: 'job=WF/load/two'}]))
+
+    view = Chat.agent_view_live(agent_file, captured: [])
+    dangling = view.select { |e| e[:kind] == :dangling_job }
+    assert_equal %w(WF/ask/one WF/load/two),
+                 dangling.collect { |e| e[:reference] }.sort,
+                 'agent_view_live resolves every outstanding reference'
+
+    report = Chat.live_report(agent_file, captured: [])
+    preserved = report[:entries].collect { |e| e[:reference].to_s }.sort
+    assert preserved.include?('WF/ask/one') && preserved.include?('WF/load/two'),
+           "per-log fold must preserve ALL outstanding job references, got #{preserved.inspect}"
+  end
 end

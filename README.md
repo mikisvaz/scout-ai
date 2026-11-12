@@ -75,7 +75,8 @@ collaboration.
 → [MultiAgentWorkflows](doc/user/MultiAgentWorkflows.md)
 
 **Provenance and inspectable, reproducible runs.** Provenance is modeled over exactly two
-node kinds — chat files and workflow steps — traversed by `Chat.traverse_provenance`.
+node kinds — chat files and workflow steps. `Chat.provenance_graph` gives the immediate
+links of any one chat or job; `Chat.traverse_provenance` walks the full closure.
 Per-inference metadata records token usage with `inference_id`-based deduplication,
 delegated-agent receipts embed child inference evidence in parent tool outputs, and
 inference results are persisted by default; `scout-ai llm prov <chat>` renders tree, flow,

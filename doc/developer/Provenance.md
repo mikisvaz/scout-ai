@@ -67,6 +67,60 @@ Provenance inspection uses `Chat.load(file)`. It parses the persisted messages w
 
 Do not use `LLM.chat` to inspect historical evidence: that method compiles control roles for inference.
 
+## Compact provenance index
+
+`Chat.provenance_graph(root, root_type: nil, on_error: :collect)` answers "what
+does THIS chat or job immediately point at" with lightweight data only:
+
+    { type: :chat,
+      chats:        { 3 => '/path/to/var/jobs/W/work/Default_agdfg' },  # index => job path
+      dependencies: [],                                                 # job roots only
+      delegation:   { 5 => 'Workspace#default' },                       # ask call index => conversation
+      live:         ['/path/chat.files/agent.chat'],                    # sidecar paths, NOT traversed
+      warnings: [] }
+
+`chats` merges both persisted reference forms — standalone `meta: job=`
+messages (anchored at that message's own index) and job references lifted
+from delegated-agent receipts (`meta` entries) inside `function_call_output`
+envelopes (anchored at the outer output message's index).  Every value is
+the **resolved canonical absolute path** of the referenced job
+(`load_job_reference` resolution plus realpath normalization), so it can be
+passed straight back
+to `Chat.provenance_graph` as the next root or to `Step.load`.  A second,
+different job at the same index turns the value into an array instead of
+overwriting; repeated references to the same job collapse to one.  Indexes
+are Ruby's zero-based positions in the persisted message array.
+
+`dependencies` lists the job's direct `Step#dependencies` as the same
+canonical absolute paths, in declared order; chat roots always return `[]`.
+`delegation` records only actual `ask` tool calls; an `ask` without a
+persisted job reference stays a delegation entry and never enters `chats`.
+
+`live` lists supplementary sidecar chats under the node's `.files`/files
+directory — including a top-level `agent.chat` that byte-identically
+duplicates the root, which the sidecar helper below deliberately filters.
+These are mutable work in flight, not authoritative provenance: the index
+never loads, counts or follows them (the strict review boundary).  This is
+also unrelated to `Chat.live_report`, which classifies transient workload.
+
+One node per call: there is no `follow` option and no recursion.  Feed any
+returned job path back in as the next root.  The return value contains
+only strings, symbols, integers, arrays and hashes — no `Chat` or `Step`
+instances, no message bodies.  `on_error` behaves like the traversal's
+(`:collect` into `warnings`, a callback, or `:raise`).
+
+How the root's kind is decided is part of the contract:
+
+- a **`Step` object** is always a job root;
+- a **path** with `root_type: :job` is a job root;
+- a **path** without `root_type` is a chat root, **even when the path is a
+  chat-producing job's result file** — for such a job, `Step#path` and the
+  output chat path are the same string, so the type cannot be inferred from
+  the path alone and is never guessed.
+
+The recursive closure of the same graph is available as
+`Chat.provenance_closure(root, ...)`; the collectors below are built on it.
+
 ## Structural traversal
 
 `Chat.traverse_provenance` is the authoritative traversal primitive. It accepts a chat file or Step and yields native `Path` and `Step` values:
@@ -118,7 +172,7 @@ Thin collectors use the same traversal:
 - `Chat.provenance_edges(root)` returns typed structural edges;
 - `Chat.tokens(root)` sums direct inference usage from discovered chats.
 
-`Chat.provenance` remains as a compatibility collector. New code should use the traversal or typed edges because the compatibility Hash does not represent job nodes and relation types fully.
+`Chat.provenance` remains as a legacy collector retained for existing callers. New code should use `Chat.provenance_graph`, `Chat.provenance_edges`, or the traversal directly: the legacy Hash does not represent job nodes and relation types fully.
 
 ### Direct-neighbour helpers
 
@@ -280,7 +334,7 @@ One receipt format exists; the reader accepts only it:
 
   The same `function_call_output` may also carry auxiliary fields next to the receipt: `step` (the producing step of the same execution), `start_timestamp`, and `timestamp`. They are bookkeeping only: the sole receipt-driven provenance edge source is the `job` field of a receipt entry (`meta[].job`); the `step` field is never followed as a parent-child edge.
 
-A legacy serialized `agent_meta` key (Array of `{role: 'meta', content: '...'}` messages) is **no longer read**: envelopes carrying only that key contribute no receipt evidence and no warnings. Chats written by older versions lose their receipt-based provenance edges unless re-saved with the current shape. The `meta` key replaced that serialized shape in commit `efd8ebbc` (the design record of the serialized shape has since been retired).
+A legacy serialized `agent_meta` key (Array of `{role: 'meta', content: '...'}` messages) is **no longer read**: envelopes carrying only that key contribute no receipt evidence and no warnings. Chats written by older versions lose their receipt-based provenance edges unless re-saved with the current shape.
 
 Receipts are embedded provenance evidence, **not** parent-chat messages, and must never be injected into the parent chat. `Chat#meta`, `chat.role_messages(:meta)`, and `Chat.token_totals([chat])` keep describing the local chat only. A receipt is read as an observation attached to the paired tool output.
 
@@ -421,7 +475,7 @@ the CLI renders. It folds three passes and returns:
 | Pass | Reads | Closes |
 |---|---|---|
 | sidecar | `<base>.jobs` through `Chat.live_workload` (contract above), then `Chat.expand_live_jobs` | running dependencies of a listed wrapper (way 5) |
-| agent view | the root agent save file, `Chat.agent_view_live` | plain-agent activity and dangling `job=` metas (ways 2 and 3) |
+| agent view | the root agent save file, `Chat.agent_view_live` (through `Chat.live_chat_state`, one parse per file) | plain-agent activity and dangling `job=` metas (ways 2 and 3) |
 | society | `<base>.society/**`, `Chat.society_live` | delegated conversations the forensic `:log` relation excludes (way 4) |
 
 The "ways" are those of the five-ways table in
@@ -518,8 +572,9 @@ agent-log path when no job exists. Rules:
   united, and scalar facts of the earlier entry win unless empty — so a
   sidecar `:inference` entry keeps its kind when an agent-side entry names
   the same job;
-- per agent-log file the two agent-side signals collapse to one entry, the
-  dangling job winning as the kind;
+- per agent-log file the two agent-side signals collapse to one entry
+  (`Chat.reconcile_agent_log_entries`), the dangling job winning as the
+  kind, and every outstanding `job=` reference being kept;
 - a log file whose running `job=` references are all captured drops its bare
   activity entry too; files with no running reference at all (the plain
   agent, way 2) keep it.
@@ -543,7 +598,7 @@ backend that reports usage.
 
 ## ChatAnalyst
 
-ChatAnalyst uses the same core traversal. It does not define Session, ChatGraph, ProvenanceContext, or node wrapper classes. Each Workflow task collects temporary report state in ordinary Hashes and Arrays and applies shared Chat operations for message indexing, tracing, tool-call pairing, and token accounting.
+ChatAnalyst uses the same core primitives. It does not define Session, ChatGraph, ProvenanceContext, or node wrapper classes. Its Workflow tasks collect report state in ordinary Hashes and Arrays and apply shared Chat operations — the compact index, the traversal collectors, message indexing, tracing, tool-call pairing, and token accounting.
 
 This keeps responsibilities separate:
 
@@ -552,13 +607,15 @@ This keeps responsibilities separate:
 - `prov` owns human and Graphviz rendering;
 - Workflow Step info owns execution lifecycle and failure provenance.
 
-ChatAnalyst is expected to consume the receipt primitives above — `Chat.agent_meta_evidence`, `Chat.meta_evidence`, `Chat.agent_meta_job_references`, and the `:agent_job` relation — instead of re-deriving delegated inference evidence. That update is pending and out of this change.
+ChatAnalyst is expected to consume the receipt primitives above — `Chat.agent_meta_evidence`, `Chat.meta_evidence`, `Chat.agent_meta_job_references`, and the `:agent_job` relation — instead of re-deriving delegated inference evidence.
 
 ## Key source files
 
 | File | Responsibility |
 |---|---|
-| `lib/scout/llm/chat/provenance.rb` | Structural traversal, direct neighbours, collectors, and token events. |
+| `lib/scout/llm/chat/provenance.rb` | Compact provenance index, structural traversal, direct neighbours, and collectors. || `lib/scout/llm/chat/provenance.rb` | Compact provenance index, structural traversal, direct neighbours, and collectors. |
+| `lib/scout/llm/chat/provenance/tokens.rb` | Provenance-aware token accounting (events, identity, deduplication, scopes). |
+| `lib/scout/llm/chat/provenance/live.rb` | Live workload and agent/society activity reports. |
 | `lib/scout/llm/chat/agent_meta.rb` | Delegated-agent receipt evidence extraction. |
 | `lib/scout/llm/chat/process/meta.rb` | Meta parsing, lineage, source-aware tracing, projections, and token totals. |
 | `lib/scout/llm/chat/tool_calls.rb` | Tool-call pairing and common status interpretation. |
@@ -570,7 +627,14 @@ ChatAnalyst is expected to consume the receipt primitives above — `Chat.agent_
 
 ## Tests
 
-The provenance contract is pinned by four test files:
+The provenance contract is pinned by five test files:
+
+- `test/scout/llm/chat/test_provenance_index.rb` — the compact index:
+  canonical resolved job paths, message-index anchoring for both reference
+  forms, scalar/array handling at one index, `ask`-only delegation, the
+  `live` boundary (listed, never traversed, byte-identical copy included),
+  job-root identification, and the follow-up workflow from a chat root
+  through a job root to its dependencies.
 
 - `test/scout/llm/chat/test_provenance.rb` — traversal relations and layout
   globs: `test_does_not_follow_imports`,
@@ -597,14 +661,12 @@ The provenance contract is pinned by four test files:
 
 ## Environment trap: checkout vs installed gem
 
-`Chat.live_report` and the rest of the live machinery live in this
-repository's `provenance.rb`. If `require 'scout-ai'` resolves to the
-**installed** scout-ai gem (2.0.0) instead of the checkout, the checkout's
-`prov` command raises `NoMethodError` on `Chat.live_report`, because the
-gem's provenance code predates it. When probing from a checkout, run with
-`-I<checkout>/lib` (or `RUBYOPT=-I<checkout>/lib`) so the checkout wins the
-load path; conversely, expect the installed gem's `prov` to lack the live
-report until a newer gem is cut.
+`Chat.live_report`, `Chat.provenance_graph` and the rest of this document's
+machinery live in this repository's `lib/scout/llm/chat/provenance.rb`. If
+`require 'scout-ai'` resolves to an **older installed gem** instead of the
+checkout, those methods raise `NoMethodError`. When probing from a checkout,
+run with `-I<checkout>/lib` (or `RUBYOPT=-I<checkout>/lib`) so the checkout
+wins the load path.
 
 ## Cross-references
 

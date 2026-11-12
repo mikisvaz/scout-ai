@@ -2,7 +2,7 @@ require File.expand_path(__FILE__).sub(%r(/test/.*), '/test/test_helper.rb')
 require File.expand_path(__FILE__).sub(%r(.*/test/), '').sub(/test_(.*)\.rb/,'\1')
 
 class TestLLMToolDefinition < Test::Unit::TestCase
-  INHERIT_ENUM = %w[none tools conversation].freeze
+  INHERIT_ENUM = %w[none tools conversation clear_tools].freeze
 
   def setup_workflow_module
     Module.new do
@@ -86,7 +86,7 @@ class TestLLMToolDefinition < Test::Unit::TestCase
       type: 'string',
       enum: INHERIT_ENUM,
       default: 'tools',
-      description: "Context copied only when starting the call or named conversation: 'none' uses only the specialist start_chat, 'tools' also copies caller task tooling, and 'conversation' copies the caller task conversation"
+      description: "Context copied only when starting the call or named conversation: 'none' uses only the specialist start_chat, 'tools' also copies caller task tooling, and 'conversation' copies the caller task conversation; 'clear_tools' copies the caller conversation too and, when continuing an existing conversation, drops earlier tool-call traces from the model context only (the stored chat keeps them)"
     }, properties[:inherit])
 
     assert_equal [:agent, :prompt], definition[:function][:parameters][:required]

@@ -192,8 +192,11 @@ module Chat
   # Interactions older than the effective compacted window are dropped
   # entirely, exactly like the mirrored strategy.
   #
-  def self.epoch_tool_compactation(messages)
-    threshold = [
+  def self.epoch_tool_compactation(messages, 
+                                   threshold: nil, full: nil, base_compacted: nil, initial_size: nil, 
+                                   epochs_per_increase: nil,  size_increase: nil, repeat_increase: nil,
+                                   configured_max_size: nil, compacted_growth_ratio: nil, configured_max_compacted: nil)
+    threshold ||= [
       (
         self.epoch_increment_tool_call_threshold ||
         DEFAULT_EPOCH_INCREMENT_TOOL_CALL_THRESHOLD
@@ -201,7 +204,7 @@ module Chat
       0
     ].max
 
-    full = [
+    full ||= [
       (
         self.epoch_increment_full_tool_calls ||
         DEFAULT_EPOCH_INCREMENT_FULL_TOOL_CALLS
@@ -209,7 +212,7 @@ module Chat
       0
     ].max
 
-    base_compacted = [
+    base_compacted ||= [
       (
         self.epoch_increment_compacted_tool_calls ||
         DEFAULT_EPOCH_INCREMENT_COMPACTED_TOOL_CALLS
@@ -217,17 +220,17 @@ module Chat
       0
     ].max
 
-    initial_size = (
+    initial_size ||= (
       self.epoch_increment_initial_size ||
       DEFAULT_EPOCH_INCREMENT_INITIAL_SIZE
     ).to_i
 
-    epochs_per_increase = (
+    epochs_per_increase ||= (
       self.epoch_increment_epochs_per_increase ||
       DEFAULT_EPOCH_INCREMENT_EPOCHS_PER_INCREASE
     ).to_i
 
-    size_increase = [
+    size_increase ||= [
       (
         self.epoch_increment_size_increase ||
         DEFAULT_EPOCH_INCREMENT_SIZE_INCREASE
@@ -235,7 +238,7 @@ module Chat
       0
     ].max
 
-    repeat_increase = [
+    repeat_increase ||= [
       (
         self.epoch_increment_repeat_increase ||
         DEFAULT_EPOCH_INCREMENT_REPEAT_INCREASE
@@ -243,12 +246,12 @@ module Chat
       0
     ].max
 
-    configured_max_size = (
+    configured_max_size ||= (
       self.epoch_increment_max_size ||
       DEFAULT_EPOCH_INCREMENT_MAX_SIZE
     ).to_i
 
-    compacted_growth_ratio = (
+    compacted_growth_ratio ||= (
       self.epoch_increment_compacted_growth_ratio ||
       DEFAULT_EPOCH_INCREMENT_COMPACTED_GROWTH_RATIO
     ).to_f
@@ -258,7 +261,7 @@ module Chat
       compacted_growth_ratio = 0.0
     end
 
-    configured_max_compacted = (
+    configured_max_compacted ||= (
       self.epoch_increment_max_compacted_tool_calls ||
       DEFAULT_EPOCH_INCREMENT_MAX_COMPACTED_TOOL_CALLS
     ).to_i

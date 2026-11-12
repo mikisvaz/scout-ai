@@ -21,7 +21,11 @@ module LLM
       function_arguments = tool_call.dig("arguments")
     end
 
-    function_arguments = JSON.parse(function_arguments, { symbolize_names: true }) if String === function_arguments
+    function_arguments = begin
+                           JSON.parse(function_arguments, { symbolize_names: true })
+                         rescue JSON::ParserError
+                           {error: "Error parsing function arguments - #{$!.message}"}
+                         end if String === function_arguments
 
     [tool_call_id, function_name, function_arguments]
   end

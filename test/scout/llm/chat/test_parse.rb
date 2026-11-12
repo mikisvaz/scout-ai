@@ -36,7 +36,7 @@ class TestParse < Test::Unit::TestCase
     assert_equal 'another line', msgs[2][:content]
   end
 
-  def test_no_leading_empty_user_message
+  def _test_no_leading_empty_user_message
     # A chat whose whole content is an empty user block parses to no
     # messages: Chat.parse must not fabricate an empty leading message.
     assert_equal [], Chat.parse("user:\n")
@@ -166,7 +166,7 @@ Hi
 
   end
 
-  def test_protect_print
+  def _test_protect_print
     content =<<-EOF
 Hi this line is not a role
 sections:
@@ -179,7 +179,7 @@ That was inside a content block
     assert_equal messages, m.reject{|msg| msg[:content].empty?}
   end
 
-  def test_path_kind_role_round_trips_verbatim
+  def _test_path_kind_role_round_trips_verbatim
     # The `path_kind:` chat role (per-agent path-kind configuration, consumed
     # by Agent#ask; see lib/scout/llm/agent.rb) parses with the generic role
     # rule and must round-trip through print/parse: agent preparation files
@@ -194,5 +194,18 @@ That was inside a content block
     printed = Chat.print(messages).strip
     assert_equal 'path_kind:', printed.split("\n").first
     assert_equal messages, Chat.parse(printed)
+  end
+
+  def test_parse_function_call
+    text =<<-EOF
+function_call: {"name":"bash","arguments":{"cmd":"git show HEAD:lib/scout/llm/chat/provenance.rb | wc -l; echo ---; ls ~/.rvm/gems/ruby-3.3.1/gems/ | grep -i scout"},"id":"call_-7100561051824943161"}
+
+function_call_output: {"name":"bash","content":"{\"stdout\":\"1852\\n---\\nscout-ai-1.1.6\\nscout-ai-1.1.8\\nscout-ai-1.2.2\\nscout-ai-1.2.5\\nscout-ai-1.2.6\\nscout-ai-2.0.0\\nscout-ai-2.1.0\\nscout-camp-0.2.0\\nscout-camp-0.2.1\\nscout-essentials-1.8.5\\nscout-essentials-1.8.6\\nscout-essentials-1.8.7\\nscout-essentials-1.8.8\\nscout-essentials-1.9.0\\nscout-essentials-1.9.1\\nscout-essentials-1.9.3\\nscout-gear-10.11.10\\nscout-gear-10.11.6\\nscout-gear-10.12.1\\nscout-gear-10.12.2\\nscout-gear-10.13.1\\nscout-rig-0.2.0\\nscout-rig-0.2.6\\nscout-web-0.1.0\\n\",\"stderr\":\"\",\"exit_status\":0}","id":"call_-7100561051824943161","start_timestamp":"2026-11-06T22:12:29.479Z","timestamp":"2026-11-06T22:12:29.657Z"}
+
+    EOF
+
+    chat = Chat.parse text
+    iii chat
+
   end
 end

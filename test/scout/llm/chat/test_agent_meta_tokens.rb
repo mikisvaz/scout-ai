@@ -636,6 +636,57 @@ class TestChatAgentMetaTokens < Test::Unit::TestCase
 
   ## Scope validation
 
+  ## Round-2 pins (bout 1): blank-string identifiers are treated as absent
+
+  # A blank `inference_id=""` is not selected as a shared token identity when
+  # a real identifier exists elsewhere for the same evidence group: the blank
+  # is not truthy evidence of identity.  Pinned BEFORE the tokens.rb fix
+  # (truthiness checks at ~193-203 let Ruby's truthy "" win).
+  def test_blank_inference_id_is_not_selected_as_identity
+    TmpFile.with_dir do |dir|
+      worker = make_job(dir, 'W/ask/Default_w',
+                        logs: {'agent.chat' => "user: w\nmeta: pt=11 ct=7 tt=18 inference_id=\nassistant: done\n"})
+      parent = write_chat(dir, 'parent.chat',
+                          receipt_chat_text(
+                            {'a1' => [meta_receipt('pt=11 ct=7 tt=18 inference_id=')]}
+                          ))
+
+      events = Chat.provenance_token_events(parent)
+
+      # The two evidence records are the SAME inference (equal token facts in
+      # the log and the receipt), so with blanks treated as absent the group
+      # resolves to the worker's lineage identity; selecting the blank string
+      # would key both records under [:inference_id, ""] and merge DISTINCT
+      # inferences that happen to share the blank.
+      assert events.none? { |event| event[:identity] == [:inference_id, ''] },
+             'blank inference_id must never become the shared identity key'
+    end
+  end
+
+  # A blank `provider_response_id` likewise never serves as identity: two
+  # legacy chat-side metas in different logs (no inference_id at all, so the
+  # lineage rule would give them distinct identities) must not collapse onto
+  # one [:provider_response_id, ""] event.  Pinned BEFORE the fix.
+  def test_blank_provider_response_id_does_not_merge_distinct_inferences
+    TmpFile.with_dir do |dir|
+      j1 = make_job(dir, 'J1/ask/Default_1',
+                    logs: {'agent.chat' => "user: a\nmeta: pt=5 tt=6 provider_response_id=\nassistant: done\n"})
+      j2 = make_job(dir, 'J2/ask/Default_2',
+                    logs: {'agent.chat' => "user: b\nmeta: pt=7 tt=8 provider_response_id=\nassistant: done\n"})
+      copied = write_chat(dir, 'copied.chat',
+                          "user: go\nmeta: job=#{j1}\nmeta: job=#{j2}\nassistant: done\n")
+
+      events = Chat.provenance_token_events(copied)
+
+      assert_equal 2, events.length,
+                   'two distinct inferences must stay two events when their only provider_response_id is blank'
+      assert events.none? { |event| event[:identity] == [:provider_response_id, ''] },
+             'blank provider_response_id must never become the shared identity key'
+      assert_equal({pt: 12, ct: 0, tt: 14, cct: 0, cwt: 0, rt: 0},
+                   Chat.provenance_token_totals(copied))
+    end
+  end
+
   def test_unknown_scope_raises
     TmpFile.with_dir do |dir|
       path = write_chat(dir, 'any.chat', "user: hi\nassistant: done\n")

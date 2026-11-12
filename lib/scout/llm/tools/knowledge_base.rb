@@ -151,6 +151,7 @@ Multiple values may be present and use the charater ";" to separate them.
         end
       end
     else
+      parameters ||= {}
       entities, reverse = IndiferentHash.process_options parameters, :entities, :reverse
 
       # Dumb

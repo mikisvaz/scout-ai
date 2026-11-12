@@ -123,7 +123,7 @@ A single inference request flows through the layers as follows:
 - [PromptProcessing.md](PromptProcessing.md) — Context management internals.
 - [Backends.md](Backends.md) — Backend abstraction and inference loop.
 - [DelegationInternals.md](DelegationInternals.md) — Multi-agent mechanics.
-- [Provenance.md](Provenance.md) — Provenance data model and traversal.
+- [Provenance.md](Provenance.md) — Provenance data model, compact index, and traversal.
 - [DesignPrinciples.md](DesignPrinciples.md) — Coding philosophy and idioms.
 - [Sandbox.md](Sandbox.md) — Which tools are sandboxed, the two-layer
   allowlist model, and the path-visibility recovery procedure.

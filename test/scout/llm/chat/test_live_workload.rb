@@ -132,6 +132,24 @@ class TestLLMChatLiveWorkload < Test::Unit::TestCase
     assert_equal 'NoSuchWF/none/Default', entries.first[:reference]
   end
 
+  # Round-2 pin (bout 1).  classify_live_job must survive an information-read
+  # failure: when step.info raises (unreadable/corrupt `.info`), the verdict is
+  # [:crashed, nil], never an escaping exception.  scout-gear's Step#info
+  # absorbs most Persist.load failures itself (falling back to
+  # {status: :noinfo}), so the read failure is pinned with a minimal step
+  # stub whose info raises -- exactly the contract the classification must
+  # keep when the inline rescue is replaced by delegation in bout 2.
+  # Pinned BEFORE the refactor; the current inline rescue may already
+  # satisfy it -- the pin records the pre-refactor truth.
+  def test_info_read_failure_classifies_as_crashed_with_nil_status
+    broken = Object.new
+    def broken.info
+      raise Errno::EISDIR, 'directory-shaped .info'
+    end
+
+    assert_equal [:crashed, nil], Chat.classify_live_job(broken)
+  end
+
   def test_end_to_end_real_in_flight_child
     # Real end-to-end: a slow child workflow is dispatched through the
     # backend tool round while the consumer reads the sidecar. Reuses the

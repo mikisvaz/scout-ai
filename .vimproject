@@ -77,6 +77,10 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
 
   clear_tools
 
+  provenance
+  provenance_update
+
+  compactation_all
 
   test=test{
    task
@@ -93,15 +97,23 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   scout-ai.rb
   scout=scout{
    llm=llm{
+    utils.rb
     chat.rb
     chat=chat{
      agent_meta.rb
      annotation.rb
      parse.rb
      persist.rb
-     process.rb
      provenance.rb
      tool_calls.rb
+     process.rb
+     process=process{
+      clear.rb
+      files.rb
+      meta.rb
+      options.rb
+      tools.rb
+     }
      prompt.rb
      prompt=prompt{
       inbox.rb
@@ -110,22 +122,13 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
       shorten_tools_epoch_increment.rb
       epoch_tool_compactation.rb
      }
-     process=process{
-      clear.rb
-      files.rb
-      meta.rb
-      options.rb
-      tools.rb
-     }
     }
     ask.rb
     embed.rb
     image.rb
-    interface.rb
     mcp.rb
     rag.rb
     request_context.rb
-    utils.rb
     sandbox.rb
     tools.rb
     tools=tools{
@@ -258,17 +261,12 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
   }
  }
  research=research filter="*"{
-  agent-delegation-analysis.md
-  agent-workflow-analysis.md
-  backends-analysis.md
-  chat-core-analysis.md
-  coding-philosophy-analysis.md
-  commands-analysis.md
-  multi-agent-patterns-analysis.md
-  prompt-strategies-analysis.md
-  provenance-analysis.md
-  synthesis-report.md
-  tools-system-analysis.md
+  clear-tools-inherit.md
+  path-engine-dc1-dc2-dc3-fixes.md
+  path-kind-chat-role.md
+  path-kind-contract-fixes-engine.md
+  provenance-navigation-design.md
+  scout-ai-runtime-availability.md
  }
  test=test {
   test_helper.rb
