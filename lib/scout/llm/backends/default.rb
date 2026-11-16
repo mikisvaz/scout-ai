@@ -98,7 +98,9 @@ module LLM
 
         parameters = parameters.except(:previous_response_id) if FalseClass === parameters[:previous_response_id]
         parameters = parameters.except(:previous_response_id) if parameters[:previous_response] == 'false'
-        client.responses.create(parameters: parameters.except(:previous_response))
+        Misc.insist([0.5, 2, 10, 60]) do
+          client.responses.create(parameters: parameters.except(:previous_response))
+        end
       end
 
       #{{{ FORMAT
@@ -516,6 +518,15 @@ module LLM
         end
       end
 
+      def save_to_file(messages, options, save_file, exception: nil)
+        Open.write save_file Chat.print(messages) if exception
+        Open.write save_file + ".options", options.except(:messages, :tools).to_json
+        Open.write save_file + ".meta", current_meta.to_json
+        Log.warn "Messages and options saved in #{save_file}"
+        e.extend LLM::Backend::BackendException
+        e.chat tmpfile
+      end
+
       def ask(question, options = {}, &block)
         original_options = options.dup
         request_context = options.delete(:request_context)
@@ -526,6 +537,7 @@ module LLM
 
         messages = self.messages question, options
         
+        # {{{ Infer role and conversation from save_file
         if String === save_file
           parts = save_file.split(/\.files\//)
           agent_chat_file = parts.pop
@@ -547,21 +559,20 @@ module LLM
           pre_message = ''
         end
 
+        prompt = Chat.prepare_prompt(messages, prompt_strategies, save_file: save_file)
+        formatted_prompt = format_messages(prompt)
+        tools = tools(formatted_prompt, options)
+        Log.medium pre_message + "Tools: #{Log.fingerprint tools.keys}" if tools
+
+        request_context = RequestContext.augment(request_context, backend: (self::TAG rescue nil), model: options[:model])
+
+        # {{{ Send job package to remote server for processing
         if relay
-          id = upload_messages(relay,  messages, options)
+          id = upload_messages(relay,  formatted_prompt, options)
           response = gather_response(relay, id)
           IndiferentHash.setup(response)
-          formatted_prompt = format_messages(messages)
-          tools = tools(formatted_prompt, options)
-          Log.medium pre_message + "Tools: #{Log.fingerprint tools.keys}" if tools
         else
-
           client = prepare_client options, messages
-          request_context = RequestContext.augment(request_context, backend: (self::TAG rescue nil), model: options[:model])
-          prompt = Chat.prepare_prompt(messages, prompt_strategies, save_file: save_file)
-          formatted_prompt = format_messages(prompt)
-          tools = tools(formatted_prompt, options)
-          Log.medium pre_message + "Tools: #{Log.fingerprint tools.keys}" if tools
 
           response = begin
                        Log.medium pre_message + "Calling #{self}: #{Log.fingerprint(options.except(:tools))}}"

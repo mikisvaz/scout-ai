@@ -41,7 +41,7 @@ module LLM
       parameters[:messages] = messages
 
       headers = IndiferentHash.setup({ 'Authorization' => "Bearer #{key}", 'Content-Type' => 'application/json'})
-      Misc.insist do
+      Misc.insist([0.5, 2, 10, 60]) do
         response = case method.to_sym
                    when :post
                      request_options = {

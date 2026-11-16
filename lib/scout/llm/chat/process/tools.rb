@@ -158,16 +158,10 @@ module Chat
         next
       elsif role == 'tool'
         workflow_name, task_name, *inputs = content_tokens(message)
+        workflow = require_workflow workflow_name
+
         inputs = nil if inputs.empty?
         inputs = [] if inputs == ['none'] || inputs == ['noinputs']
-        if Open.remote? workflow_name
-          require 'rbbt'
-          require 'scout/offsite/ssh'
-          require 'rbbt/workflow/remote_workflow'
-          workflow = RemoteWorkflow.new workflow_name
-        else
-          workflow = Chat.load_workflow workflow_name
-        end
 
         if task_name
           definition = LLM.task_tool_definition workflow, task_name, inputs
@@ -180,29 +174,7 @@ module Chat
         workflow_name = message[:content].to_s
         next if introduced_workflows.include? workflow_name
         introduced_workflows << workflow_name
-        workflow = begin
-                     Kernel.const_get workflow_name
-                   rescue
-                   end
-        if Open.remote? workflow_name
-          require 'rbbt'
-          require 'scout/offsite/ssh'
-          require 'rbbt/workflow/remote_workflow'
-          workflow = RemoteWorkflow.new workflow_name
-        else
-          workflow = Workflow.require_workflow workflow_name
-        end unless workflow
-
-        raise ScoutException, "Workflow '#{workflow_name}' not found" if workflow.nil?
-
-        next if workflow.documentation.empty?
-        content = <<-EOF
-# Documentation for the '#{workflow_name}' workflow: #{workflow.documentation[:title]}
-
-#{workflow.documentation[:description]}
-        EOF
-
-        {role: :user, content: content}
+        introduce_workflow workflow_name
       elsif role == 'kb'
         knowledge_base_name, *databases = content_tokens(message)
         databases = nil if databases.empty?
@@ -227,6 +199,65 @@ module Chat
     end.compact.flatten
     messages.replace new
     tool_definitions
+  end
+
+  def self.require_workflow(workflow_name)
+    begin
+      workflow = Kernel.const_get workflow_name
+      raise unless Workflow === workflow
+      workflow
+    rescue
+      if Open.remote? workflow_name
+        require 'rbbt'
+        require 'scout/offsite/ssh'
+        require 'rbbt/workflow/remote_workflow'
+        RemoteWorkflow.new workflow_name
+      else
+        Workflow.require_workflow workflow_name
+      end
+    end
+  end
+
+  def self.introduce_workflow(workflow_name)
+    workflow = require_workflow workflow_name
+    raise ScoutException, "Workflow '#{workflow_name}' not found" if workflow.nil?
+
+    user_doc = workflow.libdir.doc.user['README.md']
+    skills = workflow.libdir.skills.glob('*')
+    documentation = workflow.documentation
+
+    if user_doc.exists?
+      content = user_doc.read
+    elsif documentation[:description]
+      header = "Documentation for #{workflow_name}"
+      header += ': ' + documentation[:title] if documentation[:title]
+
+      content = <<-EOF
+# #{header}
+
+#{documentation[:description]}
+      EOF
+    else
+      content = nil
+    end
+
+    if skills.any?
+      content +=<<-EOF
+
+# Skills for #{workflow_name}
+
+      EOF
+
+      skills.each do |skill_path|
+        name = skill_path.basename.sub(/\.md$/, '')
+        LLM::Sandbox.allow_read_path(skill_path)
+        content += <<-EOF
+- #{name}: #{skill_path.find}
+        EOF
+      end
+    end
+
+    {role: :user, content: content}
   end
 
   def self.associations(messages, kb = nil)

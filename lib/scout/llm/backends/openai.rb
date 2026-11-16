@@ -13,11 +13,8 @@ module LLM
       parameters[:messages] = messages
       parameters[:tools] = format_tool_definitions(tools) if tools && tools.any?
 
-      begin
+      Misc.insist([0.5, 2, 10, 60]) do
         client.chat(parameters: parameters)
-      rescue
-        Log.debug 'Input parameters: ' + "\n" + JSON.pretty_generate(parameters)
-        raise $!
       end
     end
 

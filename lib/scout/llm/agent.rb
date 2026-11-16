@@ -85,9 +85,10 @@ module LLM
     # function: takes an array of messages and calls LLM.ask with them
     def ask(messages = nil, options = {})
       messages, options = nil, messages if options.empty? && Hash === messages
+      save_file = self.save_file
 
       request_context = options.delete(:request_context) || @request_context || {}
-      request_context[:caller] = self.save_file if self.save_file
+      request_context[:caller] = save_file if save_file
       request_context = IndiferentHash.add_defaults request_context, main_chat: request_context[:caller]
 
       messages = current_chat if messages.nil?
@@ -221,7 +222,7 @@ module LLM
 
           ask_options = @other_options.except(:no_ask_override)
           IndiferentHash.setup(ask_options)
-          ask_options= ask_options.merge(log_errors: true, save_file: self.save_file)
+          ask_options= ask_options.merge(log_errors: true, save_file: save_file)
           ask_options = ask_options.merge(options)
           ask_options = ask_options.merge(request_context: request_context, agent: false)
 
@@ -241,7 +242,7 @@ module LLM
           end
         else
           begin
-            self.save if self.save_file
+            self.save if save_file
           rescue
             Log.exception $!
           ensure

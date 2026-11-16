@@ -65,43 +65,4 @@ module LLM
       content: content
     }
   end
-
-  def self.run_tools(messages)
-    messages.collect do |info|
-      IndiferentHash.setup(info)
-      role = info[:role]
-      if role == 'cmd'
-        {
-          role: 'tool',
-          content: CMD.cmd(info[:content]).read
-        }
-      else
-        info
-      end
-    end
-  end
-
-  #def self.tools_to_openai(messages)
-  #  messages.collect do |message|
-  #    if message[:role] == 'function_call'
-  #      tool_call = IndiferentHash.setup(JSON.parse(message[:content]))
-  #      arguments = tool_call.delete('arguments') || {}
-  #      name = tool_call[:name]
-  #      tool_call['type'] = 'function'
-  #      tool_call['function'] ||= {}
-  #      tool_call['function']['name'] ||= name || 'function'
-  #      tool_call['function']['arguments'] = arguments.to_json
-  #      {role: 'assistant', tool_calls: [tool_call]}
-  #    elsif message[:role] == 'function_call_output'
-  #      info = JSON.parse(message[:content])
-  #      id = info.delete('call_id') || info.dig('id')
-  #      info['role'] = 'tool'
-  #      info['tool_call_id'] = id
-  #      info
-  #    else
-  #      message
-  #    end
-  #  end.flatten
-  #end
-
 end

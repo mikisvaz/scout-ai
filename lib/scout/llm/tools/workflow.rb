@@ -106,6 +106,15 @@ module LLM
       task_info[:input_options].include?(input) && task_info[:input_options][input][:required]
     end
 
+    intent = Scout::Config.get(:intent, :tool_call, :tool, :workflow, default: true)
+    if intent.to_s == 'true'
+      properties[:intent] = {
+        type: 'string',
+        description: 'Short sentence describing why you are running this command',
+      }
+      required_inputs << :intent
+    end
+
     LLM.tool_definition(task_name, task_info[:description] || '', properties,
                         required: required_inputs, defaults: defaults, envelope: false)
   end
