@@ -364,6 +364,7 @@ scout-ai=$PWD filter="*.rb *.rake Rakefile *.rdoc *.R *.sh *.js *.haml *.sass *.
    server
    word
    md
+   abriged
    info
    prov
   }

@@ -1,0 +1,40 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'scout'
+
+cmd = $previous_commands ?
+  "scout #{$previous_commands.any? ? "#{$previous_commands * ' '} " : ''}#{File.basename(__FILE__)}" :
+  $PROGRAM_NAME
+
+options = SOPT.setup <<~EOF
+
+Shorten a chat file by abridging tools
+
+$ #{cmd} [<options>] <chat> <markdown>
+
+-h--help Print this help
+-l--last Format only the last interaction
+EOF
+if options[:help]
+  if defined? scout_usage
+    scout_usage
+  else
+    puts SOPT.doc
+  end
+  exit 0
+end
+
+help, last = IndiferentHash.process_options options, :help, :last
+
+chat, output, _ = ARGV
+
+raise MissingParameterException, :chat if chat.nil?
+
+messages = Chat.parse Open.read(chat)
+messages = Chat.epoch_tool_compactation(messages, 
+                                   threshold: 0, full: 0, base_compacted: 20, initial_size: 20, 
+                                   epochs_per_increase: nil,  size_increase: nil, repeat_increase: nil,
+                                   configured_max_size: nil, compacted_growth_ratio: 0, configured_max_compacted: nil)
+puts Chat.print messages
+
