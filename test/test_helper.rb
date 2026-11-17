@@ -37,6 +37,7 @@ Scout.prepend_path :test_etc, File.join(File.expand_path(File.dirname(__FILE__))
 # inference service can be reached from `rake test`.
 Scout::Config.set({backend: :mock}, :ask, :llm)
 Scout::Config.set({backend: :mock}, :embed, :llm)
+Scout::Config.set({intent: :false}, :tool, :agent, :tools)
 
 class Test::Unit::TestCase
 
