@@ -249,11 +249,27 @@ module Chat
       EOF
 
       skills.each do |skill_path|
+        description = begin
+                        front_matter = Open.read(skill_path['SKILL.md']).scan(/^---(.*)^---/m).flatten.first.strip
+                        yaml = YAML.load front_matter
+                        yaml['description']
+                      rescue
+                        Log.exception $!
+                        nil
+                      end
         name = skill_path.basename.sub(/\.md$/, '')
+        LLM::Sandbox.allow_path(workflow.libdir.skills)
         LLM::Sandbox.allow_read_path(skill_path)
-        content += <<-EOF
-- #{name}: #{skill_path.find}
-        EOF
+        canonical_path = skill_path
+        if description
+          content += <<-EOF
+- #{name} [#{skill_path}]: #{description}
+          EOF
+        else
+          content += <<-EOF
+- #{name} [#{skill_path}]
+          EOF
+        end
       end
     end
 
