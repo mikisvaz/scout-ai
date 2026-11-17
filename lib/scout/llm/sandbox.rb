@@ -82,9 +82,9 @@ module LLM
                             exists: false, grant: nil, reason: :unresolvable)
       end
 
-      policies = [[:root, root], *Array(writable_paths).map { |grant| [:writable, grant] }]
+      policies = [[:root, root], [:root, ENV["PWD"]], *Array(writable_paths).map { |grant| [:writable, grant] }]
       policies.concat(Array(read_paths).map { |grant| [:read, grant] }) if mode.to_sym == :read
-      policies.each do |kind, grant_path|
+      policies.uniq.each do |kind, grant_path|
         grant = resolve_path(grant_path, base_path: base_path)
         next unless grant[:canonical_path]
         next unless inside?(target[:canonical_path], grant[:canonical_path])
@@ -169,6 +169,7 @@ module LLM
     def self.writable_grants(scope: nil)
       grant_paths('allowed_paths', scope: scope) +
         grant_paths('dirs', scope: scope) +
+        grant_paths('root', scope: scope) +
         grant_paths('thread', scope: scope)
     end
 
@@ -253,6 +254,8 @@ module LLM
       allow_read_path(job.files_dir)
     end
   end
+
+  LLM::Sandbox.allow_path(ENV['PWD']) if ENV['PWD']
 end
 
 # ScoutCoder: File.realpath must be applied component-by-component: resolving
