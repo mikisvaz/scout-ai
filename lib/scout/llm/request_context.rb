@@ -118,6 +118,11 @@ module LLM
     # instance's reset_info reattaches the envelope to each reset, before the
     # task block executes. No upstream class is modified globally.
     module StepExtension
+
+      def exec_type
+        self.info_file.exists? ? :persisted : :exec
+      end
+
       def register_request_context(context)
         projected = RequestContext.envelope(context)
         request_context_mutex.synchronize do
@@ -150,6 +155,7 @@ module LLM
           super(new_info)
         ensure
           lock.flock(File::LOCK_UN) rescue nil
+          Open.rm lock_path
         end
       end
 
@@ -184,6 +190,11 @@ module LLM
         envelope = @llm_request_context_envelope
         return unless envelope
 
+        if self.exec_type == :exec
+          info[:request_context] = envelope
+          return
+        end
+
         FileUtils.mkdir_p(File.dirname(info_file))
         lock_path = "#{info_file}.request_context.lock"
         File.open(lock_path, 'a') do |lock|
@@ -195,6 +206,7 @@ module LLM
           end
         ensure
           lock.flock(File::LOCK_UN) rescue nil
+          Open.rm lock_path
         end
       end
     end

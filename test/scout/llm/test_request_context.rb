@@ -270,4 +270,30 @@ class TestLLMRequestContext < Test::Unit::TestCase
     assert_equal 1, raw_text.scan(/"request_context"\s*:/).length
     assert_equal 1, raw.keys.count { |key| key == 'request_context' }
   end
+
+  def test_request_context_exec
+    context = {request_id: 'body-R', endpoint: 'test', backend: 'mock'}
+
+    job = self.context_workflow.job(:read_context)
+    job.extend(LLM::RequestContext::StepExtension)
+    job.register_request_context(context)
+    assert_equal context.to_json, job.run
+    assert job.info_file.exists?
+    refute Open.exist?(job.info_file + '.request_context')
+    refute Open.exist?(job.info_file + '.request_context.lock')
+
+
+    job = self.context_workflow.job(:read_context, 'exec')
+    job.extend(LLM::RequestContext::StepExtension)
+    assert_equal 'null', job.exec
+    refute job.info_file.exists?
+    refute Open.exist?(job.info_file + '.request_context')
+    refute Open.exist?(job.info_file + '.request_context.lock')
+
+    job.register_request_context(context)
+    assert_equal context.to_json, job.exec
+    refute job.info_file.exists?
+    refute Open.exist?(job.info_file + '.request_context')
+    refute Open.exist?(job.info_file + '.request_context.lock')
+  end
 end
