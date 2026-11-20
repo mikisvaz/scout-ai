@@ -1659,6 +1659,30 @@ class TestPathContracts < Test::Unit::TestCase
     assert properties.key?("name")
   end
 
+  def test_path_tool_definition_promote_contains_optional_defer_reload
+    register_text_kind("text", {"promote" => true})
+
+    definition = @agent.path_tool_definition("promote")
+    parameters = definition["parameters"]
+    properties = parameters["properties"]
+
+    # The ScoutCoder promotion hook consumes this caller argument; engine
+    # dispatch passes caller keys to the hook verbatim, so the schema must
+    # advertise it for schema-validating model callers to be able to emit it.
+    assert properties.key?("defer_reload")
+    assert_equal "boolean", properties["defer_reload"]["type"]
+
+    # Omittable: omitting the flag keeps the default immediate reload.
+    assert !parameters["required"].include?("defer_reload")
+
+    # The closed-parameter contract is retained.
+    assert_equal false, parameters["additionalProperties"]
+
+    # Scope: promote-branch only; no other operation grows the property.
+    read_definition = @agent.path_tool_definition("read")
+    assert !read_definition["parameters"]["properties"].key?("defer_reload")
+  end
+
   # ------------------------------------------------------------------
   # Error normalization matrix
   #

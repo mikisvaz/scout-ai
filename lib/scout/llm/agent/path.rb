@@ -1130,6 +1130,13 @@ module LLM
           "description" => "Allow replacing an existing promotion destination. " \
                            "Default false: an existing destination aborts the promotion."
         }
+        properties["defer_reload"] = {
+          "type" => "boolean",
+          "description" => "ScoutCoder-only caller argument: when true, skip " \
+                           "the automatic post-promotion workflow reload and " \
+                           "report promotion_status \"deferred\" in the tool " \
+                           "result (default false = immediate reload)."
+        }
       when "validate"
         # Kind-specific operations may extend this schema through the
         # optional `parameters` hash in the kind definition.
