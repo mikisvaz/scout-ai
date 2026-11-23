@@ -115,6 +115,48 @@ messages in your conversation. See the
 
 ---
 
+## One delegation per conversation per batch
+
+The model may issue several tool calls in one round; the delegations among
+them are dispatched **in parallel**. A specialist conversation is one
+persisted save file, so two delegations of the same round that target the
+same conversation would both drive (and auto-save) it at the same time.
+Scout-AI used to block forever in that situation.
+
+Now the delegation batch is rejected **before any specialist is asked**: the
+parallel execution layer checks the pending delegations and every delegation of
+that round returns an **error result** — a `function_call_output` with the
+`error` flag and a `ScoutException` message naming the conflicting save file.
+The batch is invalid as a whole, so **all** delegations of the round are
+rejected together, not only the two that collide. The model receives the errors
+as ordinary tool outputs and can rethink the plan; a corrected round (for
+instance one delegation per conversation) then runs normally, and the rejected
+prompts leave no residue in the conversations.
+
+Other tool calls of the same round keep their real results — a file written by
+an earlier call stays written, and its successful output is returned. The
+failure belongs to the delegation batch, not to the round.
+
+Two ways to hit it:
+
+```text
+# Same round, same agent, no conversation name: both land on 'default'
+ask(agent="Worker", prompt="Do X")
+ask(agent="Worker", prompt="Do Y")
+
+# Same round, same agent, same explicit name
+ask(agent="Worker", prompt="Do X", conversation="task_1")
+ask(agent="Worker", prompt="Do Y", conversation="task_1")
+```
+
+To fix the plan, give each delegation of a round its own conversation name
+— two delegations that omit the name share the `default` conversation and
+conflict as well — or spread the turns over several rounds so each
+conversation is advanced by one delegation at a time. Sequential turns on
+the same conversation across different rounds remain perfectly legal.
+
+---
+
 ## Two views: the official conversation and the agent view
 
 When you run inference there are two distinct records, and provenance tools
@@ -186,11 +228,12 @@ indirect control over.
 
 ```ruby
 worker = LLM.load_agent('Worker')
-agent.delegate(worker, :worker, "Delegate work to the Worker agent")
+agent.delegate(worker, 'Worker', "Delegate work to the Worker agent")
 ```
 
-This creates a tool called `hand_off_to_worker`. The model calls it with a
-`message` parameter.
+This creates a tool called `hand_off_to_Worker`. The model calls it with a
+`message` parameter. The tool asks the conversation named after the slot
+(`Worker/Worker` — the registration case is kept, nothing lower-cases it).
 
 Without a custom block, the hand-off runs on the shared conversation
 pipeline: the registered conversation is a clone of the passed agent,
@@ -198,7 +241,7 @@ persisting under `<save>.society/<agent>/<conversation>/agent.chat`, and the
 passed agent object itself does not accumulate the conversation. Reuse the
 tool to continue that conversation (`new_conversation: true` re-branches it);
 reach the live conversation agent from Ruby with
-`conversation_agent("worker/default")`.
+`conversation_agent("Worker/Worker")`.
 
 ### Custom delegation blocks
 
@@ -278,6 +321,12 @@ The model can now delegate sub-tasks to any specialist by name.
 - **Expecting `clear_tools` to trim the stored conversation**: it never does.
   Clearing is context-only — the saved chat, logs, and provenance keep every
   tool call.
+- **Two delegations of one round onto one conversation**: the whole delegation
+  batch is rejected, and every delegation of that round returns an error result
+  naming the shared save file; no specialist is asked. Other tool calls of the
+  round keep their results. Give each delegation its own conversation name, or
+  spread the turns over several rounds (see
+  [One delegation per conversation per batch](#one-delegation-per-conversation-per-batch)).
 - **Using `conversation: 'current'`**: This is a legacy value. Use explicit
   conversation names or omit the parameter.
 

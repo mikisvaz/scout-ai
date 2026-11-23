@@ -162,6 +162,87 @@ module LLM
 
     agents = tool_call_content.collect{|p| p.last }.select{|c| LLM::Agent === c }
 
+    # ScoutCoder: the delegations of one tool round are executed in parallel
+    # by the Open.traverse below, and a specialist conversation is persisted
+    # by exactly ONE save file: two pending delegations onto the same save
+    # file would drive (and auto-save) that conversation twice concurrently,
+    # which used to block forever on the persistence lock. Validate the
+    # batch here, before any specialist is started, and report the faulty
+    # plan as tool errors instead of raising out of the round: every
+    # delegation of the round is replaced with one ScoutException (rendered
+    # by the Exception branch below through the same channel as any other
+    # tool error), while the round's OTHER tool calls keep their normal,
+    # already-computed results. Agent objects are not compared because two
+    # delegation entry points can mint distinct objects for the same
+    # persisted conversation; save_file is the actual persistence target,
+    # which is the identity this invariant protects.
+    conflicted = agents.collect(&:save_file).compact.tally.select{|_f, count| count > 1 }.keys
+    if conflicted.any?
+      exception = ScoutException.new(
+        "Conflicting delegations: multiple agent executions of this round " \
+        "target the same saved conversation #{conflicted.join(", ")}. A " \
+        "conversation can be advanced by only one delegation at a time. " \
+        "Use distinct conversation names, or delegate sequentially " \
+        "(across rounds) so each conversation runs one turn at a time. No " \
+        "specialist of this round was started, and every delegation of " \
+        "this round was rejected together with it; the round's other tool " \
+        "calls were not affected."
+      )
+
+      # Un-stage what this round appended so a retried plan finds each
+      # conversation exactly as before the faulty round. Delegation staging
+      # appended one user prompt per delegation (preceded, for a
+      # clear_tools continuation, by one context-only marker), and no save
+      # has happened yet -- saving starts inside Agent#chat, which none of
+      # these delegations reached -- so the chats are still memory-only.
+      # Walk the calls newest first and pop the matching tail; a marker
+      # directly before a staged prompt can only be the marker staged by
+      # that same delegation (an earlier round's marker is followed by its
+      # own prompt and answer).
+      # One delegation in the rejected batch may have asked for a RESTART of
+      # an existing conversation (hand_off's new_conversation, or
+      # ask_conversation's restart): Agent#start then saved a snapshot of the
+      # prior chat to <save_file>.files/resets/ and re-branched in place
+      # (keeping start_chat, dropping everything after it) BEFORE this
+      # validation ran. Popping the staged prompt is not enough there: the
+      # turns the conversation had accumulated are gone from the live chat.
+      # Un-restart them: pop the staged prompt off the restart branch and
+      # swap back in the exact pre-restart chat object that Agent#start
+      # displaced. The snapshot file under resets/ is only an append-only
+      # recovery record of what was displaced, never read back by the live
+      # conversation, so it needs no compensating action. This runs BEFORE
+      # the plain prompt pops below: the restored chat does not end with the
+      # staged prompt (it ends where the old conversation ended), so the
+      # plain pop loop leaves it alone.
+      tool_call_content.reverse_each do |_function_name, function_arguments, _tool_call_id, _tool_call, content|
+        next unless LLM::Agent === content
+        next unless function_arguments[:new_conversation] || function_arguments[:restart]
+        next unless (prior = content.restart_undo_stash)
+        content.restart_undo_stash = nil
+        chat = content.current_chat
+        prompt = function_arguments[:prompt] || function_arguments[:message]
+        if chat.last && chat.last[:role].to_s == 'user' && chat.last[:content] == prompt
+          chat.pop
+          content.restore_restarted_chat(prior)
+        end
+      end
+
+      tool_call_content.reverse_each do |function_name, function_arguments, _tool_call_id, _tool_call, content|
+        next unless LLM::Agent === content
+        chat = content.current_chat
+        prompt = function_arguments[:prompt] || function_arguments[:message]
+        next unless chat.last && chat.last[:role].to_s == 'user' && chat.last[:content] == prompt
+        chat.pop
+        if function_arguments[:inherit].to_s == 'clear_tools' &&
+           chat.last && chat.last[:role].to_s == 'clear_tools'
+          chat.pop
+        end
+      end
+
+      tool_call_content.each{|entry| entry[-1] = exception if LLM::Agent === entry.last }
+      agents = []
+    end
+
     agent_answers = TSV.setup({}, key_field: 'Pos', fields: ['Content', 'Job path'], type: :list)
 
     if agents.any?

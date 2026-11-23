@@ -75,7 +75,7 @@ module LLM
         conversation: {
           type: 'string',
           pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*$',
-          description: 'Optional conversation or chat identifier; reuse it with the same agent to continue that conversation across several calls'
+          description: 'Optional conversation or chat identifier; reuse it with the same agent to continue that conversation across several rounds. Two asks of the same round onto one conversation (two nameless asks share the default) conflict: the whole delegation batch of that round returns errors'
         },
         inherit: {
           type: 'string',

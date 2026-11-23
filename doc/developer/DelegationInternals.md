@@ -395,6 +395,87 @@ SOCIAL_PRIVATE_OPTIONS = %i[
 This prevents leaking session state, tool blocks, or message arrays from the
 caller to the specialist.
 
+### Parallel delegation preflight: one conversation per batch
+
+`LLM.process_calls` runs the tool calls of a round sequentially, but the
+agent-returning ones (the delegations produced by `ask` and
+`hand_off_to_*`) are asked **in parallel** afterwards (`Open.traverse`,
+`cpus > 1`). A specialist conversation is a persisted save file with
+persistence locks behind it (`Open.sensible_write` → `Open.lock` on the
+save file), so two delegations of one round that target the same
+conversation would drive that conversation twice at the same time and the
+process used to block forever on the lock.
+
+The fix lives at the execution boundary, immediately before
+`Open.traverse`: `LLM.process_calls` collects the `save_file` of every
+pending delegation and, when two share one, converts the round into an
+error round for the delegations instead of raising:
+
+- `save_file` is the conversation's **actual persistence target**, so it is
+  the correct identity for this invariant: two delegations sharing a save
+  file contend for the same storage even when their logical names differ,
+  and delegations with the same name cannot share one.
+- The check runs **after** the tool calls of the round (so it sees every
+  delegation the model staged) and **before** any `agent.chat`
+  executes, so a conflicted batch never starts a specialist.
+- Every agent-returning entry of `tool_call_content` is replaced by one
+  `ScoutException` (same message, naming the conflicting save files). The
+  existing `Exception` branch of the result loop then turns each into a
+  normal `error` `function_call_output`, paired to its own call id, so
+  the model receives the failure as tool output and can rethink the plan.
+  Rejection is batch-wide by design: the agent sub-batch is either valid
+  as a whole or not started at all.
+- Non-delegation tool calls of the round keep their real results — the
+  failure belongs to the delegation batch, not to the round. (This is not
+  transactional: side effects already performed by earlier tool calls
+  stand.)
+- Staged prompts are rolled back in memory: delegation preparation appends
+  one user prompt per delegation (plus one `clear_tools` marker when
+  applicable) to the conversation's chat before dispatch. Those appends
+  happen in memory only — no save occurs until `Agent#chat` — so the
+  conflicted batch pops them again, walking the round's calls newest
+  first and removing each staged tail (a `clear_tools` marker immediately
+  before a staged prompt belongs to that same staging). A corrected round
+  afterwards therefore finds each conversation exactly as it was before
+  the faulty one.
+- A restarting delegation is un-restarted first, not merely popped:
+  `hand_off`'s `new_conversation` and `ask_conversation`'s `restart:` do
+  more than append — `Agent#start` **re-branches the conversation in
+  place** before the prompt is staged (start_chat kept, every
+  accumulated turn dropped) and writes a snapshot under
+  `<save_file>.files/resets/`. So `Agent#start` now stashes the exact
+  displaced chat object (`restart_undo_stash`, one restart deep), and the
+  conflicted batch pops the staged prompt off the restart branch and
+  swaps the displaced chat back (`restore_restarted_chat`, which refuses
+  if the restart branch has advanced). The `resets/` snapshot needs no
+  compensating action: it is an append-only recovery record, never read
+  back by the live conversation. The same identity gap applies here in
+  reverse — the preflight detects save-file conflicts, but the undo
+  walks agent objects; both agree because `ask_conversation` memoizes
+  **one holder per `<specialist>/<conversation>` key**, so every
+  delegation of a conversation mutates the same in-memory chat, and the
+  exact-restore regression test asserts the full message list around a
+  three-delegation mixed batch (plain, `clear_tools`, restart) through
+  that single shared holder.
+- Delegations without a `save_file` (persist-less ephemeral agents, mock
+  workers) are compacted out of the comparison, exactly as their null
+  paths cannot contend for storage.
+
+Omitting the conversation name routes both delegations to the `default`
+slot of the same specialist, so two anonymous delegations to one worker
+share one save file and conflict exactly like two explicit ones. An
+`ask` names its conversation directly, while a `hand_off_to_Worker` slot
+asks the conversation named after its slot (`Worker/Worker`); both
+resolve onto the same conversation holder, so a `hand_off_to_Worker` and
+an `ask(..., conversation: 'Worker')` of one round conflict as well. The
+slot keeps whatever case the registration used — nothing lower-cases it.
+
+Known scope: delegations issued from **independent rounds or processes**
+can still contend for the same conversation and wait on the persistence
+lock. That is the historical locking behavior and is not addressed here.
+
+---
+
 ### Delegated inference receipts
 
 When a delegation tool returns an `LLM::Agent`, `LLM.process_calls` embeds
@@ -423,7 +504,7 @@ call time — it is hard-coded at registration time.
 | Parameter | Description |
 |---|---|
 | `agent` | A pre-loaded `LLM::Agent` instance. |
-| `name` | Tool name suffix (e.g., `worker` → `hand_off_to_worker`). |
+| `name` | Tool name suffix (e.g., `Worker` → `hand_off_to_Worker`), and the conversation the slot asks. |
 | `description` | Tool description for the LLM. |
 | `&block` | Optional custom tool block. Defaults to: `agent.user(message); agent.chat`. |
 
@@ -474,7 +555,7 @@ New code should use `conversation` and `inherit` as separate parameters.
 | `lib/scout/llm/agent/chat.rb` | `start_chat`, `current_chat`, Chat proxy via `method_missing` |
 | `lib/scout/llm/agent/workflow.rb` | `chat_task`, `log_agent` — workflow integration |
 | `lib/scout/llm/chat/provenance.rb` | Live passes over save files, society trees and `.jobs` sidecars |
-| `lib/scout/llm/tools/call.rb` | `<base>.jobs` writer/removal in `LLM.process_calls` |
+| `lib/scout/llm/tools/call.rb` | `<base>.jobs` writer/removal, sequential tool-call dispatch, parallel delegation preflight and `Open.traverse` execution |
 
 ## Tests
 
@@ -487,6 +568,7 @@ New code should use `conversation` and `inherit` as separate parameters.
 | `delegate` hand-off block, slot naming, parent sweep | `test/scout/llm/agent/test_delegate.rb` — `test_default_block_returns_an_agent`, `test_parent_save_sweeps_the_hand_off_child`, `test_hyphenated_name_gives_a_sanitized_slot`, `test_pre_registered_agent_is_the_society_template`, `test_custom_block_receives_the_passed_agent_and_mutates_it`, `test_bad_hand_off_returns_the_exception_not_a_raise` |
 | Society persistence layout and autosave | `test/scout/llm/agent/test_save.rb` — `test_society_dir_for`, `test_save_nested_society`, `test_save_cyclic_society_terminates`, `test_child_auto_save_keeps_canonical_layout`, `test_restart_snapshot`, `test_save_produces_no_legacy_log_tree` |
 | Legacy `chat` parameter mapping | no direct test (`social_tool_parameters`, `lib/scout/llm/agent/conversation.rb`); the compatibility path is exercised only indirectly through stored-call replay. |
+| Parallel delegation preflight: save-file conflicts (default and named slots), mixed `ask`/`hand_off` batches, error results instead of an abort, staged-prompt rollback, restart undo (`new_conversation`/`restart:` exact-restore through the shared holder), side-effect tool results kept, hang regression | `test/scout/llm/tools/test_call_delegation_conflict.rb` |
 
 ---
 

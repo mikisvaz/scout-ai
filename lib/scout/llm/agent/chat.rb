@@ -18,10 +18,39 @@ module LLM
         (@current_chat || start_chat).annotate chat unless Chat === chat
         @current_chat = chat
       else
+        # Restart: keep the displaced conversation (exact object, including
+        # every accumulated turn) available to `restore_restarted_chat` so a
+        # round rejected before inference can undo this restart precisely.
+        @restart_undo_stash = @current_chat if Chat === @current_chat && @current_chat.any?
         start_chat = self.start_chat
         Chat.setup(start_chat) unless Chat === start_chat
         @current_chat = start_chat.branch
       end
+    end
+
+    # The exact chat object displaced by the last `start`-restart (the branch
+    # that had accumulated the conversation's turns). Held only for the
+    # current restart, overwritten by the next one: `restore_restarted_chat`
+    # consumes it to undo a restart whose round was rejected before any
+    # inference ran, and anything else can keep reading the snapshot written
+    # under <save_file>.files/resets/ instead.
+    def restart_undo_stash
+      @restart_undo_stash
+    end
+
+    def restart_undo_stash=(chat)
+      @restart_undo_stash = chat
+    end
+
+    # Undo one restart that has not been advanced since: put the displaced
+    # chat back as current_chat, keeping `start_chat` (the restart kept it,
+    # and the stashed chat already prefixes it). Returns the restored chat.
+    # Raises when the restarted branch has been mutated since the restart
+    # (its tail no longer matches the re-branched start_chat), because
+    # restoring then would silently drop those appended turns.
+    def restore_restarted_chat(prior)
+      raise ScoutException, 'Cannot restore a restarted chat that has advanced' unless current_chat == start_chat.branch
+      @current_chat = prior
     end
 
     def current_chat
