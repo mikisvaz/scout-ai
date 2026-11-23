@@ -124,7 +124,7 @@ class TestEpochToolCompactation < Test::Unit::TestCase
 
     records = records(result)
     assert_equal 4, records.length
-    records.each { |r| assert_equal :user, r[:role] }
+    records.each { |r| assert_equal :assistant, r[:role] }
 
     # Both messages of each replaced pair are gone; the four ids (plus the
     # blank-id output at forward 15, identified through its call) appear in
@@ -394,8 +394,8 @@ class TestEpochToolCompactation < Test::Unit::TestCase
 
   # --- 8. drop band -------------------------------------------------------------
 
-  # 160 outputs: the schedule reaches pinned_total=110, epoch_size=30,
-  # new_calls=30, keep_full_count=50, effective_compacted=100,
+  # 160 outputs: the schedule reaches pinned_total=140, epoch_size=30,
+  # new_calls=20, keep_full_count=40, effective_compacted=100,
   # truncate_to=140. Reverse 141..160 == forward 1..20 is dropped.
   def test_interaction_older_than_truncate_to_is_dropped_without_record
     input = [{role: 'user', content: 'start'}]
@@ -426,7 +426,8 @@ class TestEpochToolCompactation < Test::Unit::TestCase
       call_ids(result).include?('call_20'),
       'first interaction outside the drop band removed'
     )
-    assert result.first[:content].start_with?('=== Context Management ===')
+    assert_equal input.first, result.first
+    assert_match(/Removed tool messages: 40/, result[1][:content])
   end
 
   # --- 9. stability -------------------------------------------------------------
@@ -456,8 +457,7 @@ class TestEpochToolCompactation < Test::Unit::TestCase
     assert_equal base_records, grown_records
     assert_equal 4, grown_records.length
 
-    # The notice is byte-identical (no counters).
-    assert_equal base_result.first[:content], grown_result.first[:content]
+    assert_equal base_result, grown_result.take(base_result.size)
 
     # The new pair survives in full.
     assert call_ids(grown_result).include?('call_60')
@@ -465,18 +465,15 @@ class TestEpochToolCompactation < Test::Unit::TestCase
 
   # --- 10. notice ----------------------------------------------------------------
 
-  def test_notice_present_fixed_and_prepended_only_when_needed
-    result = Chat.epoch_tool_compactation(base_history)
-
-    notice = result.first
-
-    assert_equal :user, notice[:role]
-    assert notice[:content].start_with?('=== Context Management ===')
-    assert(
-      !notice[:content].match(/\d/),
-      'notice contains digits (counters would break prefix caching)'
-    )
-    assert !notice[:compacted]
+  def test_no_meta_places_one_counted_notice_at_first_affected_call
+    input = base_history
+    result = Chat.epoch_tool_compactation(input)
+    first = call_index(input, 'call_9')
+    assert_equal input.take(first), result.take(first)
+    notice = result.fetch(first)
+    assert_equal :assistant, notice[:role]
+    assert_match(/Compacted tool messages: 8\nRemoved tool messages: 0/, notice[:content])
+    assert_equal 1, contents_containing(result, '=== Context Management ===').size
 
     # All-short history: nothing replaced or dropped, so no notice.
     quiet = [{role: 'user', content: 'start'}]
@@ -526,5 +523,90 @@ class TestEpochToolCompactation < Test::Unit::TestCase
       result.any? { |m| m[:role].to_s == 'function_call' },
       'shorten_tools_epoch_increment no longer keeps tool calls'
     )
+  end
+
+  def test_meta_anchor_counts_drops_and_preserves_all_preceding_rounds
+    input = base_history
+    start = call_index(input, 'call_6')
+    later = call_index(input, 'call_10')
+    input.insert(later, {role: :meta, content: 'round 3'})
+    input.insert(start, {role: :meta, content: 'round 2'}, {role: :assistant, content: 'thinking'})
+    input.unshift({role: :system, content: 'identity'}, {role: :meta, content: 'round 1'})
+    snapshot = Marshal.dump(input)
+    result = Chat.epoch_tool_compactation(input)
+    marker = input.index { |m| m[:content] == 'round 2' }
+    assert_equal input.take(marker + 1), result.take(marker + 1)
+    assert_match(/Compacted tool messages: 8/, result[marker + 1][:content])
+    assert_equal snapshot, Marshal.dump(input)
+  end
+
+  def test_repeat_extends_live_epoch_without_changing_previously_rendered_bytes
+    options = {threshold: 6, full: 1, base_compacted: 1, initial_size: 2,
+               repeat_increase: 2, configured_max_size: 6, compacted_growth_ratio: 2}
+    history = [{role: :system, content: 'identity'}]
+    append = lambda do |key|
+      id = history.size.to_s
+      history << {role: :meta, content: "round #{id}"}
+      history << call_message(key, {}, id)
+      history << output_message(id, 'x' * 600)
+    end
+    %w[a a b c d e f].each(&append)
+    previous = Chat.epoch_tool_compactation(history, **options)
+    %w[a g h].each do |key|
+      append.call(key)
+      rendered = Chat.epoch_tool_compactation(history, **options)
+      assert_equal JSON.generate(previous), JSON.generate(rendered.take(previous.size))
+      previous = rendered
+    end
+    append.call('i')
+    changed = Chat.epoch_tool_compactation(history, **options)
+    assert_not_equal previous, changed.take(previous.size)
+    assert_equal history.take(2), changed.take(2)
+  end
+
+  def test_batched_calls_with_reversed_outputs_never_get_split_by_metadata
+    calls = %w[a b c d].map { |id| call_message(id, {}, id) }
+    outputs = %w[b a c d].map { |id| output_message(id, id == 'b' ? 'z'*500 : 'ok') }
+    input = [calls[0], calls[1], outputs[0], outputs[1], calls[2], outputs[2], calls[3], outputs[3]]
+    result = Chat.epoch_tool_compactation(input, threshold: 3, full: 1)
+    assert_match(/Context Management/, result.first[:content])
+    assert_equal [calls[0], outputs[1]], result[1, 2]
+    assert_match(/Call id: b/, result[3][:content])
+  end
+
+  def test_sizing_calibration_tradeoff_and_override_precedence
+    base = Chat::ToolCompaction.policy
+    keys = %i[threshold full initial_size configured_max_size base_compacted configured_max_compacted]
+    assert_equal [50, 20, 20, 60, 80, 160], base.values_at(*keys)
+    small = Chat::ToolCompaction.policy(context_tokens: 40_000)
+    assert_equal [25, 10, 10, 30, 40, 80], small.values_at(*keys)
+    hot = Chat::ToolCompaction.policy(context_tokens: 80_000, immediate_share: 0.75)
+    assert_equal [75, 30, 30, 90, 40, 80], hot.values_at(*keys)
+    assert_equal 320, Chat::ToolCompaction.policy(max_chars: 400)[:configured_max_compacted]
+    assert_equal 7, Chat::ToolCompaction.policy(context_tokens: 40_000, full: 7)[:full]
+    assert_raise(ArgumentError) { Chat::ToolCompaction.policy(immediate_share: 1) }
+  end
+
+  def test_cap_covers_nested_arguments_many_small_fields_and_job_path
+    args = (1..150).to_h { |i| ["k#{i}", i] }
+    args['nested'] = [{'data' => 'private' * 100}]
+    input = base_history
+    i = call_index(input, 'call_19')
+    input[i] = call_message('sized', args, 'call_19')
+    input[i+1] = output_message('call_19', 'ok', step: 'very-long-job' * 200)
+    [32, 120, 800].each do |cap|
+      result = Chat.epoch_tool_compactation(input, max_chars: cap)
+      assert_false call_ids(result).include?('call_19')
+      assert records(result).all? { |r| r[:content].size <= cap }
+      assert records(result).none? { |r| r[:content].include?('private') }
+    end
+  end
+
+  def test_native_chat_file_projection_round_trip
+    input = Chat.parse(Chat.print(base_history))
+    rendered = Chat.epoch_tool_compactation(input)
+    parsed = Chat.parse(Chat.print(rendered))
+    assert_equal rendered.map { |m| [m[:role].to_s, m[:content]] },
+                 parsed.map { |m| [m[:role].to_s, m[:content]] }
   end
 end

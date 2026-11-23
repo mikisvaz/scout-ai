@@ -1,512 +1,348 @@
 require 'json'
-require 'set'
-require_relative 'shorten_tools_epoch_increment'
 
 module Chat
-
-  # Marker for the pairwise tool-compaction strategy. Distinct from
-  # COMPACTATION_MESSAGE on purpose: epoch_tool_compactation removes the
-  # whole function_call/function_call_output pair and inserts an ordinary
-  # user-role metadata record, so its records must not look like the
-  # in-place '[CONTEXT-COMPACTED ...]' previews produced by the
-  # shorten_tools* strategies.
   TOOL_COMPACTATION_MESSAGE = 'TOOL-COMPACTION-RECORD'
-
-  # Fixed, counter-free global notice. Deterministic text only: per-call
-  # counters would change between inferences and defeat prefix caching.
   EPOCH_TOOL_COMPACTATION_NOTICE = {
     role: :assistant,
-    content: <<~TEXT.chomp
-      === Context Management ===
+    content: "=== Context Management ===\nOlder tool interactions were shortened or removed. " \
+             "Records describe calls that already ran. Use the recorded job to recover an output when available. " \
+             "A missing result alone is no reason to repeat a call."
+  }.freeze
 
-      Some older tool interactions are not present in this conversation:
-      each had its function_call and function_call_output pair removed and
-      replaced either by a short metadata record or by nothing at all. A
-      compaction record is metadata about a tool interaction, not its
-      result, and never contains the tool output. Recent tool interactions
-      are preserved in full.
+  module ToolCompaction
+    extend self
 
-      Do not treat a compaction record as a tool result. If a value is
-      needed, run the tool again.
-    TEXT
-  }
+    # 20% for non-tool messages, schemas and generation. Full pairs are
+    # estimated at 400 tokens each. Medium pairs budget four chars per token.
+    SETTINGS = {
+      threshold: :epoch_tool_call_threshold, full: :epoch_full_tool_calls,
+      base_compacted: :epoch_compacted_tool_calls, initial_size: :epoch_size,
+      epochs_per_increase: :epoch_increment_epochs_per_increase,
+      size_increase: :epoch_increment_size_increase,
+      repeat_increase: :epoch_increment_repeat_increase,
+      configured_max_size: :epoch_increment_max_size,
+      compacted_growth_ratio: :epoch_increment_compacted_growth_ratio,
+      configured_max_compacted: :epoch_increment_max_compacted_tool_calls
+    }.freeze
 
-  # --- pairwise tool compaction helpers ---
+    def setting(key, default)
+      Scout::Config.get(key, :prompt, :context, env: key.to_s.upcase, default: default)
+    end
 
-  # Whether a paired interaction is oversized, mirroring the rewrite
-  # triggers of shorten_tools_epoch_increment exactly:
-  #
-  #   output side: content.to_s longer than DEFAULT_SHORT_STRING_LENGTH * 2
-  #                (the size passed to shorten_string at
-  #                shorten_tools_epoch_increment.rb:575-579)
-  #
-  #   call side:   any argument value that is a String longer than
-  #                DEFAULT_SHORT_STRING_LENGTH (the default size of the
-  #                per-value shorten_string call at
-  #                shorten_tools_epoch_increment.rb:638-640)
-  #
-  # Non-Hash arguments (including JSON-string arguments) are never
-  # oversized on the call side, exactly like the mirrored strategy, which
-  # only rewrites Hash argument values.
-  def self.epoch_tool_compactation_oversized?(call_parsed, output_parsed)
-    output_oversized =
-      output_parsed.is_a?(Hash) &&
-      output_parsed['content'].to_s.length > DEFAULT_SHORT_STRING_LENGTH * 2
+    def policy(context_tokens: nil, immediate_share: nil, max_chars: nil, **overrides)
+      tokens = Integer(context_tokens || setting(:tool_context_tokens, 80_000))
+      share = Float(immediate_share || setting(:tool_immediate_share, 0.5))
+      chars = Integer(max_chars || setting(:tool_compaction_max_chars, 800))
+      raise ArgumentError, 'context_tokens must be positive' unless tokens.positive?
+      raise ArgumentError, 'immediate_share must be between 0 and 1 (exclusive)' unless share > 0 && share < 1
+      raise ArgumentError, 'max_chars must be at least 32' unless chars >= 32
+      unknown = overrides.keys - SETTINGS.keys
+      raise ArgumentError, "Unknown tool compaction settings #{unknown.inspect}" unless unknown.empty?
 
-    call_oversized = false
+      usable = tokens * 0.8
+      hot = [(usable * share / 400).floor, 2].max
+      medium = (usable * (1 - share) * 4 / chars).floor
+      full = [hot / 4, 1].max
+      epoch = [hot / 4, 1].max
+      peak = hot - full
+      base = medium / 2
+      growth = [(epoch / 2.0).round, 1].max
+      defaults = {
+        threshold: hot * 5 / 8, full: full, initial_size: epoch,
+        base_compacted: base, configured_max_compacted: medium,
+        configured_max_size: peak, epochs_per_increase: 3,
+        size_increase: growth, repeat_increase: growth,
+        compacted_growth_ratio: (medium - base).to_f / [peak - epoch, 1].max
+      }
+      SETTINGS.each do |key, config_key|
+        value = overrides[key] || setting(config_key, defaults.fetch(key))
+        defaults[key] = if key == :compacted_growth_ratio
+                          ratio = Float(value)
+                          ratio.finite? && ratio.positive? ? ratio : 0.0
+                        else
+                          [Integer(value), 0].max
+                        end
+      end
+      defaults.merge(max_chars: chars)
+    end
 
-    if call_parsed.is_a?(Hash)
-      arguments = call_parsed['arguments']
+    def role(msg)
+      (msg[:role] || msg['role']).to_s
+    end
 
-      if arguments.is_a?(Hash)
-        call_oversized = arguments.any? do |_key, value|
-          value.is_a?(String) && value.length > DEFAULT_SHORT_STRING_LENGTH
-        end
+    def content(msg)
+      msg[:content] || msg['content']
+    end
+
+    def payload(msg)
+      data = content(msg)
+      parsed = JSON.parse(data) if data.is_a?(String)
+      parsed if parsed.is_a?(Hash)
+    rescue JSON::ParserError
+      nil
+    end
+
+    def canonical(value)
+      case value
+      when Hash then value.sort.to_h.transform_values { |v| canonical(v) }
+      when Array then value.map { |v| canonical(v) }
+      else value
       end
     end
 
-    output_oversized || call_oversized
-  end
+    Pair = Struct.new(:start, :finish, :position, :call, :output, :key)
 
-  # One argument entry of a compaction record. Exact or omitted, nothing in
-  # between: a value is emitted verbatim only when it is a short String or
-  # a scalar, so no truncated, executable-looking fragment of a long value
-  # can ever appear in a record.
-  def self.epoch_tool_compactation_argument_line(key, value)
-    case value
-    when String
-      if value.length <= DEFAULT_SHORT_STRING_LENGTH
-        "#{key}=#{value}"
-      else
-        "#{key}=<omitted, #{value.length} chars>"
-      end
-    when Integer, Float, Symbol, TrueClass, FalseClass, NilClass
-      rendered =
-        case value
-        when NilClass then 'nil'
-        when Symbol then value.to_s
-        else value.to_s
-        end
-
-      "#{key}=#{rendered}"
-    else
-      text =
-        begin
-          value.to_json
-        rescue StandardError
-          value.to_s
-        end
-
-      "#{key}=<omitted, #{text.length} chars>"
-    end
-  end
-
-  # The user-role metadata record that replaces one oversized
-  # function_call/function_call_output pair. Contains no substring
-  # 'Preview:' and no renaming: the original tool name and call id are
-  # reported exactly as they appeared.
-  def self.epoch_tool_compactation_record(call_parsed, output_parsed)
-    name =
-      if call_parsed.is_a?(Hash) && call_parsed['name']
-        call_parsed['name']
-      else
-        'unknown'
-      end
-
-    call_id =
-      if call_parsed.is_a?(Hash) && call_parsed['id']
-        call_parsed['id']
-      elsif output_parsed.is_a?(Hash)
-        output_parsed['id']
-      end
-
-    arguments = call_parsed.is_a?(Hash) ? call_parsed['arguments'] : nil
-    content =
-      if output_parsed.is_a?(Hash) && output_parsed['content']
-        output_parsed['content']
-      else
-        ''
-      end
-    step = output_parsed.is_a?(Hash) ? output_parsed['step'] : nil
-
-    argument_chars =
-      if arguments.is_a?(Hash)
-        begin
-          arguments.to_json.length
-        rescue StandardError
-          arguments.to_s.length
-        end
-      else
-        arguments.to_s.length
-      end
-
-    lines = []
-    lines << "[#{TOOL_COMPACTATION_MESSAGE}] This is metadata about a removed tool interaction, not a tool result."
-    lines << ''
-    lines << 'A function_call / function_call_output pair was removed from the conversation at this position.'
-    lines << 'The tool was executed when the interaction happened; this record describes it and does not reproduce its output.'
-    lines << ''
-    lines << "Tool: #{name}"
-    lines << "Call id: #{call_id}"
-    lines << "Original sizes: arguments #{argument_chars} chars, output #{content.to_s.length} chars"
-    lines << 'Arguments:'
-
-    if arguments.is_a?(Hash) && !arguments.empty?
-      arguments.each do |key, value|
-        lines << "  #{epoch_tool_compactation_argument_line(key, value)}"
-      end
-    else
-      lines << '  (no argument entries recorded)'
-    end
-
-    if step && !step.to_s.empty?
-      lines << "Full output found in job: #{step}"
-    end
-
-    lines << ''
-    lines << 'The original pair was removed; this record is metadata, not a tool result. If the value of this interaction is needed, run the tool again.'
-
-    {
-      role: :assistant,
-      compacted: true,
-      content: lines * "\n"
-    }
-  end
-
-  # --- epoch_tool_compactation strategy implementation ---
-
-  #
-  # Pairwise tool compaction on the epoch_increment schedule.
-  #
-  # The schedule, windows and early returns are identical to
-  # shorten_tools_epoch_increment; only the treatment of the compact band
-  # differs. Where the mirrored strategy rewrites an oversized interaction
-  # in place (shortened content, 'compacted-' name prefix, and a
-  # '[CONTEXT-COMPACTED ...]' preview that models mistake for a real tool
-  # result), this strategy removes BOTH messages of the pair and inserts
-  # one ordinary user-role metadata record immediately after the position
-  # where the pair's function_call_output stood. Inserting after an output
-  # is the protocol-safe position in both backends: it never places a user
-  # message between a function_call and its own function_call_output.
-  #
-  # Interactions older than the effective compacted window are dropped
-  # entirely, exactly like the mirrored strategy.
-  #
-  def self.epoch_tool_compactation(messages, 
-                                   threshold: nil, full: nil, base_compacted: nil, initial_size: nil, 
-                                   epochs_per_increase: nil,  size_increase: nil, repeat_increase: nil,
-                                   configured_max_size: nil, compacted_growth_ratio: nil, configured_max_compacted: nil)
-    threshold ||= [
-      (
-        self.epoch_increment_tool_call_threshold ||
-        DEFAULT_EPOCH_INCREMENT_TOOL_CALL_THRESHOLD
-      ).to_i,
-      0
-    ].max
-
-    full ||= [
-      (
-        self.epoch_increment_full_tool_calls ||
-        DEFAULT_EPOCH_INCREMENT_FULL_TOOL_CALLS
-      ).to_i,
-      0
-    ].max
-
-    base_compacted ||= [
-      (
-        self.epoch_increment_compacted_tool_calls ||
-        DEFAULT_EPOCH_INCREMENT_COMPACTED_TOOL_CALLS
-      ).to_i,
-      0
-    ].max
-
-    initial_size ||= (
-      self.epoch_increment_initial_size ||
-      DEFAULT_EPOCH_INCREMENT_INITIAL_SIZE
-    ).to_i
-
-    epochs_per_increase ||= (
-      self.epoch_increment_epochs_per_increase ||
-      DEFAULT_EPOCH_INCREMENT_EPOCHS_PER_INCREASE
-    ).to_i
-
-    size_increase ||= [
-      (
-        self.epoch_increment_size_increase ||
-        DEFAULT_EPOCH_INCREMENT_SIZE_INCREASE
-      ).to_i,
-      0
-    ].max
-
-    repeat_increase ||= [
-      (
-        self.epoch_increment_repeat_increase ||
-        DEFAULT_EPOCH_INCREMENT_REPEAT_INCREASE
-      ).to_i,
-      0
-    ].max
-
-    configured_max_size ||= (
-      self.epoch_increment_max_size ||
-      DEFAULT_EPOCH_INCREMENT_MAX_SIZE
-    ).to_i
-
-    compacted_growth_ratio ||= (
-      self.epoch_increment_compacted_growth_ratio ||
-      DEFAULT_EPOCH_INCREMENT_COMPACTED_GROWTH_RATIO
-    ).to_f
-
-    unless compacted_growth_ratio.finite? &&
-           compacted_growth_ratio >= 0.0
-      compacted_growth_ratio = 0.0
-    end
-
-    configured_max_compacted ||= (
-      self.epoch_increment_max_compacted_tool_calls ||
-      DEFAULT_EPOCH_INCREMENT_MAX_COMPACTED_TOOL_CALLS
-    ).to_i
-
-    return messages if initial_size <= 0
-
-    max_size = [configured_max_size, initial_size].max
-
-    max_compacted = [
-      configured_max_compacted,
-      base_compacted
-    ].max
-
-    total_tool_outputs = messages.count do |msg|
-      role = msg[:role]
-      role && role.to_sym == :function_call_output
-    end
-
-    return messages if total_tool_outputs <= threshold
-    return messages if full.zero? && base_compacted.zero?
-
-    # --- Phase A: index interactions by id ---
-    #
-    # ScoutCoder: real chat layouts are strictly adjacent pairs
-    # (function_call immediately followed by its function_call_output,
-    # interleaved with meta); across all var/jobs chats there are zero
-    # call-run/output-run batches, so id pairing with an
-    # immediately-preceding-unpaired-call fallback covers every real
-    # history. Orphans stay untouched but still count toward
-    # total_tool_outputs, keeping the schedule identical to the one
-    # shorten_tools_epoch_increment computes on the same input.
-
-    interactions = []
-    interaction_of_call = {}
-    interaction_of_output = {}
-    pending_calls_by_id = {}
-    output_forward_position = 0
-
-    messages.each_with_index do |msg, index|
-      role = msg[:role]
-      next unless role
-
-      case role.to_sym
-      when :function_call
-        parsed = epoch_increment_parse_tool_json(msg[:content])
-
-        interaction = {
-          call_index: index,
-          call_parsed: parsed,
-          output_index: nil,
-          output_parsed: nil,
-          output_position: nil,
-          disposition: :keep
-        }
-
-        interactions << interaction
-        interaction_of_call[index] = interaction
-
-        id = parsed.is_a?(Hash) ? parsed['id'] : nil
-        id = id.to_s unless id.nil?
-
-        if id && !id.empty?
-          pending_calls_by_id[id] ||= interaction
-        end
-
-      when :function_call_output
-        # Every output counts, even malformed ones, so positions stay
-        # aligned with total_tool_outputs.
-        output_forward_position += 1
-
-        parsed = epoch_increment_parse_tool_json(msg[:content])
-
-        id = parsed.is_a?(Hash) ? parsed['id'] : nil
-        id = id.to_s unless id.nil?
-
-        partner =
-          if id && !id.empty?
-            pending_calls_by_id.delete(id)
+    # Output order defines the clock, even when an output is malformed.
+    # Unmatched messages never become eligible for compaction.
+    def pairs(messages)
+      pending = {}
+      previous = nil
+      position = 0
+      completed = []
+      messages.each_with_index do |msg, i|
+        case role(msg)
+        when 'function_call'
+          call = payload(msg)
+          next unless call
+          previous = Pair.new(i, nil, nil, call)
+          id = call['id'].to_s
+          (pending[id] ||= []) << previous unless id.empty?
+        when 'function_call_output'
+          position += 1
+          output = payload(msg)
+          next unless output
+          id = output['id'].to_s
+          if id.empty?
+            next unless previous && previous.start == i - 1
+            pair = previous
+            pending[pair.call['id'].to_s]&.delete(pair)
+          else
+            pair = pending[id]&.shift
+            next unless pair
           end
-
-        # Fallback for an output with a missing or blank id: pair it with
-        # the immediately preceding message when that is an unpaired call.
-        if partner.nil? && (id.nil? || id.empty?) && index > 0
-          previous = messages[index - 1]
-
-          if previous &&
-             previous[:role] &&
-             previous[:role].to_sym == :function_call
-
-            candidate = interaction_of_call[index - 1]
-
-            if candidate && candidate[:output_index].nil?
-              if candidate[:call_parsed].is_a?(Hash) &&
-                 candidate[:call_parsed]['id']
-                pending_calls_by_id.delete(
-                  candidate[:call_parsed]['id'].to_s
-                )
-              end
-
-              partner = candidate
-            end
-          end
+          pair.finish = i
+          pair.position = position
+          pair.output = output
+          pair.key = [pair.call['name'], canonical(pair.call['arguments'] || {})]
+          completed << pair
         end
-
-        next unless partner
-
-        partner[:output_index] = index
-        partner[:output_parsed] = parsed
-        partner[:output_position] = output_forward_position
-        interaction_of_output[index] = partner
       end
+      completed
     end
 
-    # --- Phase B: schedule and windows, identical to the mirrored strategy ---
+    def oversized?(pair, messages, chars)
+      return true if content(messages[pair.start]).size + content(messages[pair.finish]).size > chars
+      return true if pair.output['content'].to_s.size > chars / 2
+      args = pair.call['arguments']
+      args.is_a?(Hash) && args.any? { |_, v| v.is_a?(String) && v.size > chars / 4 }
+    end
 
-    repeat_data = build_epoch_increment_repeat_data(
-      messages,
-      total_tool_outputs
-    )
-
-    protected_positions = repeat_data[:protected_positions]
-
-    schedule = build_epoch_increment_schedule(
-      total_tool_outputs,
-      threshold,
-      repeat_data[:repeated_forward_positions],
-      initial_size: initial_size,
-      epochs_per_increase: epochs_per_increase,
-      size_increase: size_increase,
-      repeat_increase: repeat_increase,
-      max_size: max_size
-    )
-
-    pinned_total = schedule[:pinned_total]
-    new_calls = schedule[:new_calls]
-
-    epoch_size_growth = [
-      schedule[:epoch_size] - initial_size,
-      0
-    ].max
-
-    compacted_growth = (
-      epoch_size_growth * compacted_growth_ratio
-    ).round
-
-    effective_compacted = [
-      base_compacted + compacted_growth,
-      max_compacted
-    ].min
-
-    keep_full_count = new_calls + full
-    truncate_to = keep_full_count + effective_compacted
-
-    # --- Phase C: classify each paired interaction ---
-
-    replaced_count = 0
-    dropped_count = 0
-
-    interactions.each do |interaction|
-      next unless interaction[:output_index]
-
-      # Malformed tool messages are kept unconditionally, mirroring the
-      # mirrored strategy, which keeps outputs with nil or unparseable
-      # content (554-563) and calls with nil or unparseable content
-      # (612-621) regardless of their position.
-      if !interaction[:call_parsed].is_a?(Hash) ||
-         !interaction[:output_parsed].is_a?(Hash)
-        interaction[:disposition] = :keep
-        next
+    # Add whole fields only. Never turn a partial command, id or path into
+    # something the reader might mistake for the original.
+    def record(pair, chars)
+      args = pair.call['arguments']
+      lines = ["[#{Chat::TOOL_COMPACTATION_MESSAGE}]"]
+      used = lines.first.size
+      add = lambda do |line|
+        if used + line.size + 1 <= chars
+          lines << line
+          used += line.size + 1
+        end
       end
+      add.call("Tool: #{pair.call['name']}")
+      add.call("Call id: #{pair.call['id'] || pair.output['id']}")
+      step = pair.output['step']
+      add.call("Full output found in job: #{step}") unless step.to_s.empty?
+      add.call("Original sizes: arguments #{args.to_json.size} chars, output #{pair.output['content'].to_s.size} chars")
+      if args.is_a?(Hash)
+        args.each do |key, value|
+          rendered = case value
+                     when Hash, Array then "<omitted, #{value.to_json.size} chars>"
+                     when String then value.size <= chars / 4 ? value : "<omitted, #{value.size} chars>"
+                     when nil then 'nil'
+                     else value.to_s
+                     end
+          add.call("  #{key}=#{rendered}")
+        end
+      end
+      {role: :assistant, compacted: true, content: lines.join("\n")}
+    end
 
-      # One-based position from the newest output. protected_positions is
-      # reverse-1-based on outputs too, so the same number identifies the
-      # same output message in both schemes.
-      reverse_position =
-        total_tool_outputs - interaction[:output_position] + 1
+    def compact(messages, policy)
+      total = messages.count { |msg| role(msg) == 'function_call_output' }
+      return messages if total <= policy[:threshold] || policy[:initial_size].zero?
+      return messages if policy[:full].zero? && policy[:base_compacted].zero?
+      completed = pairs(messages)
+      seen = {}
+      repeats = completed.filter_map do |pair|
+        repeated = seen.key?(pair.key)
+        seen[pair.key] = true
+        pair.position if repeated
+      end
+      schedule = Chat.build_epoch_increment_schedule(total, policy[:threshold], repeats,
+        **policy.slice(:initial_size, :epochs_per_increase, :size_increase, :repeat_increase),
+        max_size: [policy[:configured_max_size], policy[:initial_size]].max)
+      boundary = schedule[:pinned_total]
+      full_after = boundary - policy[:full]
+      growth = (schedule[:nominal_size] - policy[:initial_size]) * policy[:compacted_growth_ratio]
+      medium = policy[:base_compacted] + growth.round
+      medium = medium.clamp(policy[:base_compacted], [policy[:configured_max_compacted], policy[:base_compacted]].max)
 
-      if protected_positions.include?(reverse_position) ||
-         reverse_position <= keep_full_count
-        interaction[:disposition] = :keep
-
-      elsif reverse_position <= truncate_to
-        if epoch_tool_compactation_oversized?(
-          interaction[:call_parsed],
-          interaction[:output_parsed]
-        )
-          interaction[:disposition] = :replace
-          replaced_count += 1
+      # A live repeat can extend this epoch. Only completed epochs affect
+      # the medium window, and protection is computed at the frozen boundary.
+      latest = {}
+      protected = {}
+      completed.each do |pair|
+        break if pair.position > boundary
+        protected[pair.key] = pair.position if latest.key?(pair.key)
+        latest[pair.key] = true
+      end
+      changes = {}
+      compacted = removed = 0
+      completed.each do |pair|
+        break if pair.position > full_after
+        next if protected[pair.key] == pair.position
+        if pair.position <= full_after - medium
+          replacement = nil
+          removed += 2
+        elsif oversized?(pair, messages, policy[:max_chars])
+          replacement = record(pair, policy[:max_chars])
+          compacted += 2
         else
-          interaction[:disposition] = :keep
+          next
         end
-
-      else
-        interaction[:disposition] = :drop
-        dropped_count += 1
+        changes[pair.start] = nil
+        changes[pair.finish] = replacement
       end
+      return messages if changes.empty?
+      notice = Chat::EPOCH_TOOL_COMPACTATION_NOTICE.merge(content:
+        "#{Chat::EPOCH_TOOL_COMPACTATION_NOTICE[:content]}\nCompacted tool messages: #{compacted}\nRemoved tool messages: #{removed}")
+      rebuild(messages, completed, changes, notice)
     end
 
-    # --- Phase D: rebuild ---
-
-    rebuilt = []
-
-    messages.each_with_index do |msg, index|
-      interaction = interaction_of_call[index] || interaction_of_output[index]
-
-      if interaction.nil?
-        rebuilt << msg
-        next
+    def rebuild(messages, completed, changes, notice)
+      first = changes.keys.min
+      marker = (first - 1).downto(0).find { |i| role(messages[i]) == 'meta' }
+      anchor = marker ? marker + 1 : first
+      # Preserve identity if preparation messages follow a leading meta.
+      (anchor...first).each do |i|
+        anchor = i + 1 if %w[system developer agent].include?(role(messages[i]))
       end
 
-      case interaction[:disposition]
-      when :replace
-        if index == interaction[:output_index]
-          rebuilt << epoch_tool_compactation_record(
-            interaction[:call_parsed],
-            interaction[:output_parsed]
-          )
+      # A retained sibling can straddle a removed call in a parallel batch.
+      # Place the notice before the batch and flush records after its results.
+      events = {}
+      completed.each do |pair|
+        next if changes.key?(pair.start)
+        events[pair.start] = 1
+        events[pair.finish] = -1
+      end
+      open = 0
+      safe = 0
+      (0...anchor).each do |i|
+        open += events.fetch(i, 0)
+        safe = i + 1 if open.zero?
+      end
+      anchor = safe
+      open = 0
+      pending = []
+      result = []
+      messages.each_with_index do |msg, i|
+        result << notice if i == anchor
+        open += events.fetch(i, 0)
+        if changes.key?(i)
+          pending << changes[i] if changes[i]
+        else
+          result << msg
         end
-
-        # The call message and the original output message are both skipped.
-      when :drop
-        # Both messages of the pair are removed, with no record.
-      else
-        rebuilt << msg
+        if open.zero? && !pending.empty?
+          result.concat(pending)
+          pending.clear
+        end
       end
+      Chat.setup(result)
     end
-
-    if replaced_count > 0 || dropped_count > 0
-      Log.medium(
-        "Epoch tool compactation strategy: " \
-        "epoch=#{schedule[:epoch_index]} " \
-        "pinned_total=#{pinned_total} " \
-        "new_calls=#{new_calls} " \
-        "epoch_size=#{schedule[:epoch_size]} " \
-        "keep_full=#{keep_full_count} " \
-        "truncate_to=#{truncate_to} " \
-        "replaced=#{replaced_count} " \
-        "dropped=#{dropped_count} " \
-        "protected=#{protected_positions.length}"
-      )
-
-      rebuilt.unshift({role: :assistant, content: "Number of tool calls replaced #{replaced_count}; dropped #{dropped_count}; protected #{protected_positions.length}."})
-      rebuilt.unshift(EPOCH_TOOL_COMPACTATION_NOTICE)
-    end
-
-    Chat.setup(rebuilt)
   end
+
+  def self.epoch_tool_compactation(messages, **options)
+    ToolCompaction.compact(messages, ToolCompaction.policy(**options))
+  end
+
+  def self.build_epoch_increment_schedule(
+    total_tool_outputs,
+    threshold,
+    repeated_forward_positions,
+    initial_size:,
+    epochs_per_increase:,
+    size_increase:,
+    repeat_increase:,
+    max_size:
+  )
+    pinned_total = threshold
+    epoch_index = 0
+    completed_repeat_epochs = 0
+
+    repeated_positions = repeated_forward_positions.sort
+    repeat_cursor = 0
+
+    loop do
+      periodic_increases =
+        if epochs_per_increase > 0
+          epoch_index / epochs_per_increase
+        else
+          0
+        end
+
+      nominal_size =
+        initial_size +
+        (periodic_increases * size_increase) +
+        (completed_repeat_epochs * repeat_increase)
+
+      nominal_size = [nominal_size, max_size].min
+
+      # Skip repeats belonging to previously completed epochs.
+      while repeat_cursor < repeated_positions.length &&
+            repeated_positions[repeat_cursor] <= pinned_total
+        repeat_cursor += 1
+      end
+
+      nominal_visible_end = [
+        pinned_total + nominal_size,
+        total_tool_outputs
+      ].min
+
+      repeat_detected =
+        repeat_cursor < repeated_positions.length &&
+        repeated_positions[repeat_cursor] <= nominal_visible_end
+
+      current_epoch_size = nominal_size
+
+      if repeat_detected
+        current_epoch_size = [
+          current_epoch_size + repeat_increase,
+          max_size
+        ].min
+      end
+
+      # Calls in the current epoch are numbered 1..current_epoch_size.
+      # The next epoch starts only after the current one is full.
+      if total_tool_outputs <= pinned_total + current_epoch_size
+        return {
+          epoch_index: epoch_index,
+          pinned_total: pinned_total,
+          new_calls: total_tool_outputs - pinned_total,
+          nominal_size: nominal_size,
+          epoch_size: current_epoch_size,
+          periodic_increases: periodic_increases,
+          completed_repeat_epochs: completed_repeat_epochs,
+          repeat_detected: repeat_detected
+        }
+      end
+
+      pinned_total += current_epoch_size
+      completed_repeat_epochs += 1 if repeat_detected
+      epoch_index += 1
+    end
+  end
+
 end
