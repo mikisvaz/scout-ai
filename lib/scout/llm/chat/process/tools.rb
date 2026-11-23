@@ -241,13 +241,18 @@ module Chat
       content = nil
     end
 
+    LLM::Sandbox.allow_path(workflow.libdir.doc.user) if workflow.libdir.doc.user.exists?
+
     if skills.any?
       content +=<<-EOF
 
 # Skills for #{workflow_name}
 
+The following skill directories are made readable in the sandbox:
+
       EOF
 
+      LLM::Sandbox.allow_path(workflow.libdir.skills)
       skills.each do |skill_path|
         description = begin
                         front_matter = Open.read(skill_path['SKILL.md']).scan(/^---(.*)^---/m).flatten.first.strip
@@ -258,7 +263,6 @@ module Chat
                         nil
                       end
         name = skill_path.basename.sub(/\.md$/, '')
-        LLM::Sandbox.allow_path(workflow.libdir.skills)
         LLM::Sandbox.allow_read_path(skill_path)
         canonical_path = skill_path
         if description
