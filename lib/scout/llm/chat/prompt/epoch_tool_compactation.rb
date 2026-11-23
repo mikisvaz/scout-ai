@@ -15,7 +15,7 @@ module Chat
   # Fixed, counter-free global notice. Deterministic text only: per-call
   # counters would change between inferences and defeat prefix caching.
   EPOCH_TOOL_COMPACTATION_NOTICE = {
-    role: :user,
+    role: :assistant,
     content: <<~TEXT.chomp
       === Context Management ===
 
@@ -167,7 +167,7 @@ module Chat
     lines << 'The original pair was removed; this record is metadata, not a tool result. If the value of this interaction is needed, run the tool again.'
 
     {
-      role: :user,
+      role: :assistant,
       compacted: true,
       content: lines * "\n"
     }
@@ -503,6 +503,7 @@ module Chat
         "protected=#{protected_positions.length}"
       )
 
+      rebuilt.unshift({role: :assistant, content: "Number of tool calls replaced #{replaced_count}; dropped #{dropped_count}; protected #{protected_positions.length}."})
       rebuilt.unshift(EPOCH_TOOL_COMPACTATION_NOTICE)
     end
 
