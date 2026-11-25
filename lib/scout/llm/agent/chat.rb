@@ -53,6 +53,9 @@ module LLM
       @current_chat = prior
     end
 
+    def current_chat=(chat)
+      @current_chat = Chat.setup(chat)
+    end
     def current_chat
       @current_chat ||= start
     end

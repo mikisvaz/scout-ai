@@ -215,6 +215,13 @@ module Chat
         changes[pair.finish] = replacement
       end
       return messages if changes.empty?
+      Log.medium(
+        "Tool compaction: epoch=#{schedule[:epoch_index]} pinned_total=#{boundary} " \
+        "live_calls=#{schedule[:new_calls]}/#{schedule[:epoch_size]} " \
+        "full_before_epoch=#{policy[:full]} medium_window=#{medium} " \
+        "compacted_messages=#{compacted} removed_messages=#{removed} " \
+        "protected_calls=#{protected.size}"
+      )
       notice = Chat::EPOCH_TOOL_COMPACTATION_NOTICE.merge(content:
         "#{Chat::EPOCH_TOOL_COMPACTATION_NOTICE[:content]}\nCompacted tool messages: #{compacted}\nRemoved tool messages: #{removed}")
       rebuild(messages, completed, changes, notice)

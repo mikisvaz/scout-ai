@@ -37,7 +37,7 @@ module Chat
   def self.tasks(messages, original = nil, request_context: nil)
     jobs =  []
     new = messages.collect do |message|
-      if message[:role] == 'task' || message[:role] == 'inline_task' || message[:role] == 'exec_task'
+      if message[:role] == 'task' || message[:role] == 'inline_task' || message[:role] == 'exec_task' || message[:role] == 'reload_task'
         info = message[:content].strip
 
         workflow, task  = info.split(" ").values_at 0, 1
@@ -65,6 +65,9 @@ module Chat
           {role: 'user', content: result}
         elsif message[:role] == 'inline_task'
           {role: 'inline_job', content: job.path.find}
+        elsif message[:role] == 'reload_task'
+          job.recursive_clean
+          {role: 'job', content: job.path.find}
         else
           {role: 'job', content: job.path.find}
         end

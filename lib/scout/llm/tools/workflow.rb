@@ -34,13 +34,14 @@ module LLM
     end
 
 
+    intent = Scout::Config.get(:intent, :tool_call, :tool, :workflow, workflow.to_s, task_name.to_s, default: true)
     inputs = task_info[:inputs]
     properties = inputs.inject({}) do |acc,input|
       next acc if names and not names.include?(input)
       type = task_info[:input_types][input]
       description = task_info[:input_descriptions][input]
       options = task_info[:input_options][input] || {}
-      next if ! (names && names.include?(input)) && options && options.include?(:hidden) && options[:hidden].to_s.downcase == 'true'
+      next acc if ! (names && names.include?(input)) && options && options.include?(:hidden) && options[:hidden].to_s.downcase == 'true'
       required = options[:required]
       default = task_info[:input_defaults][input]
 
@@ -106,7 +107,6 @@ module LLM
       task_info[:input_options].include?(input) && task_info[:input_options][input][:required]
     end
 
-    intent = Scout::Config.get(:intent, :tool_call, :tool, :workflow, default: true)
     if intent.to_s == 'true'
       properties[:intent] = {
         type: 'string',
